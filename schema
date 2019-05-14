@@ -1,0 +1,101 @@
+#!/bin/zsh
+declare -A suffixes
+nl=$'\n'
+suffixes[int]=(_id _count)
+suffixes[datetime]=("_at _dt _")
+
+# local -A map
+#map=(roots.length 2 roots.1.window 23 roots.2.window 42)
+#
+#We start from 1 as index because that's what Zsh uses for indexed arrays.
+#
+#Now that we have our array of associative arrays, we can loop over them and access them more easily:
+#
+#integer i
+#for (( i=1; i <= $map[roots.length]; ++i )); do
+#  local -A root
+#  root=("${(@kv)map[(I)roots.$i.*]#roots.$i.}")
+#
+#  print "root window for root number $i: $root[window]"
+#done
+#
+line="CREATE TABLE ${table} (\n"
+while read name line; done
+	
+	case "$2" in
+		int) ;;
+		varchar) ;;
+		[0-9]*) len=$2;;
+	esac
+	[[ $i != 1 ]] && line+=",\n"
+	int$len NOT NULL PRIMARY KEY AUTO_INCREMENT,
+	$name int 
+	$name varchar$len $null
+
+	[[ -n "$null" ]] && line+=" $null"
+	[[ -n "$default" ]] && line+=" default $default"
+	[[ -n "$pkey" ]] && line+=" PRIMARY KEY"
+	[[ -n "$autoinc" ]] && line+=" AUTO_INCREMENT"
+	[[ -n "$comment" ]] && line+=" COMMENT '$comment'"
+done
+
+line+=") ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;${nl}"
+
+if [[ ]]; then
+	line+="ALTER TABLE $table ADD FOREIGN KEY($field) REFERENCES $refTable ($refField)";
+fi
+
+data <<EOF
+@account
+account_id
+name
+email
+password 
+type enum(free, freemium, premium)
+created_at
+
+@account_device
+account_device_id
+account_id
+uuid
+
+@account_review_info
+account_review_info_id
+account_id
+current_page (1 [default] or the last page user viewed)
+started tinyint (0 or 1 to indicate user started playing the review)
+rating enum(1, 2, 3, 4, 5)
+comments
+
+@review
+review_id
+category_id
+voicepods_project_id
+title
+page_size (platform default or a specific size for this review)
+track_count (qty of audios of this review)
+version int (increased whenever track are reacreated)
+created_at
+
+@review_track
+review_track_id
+review_id
+voicepods_pod_id
+text_en text
+text_pt text
+status enum(awaiting, processing, dowloading, done, error)
+
+@review_tag
+review_tag_id
+review_id
+tag_id
+
+@tag
+tag_id
+name 32
+
+@category
+category_id
+name 32
+EOF
+

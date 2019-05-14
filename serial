@@ -1,0 +1,17 @@
+#!/bin/zsh
+#
+#set -x
+function setserial()
+{
+    adb shell /data/busybox stty -F $@
+    adb shell /data/busybox stty -F $1 9600
+}
+opt=${@:-"-raw -echo -echoe -echok"}
+#ttydev=${1:-/dev/ttyUSB*}
+#ttydev=${1:-"/dev/ttyO"{0-1}}
+ttydev=(/dev/ttyO0 /dev/ttyO1)
+for dev in $ttydev; do
+    echo setserial $dev ${=opt}
+    setserial $dev ${=opt}
+done
+#set +x

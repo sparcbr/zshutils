@@ -1,0 +1,145 @@
+VERSION=1.0.4
+[[ "$SUDO_USER" != "" ]] && export HOME=~$SUDO_USER
+export PATH=$PATH:$HOME/bin
+export NOSND=1
+[[ -z "$ZSH_LIBS" ]] && export ZSH_LIBS=${$(realpath $0):h}
+
+function techo() {
+	local c args nonl
+    zparseopts -M -D -- c:=c n=nonl
+	[[ -n "$nonl" ]] && args=('-n')
+	if [[ -n "$c" ]]; then
+		c="$c[2]"
+		while [[ ${1[1]} == '-' ]]; do
+			args+=("$1")
+			shift
+		done
+		echo -e $args "${C[$c]}${@}$C_" >$TTY
+	else
+		echo -e $args "$@" >$TTY
+	fi
+}
+
+function cancel() { abort 130 "Cancelled $@" }
+
+function abort() {
+	local cod=$1
+	[ $# -ge 1 ] && shift
+	[[ $# -ge 1 ]] && techo -c lred "$@"
+	[[ -n "$ABORT" ]] && $ABORT $cod "$@" 
+	[[ -n "$EXIT" ]] && exit $cod
+	return $cod
+}
+
+
+function explode()
+{
+	local _sep=${2:-${sep:-" "}}
+	s=("${(ps/$_sep/)1}")
+	[[ -n "$3" ]] && echo "${s[$3]}" || echo "${s[@]}"
+}
+
+function debug()
+{
+	local cmd=$1
+	shift
+    set -x
+    $cmd "$@" >$TTY
+    set +x
+}
+
+function vartype() {
+	print -rl -- ${(tP)1}
+}
+
+# Set info for a lib
+function lib_set_info()
+{
+    local fname=${(U)1}
+	typeset -g ZSH_${fname}_VER=$2
+	typeset -Ag ZSH_${fname}_INFO
+	shift 2
+	#@TODO clone_assoc_array ZSH_${fname}_INFO _temp_aarray
+	set -A ZSH_${fname}_INFO ${(kv)_temp_aarray}
+	#for key val in ${(kv)_temp_aarray}; do
+	#	echo "$key -> $val"
+	#	ZSH_${fname}_INFO[$key]=$val
+	#done
+	unset _temp_aarray
+}
+
+function getmime()
+{
+	file -bi $(realpath "$@") | awk -F';' '{print $1}'
+}
+
+function isScript()
+{
+	local mime=$(getmime "$@")
+	[[ "$mime" == "text/x-shellscript" ]] || {
+		[[ "$mime" == "text/plain" ]] && head -n1 "$*" | grep -q '^VERSION'
+	}
+}
+
+# Include a zsh lib
+function include()
+{
+	local name ver fpath ll opts=() prefix required reload str
+	zparseopts -D -M ll=ll f:=fpath -path=f r=required -required=r -reload=reload
+
+	name="$1"
+	if [[ -n "$fpath" ]]; then
+		fpath="${fpath[2]}"
+	else
+		fpath="$ZSH_LIBS/zsh_$name"
+	fi
+
+	if [[ ! -f "$fpath" ]]; then
+		techo "\e[91m$fpath not found\e[0m"
+		return 127
+	fi
+
+	prefix="ZSH_${(U)name}"
+    ver="${prefix}_VER"
+    if [[ -z ${(P)ver} ]] || [[ -n "$reload" ]]; then
+		[ -n "$required" ] && required=1 || required=0
+
+		if ! isScript $fpath; then 
+			set +x
+			techo "\e[91m$fpath is not a script\e[0m"
+			[ "$required" -eq 1 ] && return 2 || return 1
+		fi
+				
+		if [ -n "$ll" ]; then # @TODO lazy loading
+		else
+			techo -n "Including $name ($fpath)"
+			#[ ! -p '/tmp/pipe' ] && mkfifo /tmp/pipe
+			#2>&pipe source "$fpath" &
+			source "$fpath"
+			ret=$?
+			#read str </tmp/pipe
+			if [ $ret -eq 0 ]; then
+				typeset -Ag _temp_aarray
+				_temp_aarray[ver]="$VERSION"
+				_temp_aarray[path]="$fpath"
+				_temp_aarray[required]="$required"
+				lib_set_info $name $VERSION
+				techo " [\e[92m$VERSION\e[0m]"
+			else
+				local line
+				techo " [\e[1;101mFAIL\e[0m]"
+				#echo $str | while read line; do techo "\t$line"; done
+
+				if [ "$required" -eq 1 ]; then
+					#techo "Lib \e[1;92m$name is required\e[22m. Bailing out.\e[0m"
+					set +x
+					return 2
+				fi
+				set +x
+				return 1
+			fi
+		fi
+    fi
+}
+
+lib_set_info main $VERSION # "include" itself

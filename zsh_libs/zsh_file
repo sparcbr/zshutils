@@ -1,0 +1,126 @@
+VERSION=1.0
+
+function getfilename()
+{
+    echo "${1:t}"
+}
+
+function fullpath()
+{
+	echo "${1:P}"
+}
+function getpath()
+{
+    echo "${1:h}"
+}
+
+# ${file%%.old}
+function getext()
+{
+    # echo "${1##*.}"
+    echo "${1:e}"
+}
+
+function getfilenoext()
+{
+    echo "${1:t:r}"
+}
+
+function isDir()
+{
+	[[ -d "$1" ]]
+}
+
+function isEmptyDir()
+{
+	local glob=("$1"(N/F))
+	[[ -z $glob ]]
+}
+
+function noext()
+{
+    if [[ -n $2 ]]; then
+        echo "${1%%.$2}"
+    else
+        echo "${1:r}"
+    fi
+}
+
+# Added 2019-04-15 18:36 @TODO
+function replace()
+{
+	local s r
+	s=$1 ; r=$2 ; shift 2
+	sed -i bak -e s/$1/$2/g "$@"
+}
+
+#@TODO
+function backup()
+{
+	local sudo=""
+	[[ "$1" == "-s" ]] && { shift; sudo='-s' }
+	[[ -n "$2" ]] && {
+		run $sudo cp "$1" "$2/$(getfilename "$1").bkup"
+	} || run $sudo cp "$1" "$1.bkup"
+}
+
+#@TODO
+function rename()
+{
+	local name dir file
+	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
+	name="$(getfilename "$1")" dir="$(getpath "$1")"
+	#usr/lib/arm-linux-gnueabihf/libXpm.so.4.11.0
+	#usr/lib/arm-linux-gnueabihf/libXtst.so.6.1.0
+	[[ -f "$1" || -d "$1" ]] || { color "$1 doesn't exist or no file permission"; return 1 }
+	#file=$(dialog --title "Rename" --yes-label Rename --output-fd 1 --inputbox "Rename $1 to: " 10 120 "$name")
+	echo $-
+	#@ file="$(input -p "Remame \"$1\" to" $name)" || return $?
+	read "file?Remame \"$1\" to" $name || return $?
+	set -x
+	run $sudo mv "$1" "$dir/$file"
+	set +x
+}
+
+# Added 2019-05-03 16:50 @TODO
+function syncDirs()
+{
+	local quiet sudo target ignores
+	zparseopts -D -M -- q=quiet s=sudo i:=ignores
+	[[ -z "$sudo" ]] && sudo='-S'
+	[[ -d "$1" ]] || abort 1 "$1 is not a dir"
+	if [[ -n "$2" ]]; then
+		target=($(explode "$2" ','))
+	else
+		target=($(box get backupdirs))
+	fi
+
+	if [[ -z "$target" ]]; then
+		target=$(input "Enter target directory") || abort $?
+	fi
+	if [[ ! -d "$target" ]]; then
+		confirm "$target is not a dir. Create" || cancel
+		run $sudo mkdir $target || abort $?
+	fi
+	run $sudo rsync -ncai --delete --exclude-from=$ignores "$1"/ "$target"
+	confirm "Do it" || cancel
+	run $sudo rsync -cai --delete --exclude-from=$ignores "$1"/ "$target"
+}
+
+# Added 2019-01-22 18:07:09 @TODO
+function syncIhm()
+{
+	( cd $HOME/PeD/android && {
+		syncDirs -i $CFG/android.ignore Treadmill $CLOUD/data/Inbramed/android/Treadmill
+		syncDirs -i $CFG/android.ignore Cicloergometer $CLOUD/data/Inbramed/android/Cicloergometer
+	  }
+	)
+}
+
+# Added 2019-02-20 09:23:39 @TODO
+function boxStart()
+{
+    include boxes
+    box start
+}
+

@@ -1,0 +1,4 @@
+#!/bin/zsh
+ret=$1
+[[ $ret -eq 0 ]] && type=success || type=error
+shuf -ezn 1 $SOUNDS/$type/* | xargs -0 -n1 play

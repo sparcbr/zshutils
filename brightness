@@ -1,0 +1,29 @@
+#!/bin/bash
+bright="/sys/class/backlight/acpi_video0/brightness"
+case $1 in
+	install)
+		fixfile="/lib/systemd/system-sleep/fix_brightness"
+		sudo tee $fixfile >/dev/null <<EOF
+#!/bin/sh
+case \$1 in
+  post)
+	$0
+    ;;
+esac
+EOF
+		sudo chmod +x $fixfile
+		shift
+	;;
+	get|show)
+		cat $bright
+		exit
+	;;
+esac
+
+
+level=${1:-6}
+if [ $EUID -ne 0 ]; then
+	echo $level | sudo tee $bright
+else
+	echo $level > $bright
+fi

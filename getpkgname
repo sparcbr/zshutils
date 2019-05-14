@@ -1,0 +1,6 @@
+#!/bin/zsh
+command -v aapt >/dev/null || {
+	echo "Installing aapt:"
+	sudo apt install -y aapt || echo "Error installing aapt."
+}
+aapt dump badging $1 | grep package:\ name  | cut -f2 -d\'

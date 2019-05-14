@@ -1,0 +1,632 @@
+VERSION=1.0.3
+typeset -g -a comp
+alias e=echo
+alias op="xdg-open"
+alias open="xdg-open"
+alias vmake="make SHELL='$$SHELL -x'"
+alias web="cd gp3320/app/bcm-webconf ; . venv/bin/activate ; ./webconf.py &"
+alias sv="sudo vim"
+alias pytags="ctags -R --python-kinds=-i ."
+alias cfg="cd $CFG"
+alias s="sudo"
+alias cpa="sudo cp -a"
+alias mk="make"
+alias apt="sudo apt"
+alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ignore-trailing-space --ignore-blank-lines"
+alias sys="sudo systemctl"
+
+function hg()
+{
+	local match fopt gopt ic range
+	zparseopts -D -E -K i=ic r:=range
+	[[ -n "$ic" ]] && gopt+=" -i"
+	gopt+=" $1"
+	[[ -n "$range" ]] && fopt="${range[2]}" || fopt="0"
+	fc -li ${=fopt} | grep ${=gopt}
+}
+
+comp+=("inst=apt")
+function inst()
+{
+	local machine pkgs
+	zparseopts -D -E -M - m:=machine
+	if [[ -z "$machine" ]]; then
+		pkgs="${@:-$(fc -ln -1)}"
+		sudo apt-get install $pkgs
+	else
+		echo "$@" >> "$CFG/${machine[2]}.pkgs.txt"
+	fi
+}
+comp+=("aptinst=apt")
+function aptinst()
+{
+	sudo apt-get install -y $@
+}
+
+# Added 2019-04-12 11:45
+function aptlist()
+{
+	zgrep 'install ' /var/log/dpkg.log* | sort | cut -f1,2,4,6 -d' ' | less
+}
+
+function typeOf()
+{
+	local name ret fpath
+	name="$1"
+	if [[ ! -f "$name" ]]; then
+		ret=($(which -w $name))
+		type="${ret[2]}"
+		if [[ "$type" != "none" ]]; then
+			if [[ "$type" == "command" ]]; then
+				fpath=$(which $name)
+				if isScript $fpath; then
+					type="script"
+				fi
+			fi
+			echo $type $fpath
+			return 0
+		fi
+		echo "none"
+		return 1
+	fi
+	
+	fpath=$name
+	
+	if isScript $fpath; then
+		type="script"
+	elif [[ -x "$fpath" ]]; then
+		type="command"
+	else
+		echo "none"
+		return 1
+	fi
+	
+	echo $type $fpath
+	return 0
+}
+
+function zindent()
+{
+	echo -n "$@" | sed -E 's/^([^{}])/\t\1/g'
+}
+
+function mkscript()
+{
+	local shell func name data edit err_exists file isLib
+	err_exists="exists but isn't a shell script."
+	zparseopts -D -K s:=shell f:=func n:=name e=edit
+
+    if [ $# -lt 1 ]; then
+        echo s:=shell f:=func n:=name e=edit
+        return
+    fi
+	if [[ -n "$func" ]]; then
+		func=$func[2]
+		#@TODO function already exists? (c)ancel, (a)ppend, overwrite
+	fi
+	isLib=false
+	if [[ -n "$name" ]]; then
+		name=$name[2]
+		file=$(getpath $name)
+        if [[ "$file" != "." ]]; then # full path given
+			if [[ -f "$file" ]] && ! isScript $file; then
+				echo "$file $err_exists"
+				return 1
+			fi
+		else
+			cmdtype=($(typeOf $name))
+			type=${cmdtype[1]}
+			file=${cmdtype[2]}
+			if [[ "$type" != "none" ]]; then
+				if [[ "$type" != "script" ]]; then
+					if [[ -f "$ZSH_LIBS/zsh_$name" ]]; then # is it a lib?
+						file="$ZSH_LIBS/zsh_$name"
+						isLib=true
+					else
+						echo "$file $err_exists"
+						return 1
+					fi
+				fi
+				#@TODO zconfirm "append to $xpath ?"
+			else
+				if [[ -f "$ZSH_LIBS/zsh_$name" ]]; then # is it a lib?
+					file="$ZSH_LIBS/zsh_$name"
+					isLib=true
+				fi
+			fi
+		fi
+	else
+		file="$ZSH_LIBS/zsh_aliases"
+		isLib=true
+	fi
+
+	if [[ ! -f "$file" ]]; then
+		[[ -n "$shell" ]] && shell="/bin/"$shell[2] || shell=$SHELL
+		data="#!${shell}\n"
+	fi
+
+	# add data
+	# TODO: append to function in case of existing function
+	data+="\n# Added "$(date "+%F %R")"\n"
+    if [[ -n "$func" ]]; then
+		data+=$(zindent "function ${func}()\n{\n$@\n}")
+	else
+		data+=$(zindent "$@")
+	fi
+
+	echo ${data}$'\n' >> $file
+	$isLib && source $file && { type $func ; which $func }
+
+	# setup file
+	[[ -x "$file" || $isLib ]] || chmod +x $file
+
+	# edit
+	if [[ -n "$edit" ]]; then
+		[[ -n "$func" ]] && edfunc $func || gvim -f $file
+	fi
+}
+#function _stack()
+#{
+#	declare -A stack
+#}
+# args: name commandline options
+
+function gvimdiff()
+{
+	diff -u $1 $2
+	if [ $? -eq 0 ]; then
+		echo "$1 == $2"
+	else
+		command gvimdiff $1 $2
+	fi
+}
+
+function emu()
+{
+    gvim /media/sparc/retropie/opt/retropie/emulators/retroarch/retroarch.cfg
+    xdg-open https://github.com/retropie/retropie-setup/wiki/retroarch-configuration
+    xdg-open http://www.instructables.com/id/USB-SNES-Controller/
+}
+function add_key()
+{
+	base=${1:-~}
+	cat $CFG/id_rsa.pub > ${base}/.ssh/authorized_keys
+	chmod 700 ${base}/.ssh
+	chmod 600 ${base}/.ssh/authorized_keys
+}
+function edalias()
+{
+	local lin n aliasf=${3:-~/.zsh_aliases}
+    set -x
+	if [[ -n "$1" ]]; then
+		n=${2:-0}
+		lin=$(( `egrep -n "^$1" $aliasf | cut -d: -f1` + $n ))
+		[ $? -ne 0 ] && lin=1
+	fi
+    set +x
+	gvim -f $aliasf +$lin
+	echo "Sourcing $aliasf"
+	source $aliasf
+}
+
+function edfunc()
+{
+	local arg
+	arg=($(type $1))
+	[[ $? -ne 0 ]] && { echo $arg; return 1 }
+	[[ "${arg[5]}" != "function" ]] && { echo "$1 is not a function:\n\t$arg"; return 2 }
+	edalias "function $1\(\)" 2 ${arg[-1]}
+}
+comp+=("vw=exec")
+function vw()
+{
+	local ret buffer mime fpath
+	fpath="$*"
+	ret=`which $fpath`
+	if [ -f "$ret" ]; then
+		mime=$(getmime $fpath)
+		[[ "$mime" == "application/x-sharedlib" ]] && { echo "$fpath is binary executable" ; return 1 }
+		gvim $ret
+	else
+		ret=`which -w $@`
+		buffer=(${=ret})
+		case "${buffer[2]}" in
+			function)
+				edfunc $1
+				;;
+			alias)
+				edalias "alias $1=" 0
+				;;
+		esac
+	fi
+}
+function finderror()
+{
+	errline=`tail /var/log/apache2/error.log |  grep -e "PHP \(Parse\|Fatal\|Notice\)" | tail -n1`
+	str=`echo $errline| sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/ /g'`
+	line=`echo $str | sed 's/.*line \([0-9]*\).*$/\1/'`
+	filename=`echo $str | sed 's/.*\(\/media\/sparc\/xdata\/[^ ]*\).*$/\1/'`
+	echo $filename
+	echo $line
+	v --remote-tab-silent "$filename:$line"
+}
+function cptree()
+{
+	local dest=$1
+	shift
+	echo $@ | cpio -pdv $dest
+}
+function loadvim()
+{
+	set -x
+	list=${1:-vimlist.txt}
+	dirs=(. $CFG)
+	gvim -p $(cat `find ${dirs[*]} -name $list`)
+	set +x
+
+}
+function savevim()
+{
+	list=$(forvim "expand('%:p')")
+	echo $list
+	echo $list > $CFG/vimlist.txt
+}
+function vimcmd()
+{
+	--remote-send $@
+}
+function forvim()
+{
+	if [ "$1" = "cmd" ]; then
+		cmd="--remote-send"
+		shift
+	else
+		cmd="--remote-expr"
+	fi
+	for v in `vim --serverlist`; do
+		vim --servername $v $cmd $@
+	done
+}
+function f()
+{
+	local d i s
+	zparseopts -D -E d:=d i=i s=s
+	#if [ "${1:0:2}" = "-d" ]; then
+	#	d=${1:2}
+	#echo "d[]=>$d[1] $d[2] $d[3]"
+	[[ -n $s ]] && s="sudo"
+	[[ -n $d ]] && d="-maxdepth ${d[2]}"
+	[[ -n $i ]] && name="-iname" || name="-name"
+
+	#$s find ${=d} \( -path ./bckup_extensions -or -path ./extensions \) -prune -or $name $@ -print
+	$s find ${=d} $name $@ -print
+}
+function aldd() {
+	local R=$USER_HOME/clp
+	if [[ $# -gt 1 ]]; then
+		if [ "$1" = "-r" ]; then
+			shift
+			R=$1
+			shift
+		elif [ "$1" = "-s" ]; then
+			R=$STAGING_DIR
+			shift
+		fi
+	fi
+	${TOOLCHAIN_SYS}ldd --root=$R $@
+}
+
+function recv()
+{
+	local host=$1
+#	scp $host:$2 
+	echo TODO
+}
+function send()
+{
+	local host=$1
+	shift
+	scp $@ $host
+}
+function sge()
+{
+	ge -s $@
+}
+function ge()
+{
+	local n inc incs s icase
+	zparseopts -D -E i=icase s=sudo
+	[[ -n "$sudo" ]] && s=sudo
+	[[ -n "$icase" ]] && icase="-i"
+	OIFS=$IFS;
+	IFS=',;:' read -rA NAMES <<< "$1"
+	IFS=$OIFS
+#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
+	exc=("--exclude-dir=bckup_extensions")
+	inc=
+	for inc in "${NAMES[@]}"; do
+		incs+=("--include=*.$inc")
+	done
+	shift
+
+	$s grep --color ${exc} ${incs} -rn $icase $@
+}
+function duh()
+{
+	local sudo
+	[[ "$1" == '-s' ]] && { shift; sudo='sudo' }
+	$sudo du -csh "$@" | sort -h
+}
+function v()
+{
+	local opt
+	if [ "${1:0:1}" = "-" ]; then
+		opt=$1
+		shift
+	fi
+	# convert "filename:linenum" to "filename" "+linenum"
+	# file1:l4 file2:l66 
+	for arg; do
+		if [[ "$arg" =~ ":" ]]; then
+			line=+$(echo $arg | cut -d: -f2)
+			file=$(echo $arg | cut -d: -f1)
+			gvim $opt $line $file
+		else
+			gvim $opt $arg
+		fi
+	done
+}
+
+# Added 2019-01-10 11:26:22
+function extract_cpio_image()
+{
+    local ret name mime sourcedir imgfile=$(fullpath "$1") targetroot targetdir uncompressed tmp
+	sourcedir=$(getpath "$imgfile")
+	name=$(getfilename "$imgfile")
+    targetdir=${2:-$(noext "$imgfile")}
+    (
+		if [[ -f "$targetdir" ]]; then
+			techo -c warn "A file exists in place of target dir: \"$C[warn]$targetdir$C_\""
+			targetdir=$(input "Choose another path/filename" "$targetdir")
+		fi
+		
+		if [[ -d "$targetdir" ]] && ! isEmptyDir "$targetdir"; then
+			confirm "Dir $targetdir not empty. $C[lred]Remove files and continue" || { cancel ; return $? }
+			run -s rm -rf "$targetdir"/* || { abort $? ; return $? }
+		else
+			run -s mkdir -p "$targetdir" || { abort $? ; return $? }
+		fi
+		uncompressed="$imgfile.uncompressed"
+		if [[ "$imgfile" -ot "$uncompressed" ]] && [[ -s "$uncompressed" ]] &&  \
+			! confirm -c warn "$uncompressed is newer than $imgfile.\n Overwrite it" ]]
+		then
+			{ cancel ; return $? }
+		fi
+		mime=$(getmime "$imgfile")
+		if [[ "$mime" == 'application/octet-stream' ]]; then
+			mime=$(file "$imgfile")
+			if [[ $mime =~ 'cpio archive' ]]; then
+				# already a cpio file
+				uncompressed="$imgfile"
+				tmp=
+			elif [[ $mime =~ 'u-boot' ]]; then
+				tmp="$sourcedir/$name.tmp.gz"
+				[[ -f "$tmp" ]] && rm -f "$tmp"
+				run -S -p 'U-Boot image detected. Extracting ramdisk.' \
+					dd if="$imgfile" of="$tmp" bs=64c skip=1
+				mime=$(getmime "$tmp")
+			fi
+		else
+			tmp="$imgfile"
+		fi
+		
+		if [[ -n "$tmp" ]]; then
+			if [[ "$mime" == 'application/gzip' ]]; then
+				zcat "$tmp" > "$uncompressed" || return $?
+			else
+				techo -c warn "$tmp is not a gzip (mime=$mime)"
+				return 1
+			fi
+		fi
+
+		cd "$targetdir" && run -s cpio -idmv --file="$uncompressed" || { abort $? ; return $? }
+    ) && cd "$targetdir"
+}
+function compress()
+{
+    local alg=$1
+    shift
+    case "$alg" in
+        "gzip")
+            gzip -c < $1 > $2
+            ;;
+
+        "lzo")
+            lzop $1 -o $2
+            ;;
+
+        *)
+            minigzip < $1 > $2
+            ;;
+    esac
+}
+
+function compress_cpio_image()
+{
+    local sourcedir=$1 targetimg=$(fullpath ${2:-$1}".img") compalg=${3:-minizip}
+	#.. ${ANDROID_PRODUCT_OUT}/$name.img
+	(cd $sourcedir && \
+		sudo find | sudo cpio -ov -H newc -R root:root --file=${targetimg}.uncompressed && \
+			compress $compalg ${targetimg}.uncompressed $targetimg && \
+			mkimage -A arm -O linux -T ramdisk -d $targetimg $(getpath $targetimg)/uRamdisk)
+}
+
+# Added 2019-01-11 16:33:46
+function stripcolors()
+{
+	echo $@ | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]//g"
+}
+
+# Added 2019-01-11 17:00:37
+function shpydf()
+{
+    output=`pydf`; devs=`echo $output | cut -f1 -d `; labels=`sudo lsblk --noheadings -o LABEL $devs|stripcolors`; for line in $output; do i=1; echo "${labels[$i]} $line"; i++; done
+}
+
+# Added 2019-01-16 19:18:20
+# create progress bar
+function pbar()
+{
+	type setup_scroll_area >/dev/null || source $HOME/bin/progress_bar.sh || return 1
+	if [[ "$1" == "start" ]]; then  # setup
+		setup_scroll_area $2
+		enable_trapping		# optional to clean up properly if user presses ctrl-c
+	elif [[ "$1" == "set" ]]; then # advance progress bar
+		draw_progress_bar $2
+	elif [[ "$1" == "block" ]]; then # turns the progress bar yellow to
+		block_progress_bar $2        # indicate some action is requested from the user
+	elif [[ "$1" == "end" ]]; then # finish
+		destroy_scroll_area 
+	else
+		return 1
+	fi
+}
+
+function tobin
+{
+    #@TODO pad to 8-multiple, sep 8-bit groups by space
+    printf "%08d" $(([##2]$1))
+}
+function tooct
+{
+    echo -n $(([##8]$1))
+}
+function tohex
+{
+    echo -n $(([##16]$1))
+}
+function chartoint()
+{
+    local i=`printf %3d \'"$1"`
+    #printf %d \'"$1""\n"
+    printf "$i 0x%2x %s\n" $i $(tobin $i)
+
+    # Bizarre:
+    # function chartoint()
+    # {
+    #     printf %d \'$1\n
+    # }
+    # Does not work for T: 
+    #   chartoint T
+    #   0
+
+    # Quoting the argument solves the problem:
+    #   printf %d \'"$1"\n
+    # function chartoint()
+    # {
+    #     printf %d \'$1\n
+    # }
+    # But directly on prompt without the function:
+    #   printf %d \'T
+    #   84
+    # Any other char works:
+    #   chartoint U
+    #   85
+    # Quoted works
+    #   chartoint 'T'
+    #   84
+    # works: for l in {A..Z}; do [[ "$l" == "T" ]] && e "Attention:"; echo -n "$l="; chartoint $l; echo ; done
+    #   
+    # What is this sorcery?
+}
+function hextochar()
+{
+    local i str
+	for ((i=0; i<$#1 ; i+=2)); do 
+		str+="\x${1:$i:2}"
+	done
+    printf "$str"
+}
+function inttochar()
+{
+    [[ $(ishex $1) ]] && hextochar $1 || printf "\\$(printf %o $1)"
+}
+
+# Added 2019-02-20 09:23:39 @TODO
+function boxStart()
+{
+    include boxes
+    box start
+}
+# Added 2019-02-20 15:38:03
+function hidrivemount()
+{
+    local mnt="/mnt/webdav.$USER"
+    [[ -d $mnt ]] || sudo mkdir -p $mnt
+    sudo mount -t davfs https://webdav.hidrive.strato.com/ $mnt
+}
+
+# Added 2019-02-25 08:36:38
+function find_dupes()
+{
+	local dupes
+	echo TODO: test against fdupes speed
+#	dupes=(find . ! -empty -type f -exec md5sum {} + | sort -k1 | uniq -w32 -D --all-repeated=separate)
+	#getpath $(printf "%s\n" "$string1" "$string2" | sed -e 'N;s/^\(.*\).*\n\1.*$/\1/'
+}
+
+
+# Added 2019-03-30 20:31
+function lastarg()
+{
+	echo ${@: -1}
+}
+
+# Added 2019-03-30 20:31
+function mkcd()
+{
+	local dir=$(lastarg "$1")
+	mkdir -p "$dir"
+	cd "$dir"
+}
+
+# Added 2019-03-30 20:31
+function mkcp()
+{
+	local dir=$(lastarg "$@")
+	mkdir -p "$dir"
+	cp "$@"
+}
+
+# Added 2019-04-04 14:54
+function ipfind()
+{
+	local user=${1:-debian} net
+	net=192.168.0
+	for ip in $(seq $(($last+1)) 254); do
+		last=$ip
+		ping -W3 -c1 $net.$ip && ssh $user@$net.$ip
+		echo ret=$?
+	done
+}
+
+# Added 2019-04-04 15:20
+function procmon()
+{
+	local prog=$1 timeout=5
+	while true; do
+		pid=$(pidof $prog)
+		[[ -z "$pid" ]] && continue || e $pid
+		sleep $timeout
+		pid2=$(pidof $prog)
+		[[ -z "$pid2" ]] && continue || e $pid2
+		[[ $pid -eq $pid2 ]] && kill $pid
+		sleep 1
+	done
+}
+
+# Added 2019-04-11 01:43
+function logs()
+{
+	tail logs/{api,debug}.txt -f &
+}

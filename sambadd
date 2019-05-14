@@ -1,0 +1,9 @@
+#!/bin/bash
+user=$1
+
+echo "Adding UNIX user $user"
+useradd -M -s /sbin/nologin $user
+echo "Adding Samba user $user"
+smbpasswd -a $user
+echo "Enabling Samba user $user"
+smbpasswd -e $user

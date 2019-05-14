@@ -1,0 +1,83 @@
+VERSION=1.0.0
+
+export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
+
+alias pull="git pull"
+alias push="git push"
+alias gdiff="git diff --ignore-space-at-eol -b -w --ignore-blank-lines --minimal"
+alias gadd="git add"
+alias gadd-modified="git add \$(git diff --name-only --relative)"
+alias gshow="git show"
+alias gunstage="git reset HEAD --"
+alias unstage="git reset HEAD --"
+alias gfollow="git log --follow"
+alias git_get_tag='git describe --tags $(git rev-list --tags --max-count=1)'
+alias gchk='git checkout'
+alias glog2='git log --date=iso -g'
+# repos
+alias maquina="cd ~/MaquinaDeConversao/www/api.maquinadeconversao.com.br"
+alias idiomus="cd ~/xdata/idiomusAPI"
+alias q48="cd ~/Q48API"
+
+function ggrep()
+{
+    local files pattern
+    pattern=$(echo "$@" | awk -F' - ' '// {print $1}')
+    files=$(echo "$@" | awk -F' - ' '// {print $2}')
+    #pattern="${@%%_*}"
+    #files="${@#*_}"
+    #while arg in "$@"; do
+    #    [[ "$arg" != "--" ]]
+    #    [[ ]] && files+=" $arg"
+    #done
+    set -x
+    git grep "$pattern" $(git rev-list --all -- ${=files}) -- ${=files}
+    set +x
+}
+function commit()
+{
+	git commit -m "$*"
+}
+function croot()
+{
+	git config --global --get alias.root > /dev/null || git config --global --add alias.root '!pwd'
+	alias croot='cd $(git root)'
+	cd $(git root)
+}
+
+# Added 2019-01-25 11:17:01
+function github()
+{
+    set -x
+    [[ -n "$1" && ! -d "$1" ]] && open https://github.com/$1 || github $(gitgetrepo ${1:-.})
+    set +x
+
+}
+function gitgetrepo()
+{
+    local repo
+    ( 
+        [[ -n "$1" && "$1" != "." && -d "$1" ]] && cd $1
+        repo=$(git remote show origin | awk -F: '/Fetch URL/{print $3}')
+        echo "${repo%.*}"
+    )
+}
+
+function gselect()
+{
+    local i n var line lines noSelect nlimit='-500'
+	
+	setopt extendedglob
+	
+	lines=("${(@f)$(git log --graph --oneline --all $nlimit $@)}")
+
+    # mark lines without content as non-selectable
+	n=$#lines
+	for ((i=1; i<=$n; i++)); do
+		if [[ ! "${lines[$i]}" =~ [a-f0-9] ]]; then
+			noSelect+=($i)
+		fi
+	done
+	chooser -n "$noSelect" -R '([a-f0-9]{5,40} .*)' "$lines[@]"
+    #line=(${=line##[^a-f0-9]#})
+}

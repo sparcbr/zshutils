@@ -1,0 +1,6 @@
+VERSION=1.0
+export ANDROID_HOME="$HOME/androidSDK/tools"
+export ANDROID_PLATFORM_TOOLS="$HOME/androidSDK/platform-tools"
+export PATH="$PATH:$ANDROID_HOME:$ANDROID_PLATFORM_TOOLS"
+
+alias android='adb shell'

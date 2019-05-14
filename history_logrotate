@@ -1,0 +1,5 @@
+#!/bin/zsh
+# Added 2019-03-19 09:37
+cat .zsh_history >>! .zhistory.log
+logrotate ~/.rotate_hist.rc
+

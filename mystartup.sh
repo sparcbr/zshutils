@@ -1,0 +1,1 @@
+/home/sparc/Dropbox/sbin/mystartup.sh

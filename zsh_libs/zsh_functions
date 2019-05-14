@@ -1,0 +1,386 @@
+VERSION=1.0.4
+
+#@TODO check i it's the top shell, and i it is, don't exit, just return: [[ $- =~ m ]] || EXIT=1
+#		echo $ZSH_EVAL_CONTEXT
+#		echo $SHLVL
+
+autoload throw catch
+setopt pipefail nomultios 2>/dev/null
+alias error="alert -e"
+alias success="alert"
+
+typeset -gA COLORS
+COLORS=(
+	 black 30  red 31  green 32  yellow 33  blue 34  magenta 35  cyan 36 lgray 37
+	dkgray 90 lred 91 lgreen 92 lyellow 93 lblue 94 lmagenta 95 lcyan 96 white 97
+	 bgblack  40  bgred  41  bggreen  42  bgyellow  43  bgblue  44  bgmagenta  45  bgcyan  46 bglgray  47
+	bgdkgray 100 bglred 101 bglgreen 102 bglyellow 103 bglblue 104 bglmagenta 105 bglcyan 106 bgwhite 107
+)
+
+typeset -gA C
+C=(
+	head "\e[${COLORS[lblue]}m"
+	err "\e[1;${COLORS[bgred]}m"
+	red "\e[${COLORS[red]}m"
+	lred "\e[${COLORS[lred]}m"
+	ok "\e[${COLORS[lgreen]}m"
+	warn "\e[${COLORS[lyellow]}m"
+)
+C_="\e[0m"
+CANCEL=" [${C[warn]}CANCEL$C_]"
+FAIL=" [${C[err]}FAIL$C_]"
+OK=" [${C[ok]}OK$C_]"
+
+function input()
+{
+	local var ret
+	set -x
+	setopt zle
+	zparseopts -M -D - p:=p
+	var="$@"
+	[ -n "$p" ] && p[2]="${p[2]}: "
+	vared $p var
+	ret=$?
+	echo "$var"
+	set +x
+	return $ret
+}
+
+function confirm()
+{
+	local ret a str
+	if [ "$1" = "-c" ]; then
+		techo -nc $2 "$@ (y/N)"
+		shift 2
+		str="? "
+	else
+		str="$@ (y/N)? "
+	fi
+	if [ -n "$BASH" ]; then
+		while [ "$a" != 'y' ] && [ "$a" != 'n' ]; do
+			read -p $str -n 1 -r a
+		done
+		return $ret
+	fi
+	read -q -r "a?$str"
+	ret=$?
+	echo
+	return $ret
+}
+
+function chooser()
+{
+    local noSelect chosen ret
+	zparseopts -M -D - c=color p:=print n:=noSelect R:=regex
+
+	#args=("${(@f)@}")
+    if [ $# -gt 1 ]; then
+		#if ! zmodload zsh/curses; then
+		#	return 1
+		#fi
+		chosen="$(ZSHSELECT_NONSELECTABLE="$noSelect[2]" ZSHSELECT_START_IN_SEARCH_MODE=0 zsh-select "$@")"
+	else
+		chosen="$1"
+    fi
+	ret=$?
+	if [ -z "$regex" ]; then
+		[ -z "$chosen" ] && return 1
+		echo "$chosen"
+		return 0
+	elif [ "$chosen" =~ "$regex[2]" ]; then
+		echo "$match[@]"
+		return 0
+	fi
+	return 1
+}
+
+function lnecho()
+{
+    for i; do
+        echo $i
+    done
+}
+
+function chkCmdInstall()
+{
+	local deb ret
+		# techo -c err "$cmd command not found"
+    if ! command -v $1 >/dev/null; then
+        [ -n "$2" ] && deb=$2 || deb=$1
+        techo "Installing $deb (provides $cmd)" 
+        sudo apt install $deb
+		ret=$?
+		[ $ret -ne 0 ] && techo -c err "Error installing $deb"
+		return $ret
+	fi
+}
+
+function alert()
+{
+    local icon title body
+    if [ "$1" = "-e" ]; then
+        icon="error"
+        title="Error"
+        shift
+		[ -z "$NOSND" ] && sndplay error || vflash 
+    else
+        icon="trophy-gold"
+        title="Success"
+		[ -z "$NOSND" ] && sndplay success || vflash 
+    fi
+    notify-send --icon=$icon "$title" "$*"
+}
+
+function vflash()
+{
+    techo "\x1b[?5h" ; sleep .2 ; techo "\x1b[?5l"
+}
+function sndplay()
+{
+    local dir
+    dir=$SOUNDS/$1
+    [ -d "$dir" ] || { techo -c err "$dir doesn't exist" ; return }
+    run -I libsox-fmt-mp3 - shuf -ezn 1 $dir/* | xargs -0 -n1 play
+}
+
+# Say the file, line number and optional message for debugging
+# Inspired by bash's `caller` builtin
+# Thanks to https://unix.stackexchange.com/a/453153/143394
+function yelp() {
+    # shellcheck disable=SC2154  # undeclared zsh variables in bash
+    if [ -n "$BASH_VERSION" ]; then
+        local file=${BASH_SOURCE[1]} func=${FUNCNAME[1]} line=${BASH_LINENO[0]}
+    else  # zsh
+        emulate -L zsh  # because we may be sourced by zsh `emulate bash -c`
+        # $funcfiletrace has format:  file:line
+        local file=${funcfiletrace[1]%:*} line=${funcfiletrace[1]##*:}
+        local func=${funcstack[2]}
+        [ "$func" =~ '/' ] && func=source  # $func may be filename. Use bash behaviour
+    fi
+    techo "${file##*/}:$func:$line $*"
+}
+[ -z "$BASH" ] || return
+function array_dump()
+{
+    local key val
+	[ "$(vartype "$1")" = 'association' ] || { echo "Not an associative array."; return 1 }
+    echo "dump of \"$1\":"
+    for key val in ${(kvP)1}; do
+        val="${${(P)1}[$key]}"
+        echo "$key -> $val"
+    done
+}
+function _push()
+{
+    local data l=${#stack[@]}
+    typeset -A data
+    data[name]=$1 ; data[verbose]=$2 # ; data[opts]=$3
+    stack[$l]=$data
+}
+function _pop()
+{
+    local l=$(( ${#stack[@]} - 1 ))
+    [ ${+stack[$l]} -eq 1 ] || { echo pop without push ; return 1 }
+    data=$stack[$l]
+    unset "stack[$l]"
+}
+function run_begin()
+{
+    local ret=$? verbose run
+    zparseopts -M -D -A arr - v -verbose=v r: -run:=r
+    for key in ${(k)arr}; do
+        val=${arr[$key]}
+        case $key in
+            -v) verbose=1 ;;
+            -r) runargs=$val ;;
+        esac
+    done
+    name=$1
+    _push $name $verbose
+    if [ "$verbose" -eq 1 ]; then
+        banner Starting: $name
+    fi
+}
+function run_end()
+{
+    _pop
+    if [ "${data[verbose]}" -eq 1 ]; then
+        banner Finished: $data[name]
+    fi
+}
+
+function run()
+{
+    local ret cmd fullcmd sudo dryrun quiet color alert print pcolor cmdinst
+
+	if [ "${1:0:1}" = '-' ]; then
+		zparseopts -M -D - s=sudo S=trysudo n=dryrun q=quiet c:=color a=alert p:=print I:=cmdinst
+		[ "$1" = '-' ] && shift
+	else
+		echo 'no option'
+		return
+	fi
+
+    cmd=$1
+	if [ -n "$sudo" ]; then
+		sudo="sudo"
+		fullcmd="sudo $@"
+		trysudo=
+	else
+		fullcmd="$@"
+	fi
+
+	if [ ! -n "$quiet" ]; then
+		pcolor="-c head"
+		[ -n "$print" ] && techo $=pcolor $print[2] || techo $=pcolor $fullcmd
+	fi
+
+	{
+		setopt pipefail
+		if [ -z "$dryrun" ]; then
+			if [ -n "$color" ]; then
+				color ${=fullcmd} # | colorify
+				ret=$?
+			else
+				color ${=fullcmd}
+				ret=$?
+			fi
+
+			if [ $ret -eq 130 ]; then
+				throw $ret
+				# yelp 
+			fi
+
+			if [ $ret -eq 127 ]; then
+				chkCmdInstall $cmd $cmdinst[2]
+				ret=$?
+				if [ $ret -eq 0 ]; then
+					color ${=fullcmd}
+					ret=$?
+				fi
+			fi
+
+			if [ $ret -ne 0 ]; then
+				if [ -n "$trysudo" ]; then
+					techo "Trying with sudo"
+					color sudo ${=fullcmd}
+					ret=$?
+					[ $ret -ne 0 ] && throw $ret
+				else
+					throw $ret
+				fi
+			fi
+		fi
+	} always {
+		if noglob catch *; then
+			CAUGHT=(${=CAUGHT})
+			ret=$CAUGHT[1]
+			if [ $ret -eq 130 ]; then
+				cancel $quiet "$cmd $CANCEL"
+				return $ret
+			fi
+			[ -z "$quiet" ] && techo "$cmd $FAIL ($CAUGHT)"
+			[ -n "$alert" ] && error "$cmd error: $CAUGHT"
+			abort $ret
+			return $ret
+		fi
+	}
+
+    case $ret in
+	0)
+		[ -z "$quiet" ] && [ -z "$dryRun" ] && techo "$cmd $OK"
+		[ -n "$alert" ] && success "$cmd finished successfully."
+	;;
+	*)
+		[ -z "$quiet" ] && techo "$cmd $FAIL"
+		[ -n "$alert" ] && error "$cmd error: ret=$ret"
+		abort $ret
+	;;
+	esac
+
+    return $ret
+}
+
+# nice fonts:
+# smaller: pagga, future
+# medium: smblock
+function banner()
+{
+	local cmd c
+	if type toilet >/dev/null; then
+		cmd='toilet'
+	elif type figlet>/dev/null; then
+		cmd='figlet'
+	else
+		if type apt-get 2>&1 >/dev/null && sudo apt install toilet lolcat; then
+			if type toilet >/dev/null; then
+				cmd='toilet'
+			fi
+		elif type yum >&/dev/null; then
+			sudo yum install figlet && cmd='figlet'
+		fi
+    fi
+	if [ "$1" = '-c' ]; then
+		c=$2 ; shift 2
+	fi
+	if [ -z "$cmd" ]; then
+		if [ -n "$c" ]; then
+			techo -c $c "$@"
+		elif type lolcat >/dev/null; then
+			echo "$@" | lolcat -F 0.3 -a -s 40 -d 4 >$TTY
+		fi
+		return
+	fi
+	
+	if [ -n "$c" ]; then
+		$cmd -f pagga "$@" | colorify -c $c >$TTY
+	elif type lolcat >/dev/null; then
+		$cmd -f pagga "$@" | lolcat -F 0.3 -a -s 40 -d 4 >$TTY
+	else
+		$cmd -f pagga "$@" >$TTY
+	fi
+}
+
+function color()
+{
+	{ "$@" 2>&1 1>&3 | sed $'s,.*,\e[91m&\e[0m,' 1>&2 } 3>&1
+	return $pipestatus[1]
+}
+
+function colorify()
+{
+	#@broken: [ ! -p /dev/stdin ] && exit 0
+	if [ "$1" = '-all' ] || [ "$1" = '-c' ]; then
+		if [ "$1" = '-all' ]; then
+			c='err'
+		else
+			c=$2
+			shift
+		fi
+		shift
+		while read line; do
+			echo "${C[$c]}$line$C_"
+		done
+	else
+		awk '
+		BEGIN{IGNORECASE=1}
+		function color(c,s) {
+			printf("\033[%dm%s\033[0m\n",90+c,s)
+		}
+		/\.php/ {color(2,$0);next}
+		/error/ {color(1,$0);next}
+		/success/ {color(2,$0);next}
+		/warning/ {color(3,$0);next}
+		/INFO/ {color(4,$0);next}
+		/DBG/ {color(5,$0);next}
+		{print}
+		' $1
+	fi
+}
+
+# Added 2019-05-08 23:55
+function refactor()
+{
+	find . -type f -name '*.php' -print0 | xargs -0 sed -i "s/$search/$replace/g"
+}
+

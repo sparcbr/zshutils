@@ -1,0 +1,123 @@
+VERSION=1.0
+# databases data dir
+DB_DATA_DIR=/var/lib/mysql
+
+# get last modification time of dbname(s)
+# usage: dbtstamp dbname
+function dbtstamp()
+{
+	usedb $1
+	sudo ls -lrt --time-style=+"%Y-%m-%d %H:%M:%S" $DB_DATA_DIR/$db/ | \
+		awk '{print $6,$7,$8}' | sort --numeric-sort
+}
+
+# Receive a list and the default selected item.
+# Put the default item on the first position.
+# @param string selected
+# @param string[] list
+function mklist()
+{
+	local list first
+	first=$1
+	list=($1)
+	shift
+	for i; do
+		[[ "$i" != "$first" ]] && list+=($i)
+	done
+	echo ${list[@]}
+}
+
+# execute mysql command
+# usage: sql [-d mydatabase] 'SELECT * FROM table1'
+function sql()
+{
+	if [[ "$1" == "-d" ]]; then
+		usedb $2
+        shift 2
+	elif [[ "$1" == "-n" ]]; then
+		shift
+	else
+        #dbname=${${dbname:-$(proj get dbname)}}
+		usedb
+	fi
+	mysql -u root -pmy7866 -e "$*" $db
+}
+function isdb()
+{
+	[[ -n "$1" ]] && [[ -d "$DB_DATA_DIR/$1" ]]
+}
+function usedb()
+{
+	isdb $db && return
+	if [ $# -gt 0 ]; then
+		db=$1
+	else
+		[[ -n $DBNAME ]] && isdb $DBNAME && return
+		db=$dbname
+	fi
+	db=$(zsh-select $(mklist $db $(dblist)))
+	dbname=$db
+}
+function dblist()
+{
+	sql -n 'show databases' | tail -n +2
+}
+
+function istable()
+{
+	[[ -n $db ]] || return 
+	sql "describe $1" >/dev/null 2>&1
+}
+function tablelist()
+{
+	local args
+	[[ $1 == '-d' ]] && usedb $2 && shift 2
+	sql $args 'show tables' | tail -n +2
+}
+
+function gettable()
+{
+	istable $1 && echo $1 && return
+	echo $(zsh-select "$1" $(tablelist))
+}
+
+function tableshow()
+{
+	local tblname args t
+	if [[ "$1" == "-d" ]]; then
+		usedb $2 || return
+		shift 2
+	else
+		usedb || return
+	fi
+	[[ "$1" == '-t' ]] && { shift; t=1 }
+	tblname=$(gettable $1)
+	if [[ -n "$t" ]]; then
+		sql "describe $tblname"
+	else
+		echo "CREATE TABLE $tblname ("
+		echo $(sql show create table "$tblname" | tail -n +2) | tail -n +2
+	fi
+}
+
+# shows a list of databases and their sizes
+# usage: dbsize mydatabase
+function dbsize()
+{
+	sql 'SELECT table_name AS "Table Name", ROUND(((data_length + index_length) / 1024 / 1024), 2) AS "Size in (MB)" FROM information_schema.TABLES WHERE table_schema = "'$1'" ORDER BY (data_length + index_length)'
+}
+
+# Added 2019-03-23 23:36
+function sqldbdump()
+{
+	[ $# -gt 1 ] && { echo "Usage: ${funcstack[1]} database_name"; return }
+	dbname=${1:-${DBNAME:-$(usedb $dbname)}}
+	if [[ -f "$dbname.sql.bkup" ]]; then
+		techo -c warn "Saving backup $dbname.sql.bkup"
+		mv $dbname.sql $dbname.sql.bkup
+	fi
+	mysqldump $dbname --no-data --single-transaction --skip-add-drop-table | \
+		sed -e 's/ AUTO_INCREMENT=[0-9]*\b//g' | \
+		grep -v '^\/\*![0-9]\{5\}.*character_set_client.*\/;$' > $dbname.sql
+}
+

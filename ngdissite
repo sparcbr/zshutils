@@ -1,0 +1,28 @@
+#!/bin/bash
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 
+   exit 1
+fi
+
+if [[ "$1" = "" ]]; then
+	avail=$(ls /etc/nginx/sites-enabled)
+	echo $avail
+	exit 0
+fi
+s=$1
+# s=${s##*/}
+name=${s%.conf}
+#echo ${s%.*}
+filename=$name.conf
+if [[ -f "/etc/nginx/sites-enabled/$filename" ]]; then
+	rm -f /etc/nginx/sites-enabled/$filename 
+	if [[ $? -eq 0 ]]; then
+		echo service nginx reload
+		exit 0
+	else
+		exit $?
+	fi
+fi
+
+echo $filename não existe
+exit -1

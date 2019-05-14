@@ -1,0 +1,5 @@
+#!/bin/bash
+export MYSQL_USER=root
+export MYSQL_PASSWORD=my7866
+export MYSQL_HOST=127.0.0.1
+TangoAccessControl 1

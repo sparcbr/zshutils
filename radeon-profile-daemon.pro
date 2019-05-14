@@ -1,0 +1,1 @@
+/home/sparc/xdata/radeon-profile-daemon/radeon-profile-daemon/radeon-profile-daemon.pro

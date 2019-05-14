@@ -1,0 +1,52 @@
+#!/bin/zsh
+
+typeset -a times
+type getext || source ~/.zsh_aliases
+
+gapthreshold=0.7
+zparseopts -M -E -D -K g:=gapthreshold i=txtinput
+
+echo "{"
+# set -x
+for file in "$*"; do
+	ext=$(getext $file)
+	case "$ext" in
+		mp3) silencetimes=$(silan -t $gapthreshold $file) ;;
+		*)
+			if [[ -n "$txtinput" || "$ext" = "txt" ]]; then
+				silencetimes=$(<$file)
+			else
+				continue
+			fi
+			;;
+	esac
+	# txtfile=${}
+	#syllabes=(${(@f)$(syllabecount -i )})
+	i=1
+	times=
+	for line in "${(@f)silencetimes}"; do
+		words=(${(s. .)line}); # string to array, split on spaces
+		time=$words[1]
+		if [ "$words[3]" = "On" ]; then
+			timestart=$time
+			if [ $i -ne 1 ]; then
+				timegap=$(($timestart - $timeoff))
+				echo -n "$timegap },"
+				if [[ $timegap -lt $gapthreshold ]]; then
+					echo -n " /* gap too short (< $gapthreshold) */"
+				fi
+				echo
+			fi
+			echo -n "$i: { $timestart, "
+		else
+			timeoff=$time
+			timelen=$(($timeoff - $timestart))
+			echo -n "$timeoff, $timelen, "
+			((++i))
+		fi
+	done
+done
+
+#set +x
+echo "0 }"
+echo " }"

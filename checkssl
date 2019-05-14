@@ -1,0 +1,433 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# checkssl - checks ssl certs for a set of domains
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+# Usage: checkssl [-h|--help] [-d|--debug] [-f|--file filename] [-s|--server stype] [-l|--location] [-e:--expires days] [-r:--renew] [-c:--command command] [domain]
+
+# Revision history:
+# 2015-12-05 Created (v0.1)
+# 2015-12-05 Added the ability to automatically search for domains from the Lets Encrypt live directory  (v0.2 - sleeps)
+# 2015-12-06 Corrected issue in grep affecting performance on some servers (v0.3 - srvrco)
+# 2015-12-06 corrected typo (srvrco)
+# 2015-12-06 Added --expires days argument to set the timescale you want to know about certs coming to end of life (srvrco)
+# 2015-12-06 Added --renew argument to list domains ready for renew v0.4 - srvrco)
+# 2015-12-19 Added --command argument to perform action to renew certs ( or send email or anything else needed) (v0.5 srvrco)
+# 2016-01-07 Added option to just provide domain name on command line (v0.6 srvrco)
+# 2016-01-30 Updated after using shellcheck to maintain a better coding standard (0.7)
+# 2016-01-31 Added check at start to ensure all required applications are installed (0.8)
+# 2016-05-30 Added auto-upgrade option on the command line (1.00)
+# 2016-05-30 Correcting typo (1.01)
+# 2016-07-20 adding -p option to list possible issues (1.02)
+# 2016-08-02 remove spaces from domain names (1.03)
+# 2016-08-25 updated for use on MAC / FreeBSD. issue #6 (1.04)
+# 2016-08-25 typo correction (1.05)
+# 2016-08-25 removing set-x left in during some testing ... (1.06)
+# 2016-09-17 moved upgrade option (-u) so it works if only option. (1.07)
+# 2016-10-14 added '-' to allowed characters for the alt name check
+# 2016-10-25 allow muttiple different services to be checked (1.08)
+# 2016-10-25 bug fix of missing REMOTE_EXTRA (1.09)
+# 2016-10-25 set defaults to REMOTE_EXTRA to none (1.10)
+# 2016-10-28 enable defining other ports in a file #11 (1.11)
+# 2016-10-28 add ability to specify REMOTE_EXTRA in file list (1.12)
+# 2017-01-01 updated checks from shellcheck (1.13)
+# 2017-01-09 correct typo in cleanup (to remove all tmp files) (1.14)
+# 2017-01-12 updated to ignore -r flag if -c is used. (1.15)
+# 2017-01-31 updated variable for auto upgrade location (1.16)
+# 2017-02-06 merge branches parsing CN and wildcard certs (1.17)
+# 2017-02-22 make no output when -u is only arg and no upgrade available (1.18)
+# 2017-12-09 Set LC_TIME to be able to parse english month (1.19)
+# 2017-12-09 Use absolute path to `date` binary (1.20)
+# ---------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="1.20"
+
+ORIGCMD="$0 $*"
+CODE_LOCATION="https://raw.githubusercontent.com/srvrco/checkssl/master/checkssl"
+RENEW_ALERT="30" # set to number of days to be alerted for certificate renewal ( default, can be changed with -expires argument)
+
+BIN_DATE="/bin/date"
+if [[ ! -x "$BIN_DATE" ]]; then
+  BIN_DATE=$(command -v date || echo date)
+fi
+
+_QUIET=0
+_UPGRADE=0
+_UPGRADE_CHECK=1
+
+clean_up() { # Perform pre-exit housekeeping
+  rm -f "$LIST_OF_DOMAINS"
+  rm -f "$DATA_OUT"
+  return
+}
+
+date_diff() { # use different grep version for different os types
+  if [[ "$os" == "freebsd" ]]; then
+    "$BIN_DATE" -v  -${RENEW_ALERT}
+  else
+    "$BIN_DATE" -d "${RENEW_ALERT} days" +%s
+  fi
+}
+
+error_exit() {
+  echo -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  clean_up
+  exit 1
+}
+
+get_os() { # function to get the current Operating System
+  uname_res=$(uname -s)
+  if [[ ${uname_res} == "Linux" ]]; then
+    os="linux"
+  elif [[ ${uname_res} == "FreeBSD" ]]; then
+    os="bsd"
+  elif [[ ${uname_res} == "Darwin" ]]; then
+    os="mac"
+  elif [[ ${uname_res:0:6} == "CYGWIN" ]]; then
+    os="cygwin"
+  else
+    os="unknown"
+  fi
+  debug "detected os type = $os"
+}
+
+graceful_exit() {
+  clean_up
+  exit
+}
+
+signal_exit() { # Handle trapped signals
+  case $1 in
+    INT)
+      error_exit "Program interrupted by user" ;;
+    TERM)
+      echo -e "\n$PROGNAME: Program terminated" >&2
+      graceful_exit ;;
+    *)
+      error_exit "$PROGNAME: Terminating on unknown signal" ;;
+  esac
+}
+
+usage() {
+  echo -e "Usage: $PROGNAME [-h|--help] [-d|--debug] [-f|--file filename] [-s|--server stype] [-l|--location directory] 
+                [-e|--expires days] [-r|--renew] [-u|--update] [-U|--nocheck] [-c|--command command] [domain]"
+}
+
+log() {
+     echo "[$("$BIN_DATE" +%Y-%m-%d\ %H:%M:%S)] $*" >> "${PROGNAME}.log"
+}
+
+debug() {
+  if [[ "${_USE_DEBUG:-"0"}" -eq 1 ]]; then
+    echo "$@"
+  fi
+}
+
+_requires() {
+  result=$(which "$1" 2>/dev/null)
+  debug "checking for required $1 ... $result"
+  if [ -z "$result" ]; then
+    error_exit "This script requires $1 installed"
+  fi
+}
+
+help_message() {
+  cat <<- _EOF_
+	$PROGNAME ver. $VERSION
+	Checks ssl certs for a set of domains
+
+	$(usage)
+
+	Options:
+	  -h, --help      Display this help message and exit.
+	  -d, --debug     Outputs debug information
+	  -f, --file  filename
+	                  Where 'filename' is a file containing a list of domain names
+	  -s, --server server_type
+	                  Where 'server_type' is the server type (cpanel, ISPconfig, apache2 ...)
+	  -l, --location directory
+	                  Where 'directory' is where your lets encrypt live directory is
+	                  (typically /etc/letsencrypt/live/)
+	  -e, --expires days
+	                  Where 'days' is the number of days to alert if cert expires in that time period
+	  -r, --renew     This just lists domain names that need to be renewed.
+	                  This list could be used by an auto renew script, or to email you.
+	  -p, --problems  This just lists the domains that have possible issues.
+	                  This list could be used to email you only if there is something to take care of.
+	  -u, --upgrade   Upgrade checkssl if a more recent version is available
+	  -U, --nocheck   Do not check if a more recent version is available
+	  -c, --command run_command
+	                  Where 'run_command' is a command which will be run (with domain name passed)
+	                  for any certs due for renewal
+
+	                  A domain name can also be specified on the command line
+	_EOF_
+  return
+}
+
+debug() {
+  if [[ "${_USE_DEBUG:-"0"}" -eq 1 ]]; then
+    echo "$@"
+  fi
+}
+
+info() {
+  if [ ${_QUIET} -eq 0 ]; then
+    echo "$@"
+  fi
+}
+
+check_upgrade () {
+  latestcode=$(curl --silent "$CODE_LOCATION")
+  latestversion=$(echo "$latestcode" | grep VERSION= | head -1| awk -F'"' '{print $2}')
+  latestvdec=$(echo "$latestversion"| tr -d '.')
+  localvdec=$(echo "$VERSION"| tr -d '.' )
+  debug "current code is version ${VERSION}"
+  debug "Most recent version is  ${latestversion}"
+  # use a default of 0 for cases where the latest code has not been obtained. 
+  if [ "${latestvdec:-0}" -gt "$localvdec" ]; then
+    if [ ${_UPGRADE} -eq 1 ]; then
+      temp_upgrade="$(mktemp)"
+      echo "$latestcode" > "$temp_upgrade"
+      install "$0" "${0}.v${VERSION}"
+      install "$temp_upgrade" "$0"
+      rm -f "$temp_upgrade"
+      info "Updated getssl from v${VERSION} to v${latestversion}"
+      eval "$ORIGCMD"
+      graceful_exit
+    else
+      info ""
+      info "A more recent version (v${latestversion}) of checkssl is available, please update"
+      info "the easiest way is to use the -u or --upgrade flag"
+      info ""
+    fi
+  fi
+}
+
+
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+
+
+# Parse command-line
+while [[ -n $1 ]]; do
+  case $1 in
+    -h | --help)
+      help_message; graceful_exit ;;
+    -d | --debug)
+     _USE_DEBUG=1 ;;
+    -c | --command)
+      COMMANDARG=true; shift; RUNCOMMAND="$1" ;;
+    -e | --expires)
+      shift; RENEW_ALERT="$1" ;;
+    -f | --file)
+      FILEARG=true; shift; FILE="$1" ;;
+    -r | --renew)
+      RENEWARG=true ;;
+    -p | --problems)
+      PROBLEMARG=true ;;
+    -s | --server)
+      SERVERARG=true; shift; STYPE="$1" ;;
+    -l | --location)
+      LOCATIONARG=true; shift; LOC="$1" ;;
+    -u | --upgrade)
+     _UPGRADE=1 ;;
+    -U | --nocheck)
+     _UPGRADE_CHECK=0 ;;
+    -* | --*)
+      usage
+      error_exit "Unknown option $1" ;;
+    *)
+      DOMAINARG=true; DNAME=$(echo "$DNAME";echo "$1") ;;
+  esac
+  shift
+done
+
+# Main logic
+
+# Get the current OS, so the correct functions can be used for that OS. (sets the variable os)
+get_os
+
+#check if required applications are included
+
+_requires openssl
+_requires mktemp
+_requires grep
+_requires awk
+_requires column
+
+# Check if upgrades are available (unless they have specified -U to ignore Upgrade checks)
+if [[ $_UPGRADE_CHECK -eq 1 ]]; then
+  check_upgrade
+  if [[ ! $FILEARG && ! $SERVERARG && ! $LOCATIONARG && ! $DOMAINARG ]]; then
+    graceful_exit
+  fi
+fi
+
+if [[ ! $FILEARG && ! $SERVERARG && ! $LOCATIONARG && ! $DOMAINARG ]]; then
+  help_message
+  graceful_exit
+fi
+
+if [[ $RENEWARG && $COMMANDARG ]]; then
+  # ignore RENEWARG, since commandarg is running the given command for all domains needing renewal
+  RENEWARG=""
+fi
+
+# create temporary file for the list of domains, and output
+LIST_OF_DOMAINS=$(mktemp)
+DATA_OUT=$(mktemp)
+debug "created tmp files for input (${LIST_OF_DOMAINS}) and output (${DATA_OUT})"
+echo "Domain|port|cert issued for|valid until|cert issued by|  possible issues?" > "$DATA_OUT"
+
+# use name name from command line if specified
+if [ $DOMAINARG ]; then
+    echo "$DNAME" >> "$LIST_OF_DOMAINS"
+    debug "added $DNAME to list of domains"
+fi
+
+
+# check and inport file if specified on command line
+if [ $FILEARG ]; then
+  if [ -f "$FILE" ]; then
+    grep -v '^#' "$FILE" >> "$LIST_OF_DOMAINS"
+    debug "added file $FILE to list of domains"
+  else
+    echo "$FILE not found"
+    graceful_exit
+  fi
+fi
+
+# get a list of domains from server (if -s flag used)
+if [ $SERVERARG ]; then
+  debug "getting list of domains from server"
+  if [ "$STYPE" == "cpanel" ]; then
+    cut -d":" -f 1 < /etc/userdomains | grep "\." >> "$LIST_OF_DOMAINS"
+  elif [ "$STYPE" == "ISPconfig" ]; then
+    apache2ctl -S | grep namevhost | awk '{print $4}' | sort | uniq >> "$LIST_OF_DOMAINS"
+  else
+    echo "unknown server type currently"
+    graceful_exit
+  fi
+fi
+
+# read directory names as domains in given directory ( format used by letsencrypt and getssl ) 
+if [ $LOCATIONARG ]; then
+  debug "getting list of domains from directory"
+  for f in ${LOC}/*; do
+    if [ -d "$f" ]; then
+      debug "Checking $dir"
+      dir=$(basename "$f")
+      echo "$dir" >> "$LIST_OF_DOMAINS"
+    fi
+  done
+fi
+
+debug "completed creating list of domains"
+
+# read domains from file 
+while IFS= read -r LINE; do
+  if [ ! -z "$LINE" ]; then
+    debug "line $LINE"
+    PS=443
+    PORT=443
+    if [[ "$LINE" == *":"* ]]; then
+      DOMAIN=$(echo "$LINE" | awk -F":" '{print $1}')
+      PS=$(echo "$LINE" | awk -F":" '{print $2}')
+    else
+      DOMAIN=$(echo "$LINE" | awk '{print $1}')
+    fi
+
+    case "${PS}" in
+      https | 443)   PORT=443;  REMOTE_EXTRA="" ;;
+      ftp   | 21)    PORT=21;   REMOTE_EXTRA="-starttls ftp" ;;
+      ftpi  | 990 )  PORT=990;  REMOTE_EXTRA="" ;;
+      imap  | 143 )  PORT=143;  REMOTE_EXTRA="-starttls imap" ;;
+      imaps | 993 )  PORT=993;  REMOTE_EXTRA="" ;;
+      pop3  | 110 )  PORT=110 ; REMOTE_EXTRA="-starttls pop3" ;;
+      pop3s | 995 )  PORT=995;  REMOTE_EXTRA=""  ;;
+      smtp  | 25 )   PORT=25;   REMOTE_EXTRA="-starttls smtp" ;;
+      smtps | 587 )  PORT=587;  REMOTE_EXTRA="-starttls smtp" ;;
+      xmpp  | 5222 ) PORT=5222; REMOTE_EXTRA="-starttls xmpp" ;;
+      xmpps | 5269 ) PORT=5269; REMOTE_EXTRA="" ;;
+      ldaps | 636 )  PORT=636;  REMOTE_EXTRA=""  ;;
+      * )            PORT=$PS;  REMOTE_EXTRA="$(echo "$LINE" | awk '{for (i=2; i<=NF; i++) print $i}')"  ;;
+    esac
+
+    PROBLEMS=""
+    debug " --------------- domain ${DOMAIN}:${PORT} ${REMOTE_EXTRA}---------------------"
+    # shellcheck disable=SC2086
+    CERTINFO=$(echo | openssl s_client -servername "${DOMAIN}" -connect "${DOMAIN}:${PORT}" ${REMOTE_EXTRA} 2>/dev/null | openssl x509 2>/dev/null)
+    ISSUEDTO=$(echo "$CERTINFO" | openssl x509 -noout -subject 2>/dev/null| grep -Eo "/CN=[^/]+" | cut -c 5-)
+    [[ -z $ISSUEDTO ]] && ISSUEDTO="-"
+    debug "$ISSUEDTO"
+    ISSUER=$(echo "$CERTINFO" | openssl x509 -noout -issuer 2>/dev/null| grep -Eo "/CN=[a-zA-Z' 0-9]*"| cut -c 5-)
+    [[ -z $ISSUER ]] && ISSUER="-"
+    debug "$ISSUER"
+    ENDDATE=$(echo "$CERTINFO" | openssl x509 -noout -enddate 2>/dev/null| cut -d= -f 2-)
+    [[ -z $ENDDATE ]] && ENDDATE="-"
+    debug "$ENDDATE"
+    # shellcheck disable=SC2053
+    if [[ $DOMAIN != $ISSUEDTO ]]; then
+      if [[ -z $CERTINFO ]]; then
+        PROBLEMS=$(echo "${PROBLEMS}- no certificate found")
+      else
+        ALT_NAMES=$(echo "$CERTINFO" | openssl x509 -noout -text 2>/dev/null| grep "Subject Alternative Name" -A2 |grep -Eo "DNS:[a-zA-Z 0-9.-]*" | cut -c 5-)
+        debug "ALT Names  $ALT_NAMES"
+        if [[ "$(echo "$ALT_NAMES" | grep "^${DOMAIN}")" == "${DOMAIN}" ]]; then
+          ISSUEDTO="${DOMAIN} (alt)"
+        else
+          PROBLEMS="${PROBLEMS}- possible name mismatch"
+        fi
+      fi
+    fi
+    if [[ "$ENDDATE" != "-" ]]; then
+      if [[ "$os" == "bsd" ]]; then
+        if [[ $("$BIN_DATE" -v +"${RENEW_ALERT}d" +%s) -gt $(LC_TIME=C "$BIN_DATE" -j -f "%b %d %H:%M:%S %Y %Z" "$ENDDATE" +%s) ]]; then
+          PROBLEMS=$(echo "${PROBLEMS}- certificate near renewal date")
+        fi
+      elif [[ "$os" == "mac" ]]; then
+        if [[ $("$BIN_DATE" -v +"${RENEW_ALERT}d" +%s) -gt $(LC_TIME=C "$BIN_DATE" -j -f "%b %d %H:%M:%S %Y %Z" "$ENDDATE" +%s) ]]; then
+          PROBLEMS=$(echo "${PROBLEMS}- certificate near renewal date")
+        fi
+      else
+        if [[ $("$BIN_DATE" -d "${RENEW_ALERT} days" +%s) -gt $(LC_TIME=C "$BIN_DATE" -d "$ENDDATE" +%s) ]]; then
+          PROBLEMS=$(echo "${PROBLEMS}- certificate near renewal date")
+        fi
+      fi
+    fi
+    printf "%s|%s|%s|%s|%s|%s\n" "$DOMAIN" "$PS" "$ISSUEDTO" "$ENDDATE" "$ISSUER" "$PROBLEMS">> "$DATA_OUT"
+  fi
+done < "$LIST_OF_DOMAINS"
+
+if [[ $RENEWARG ]]; then
+  grep "certificate near renewal date" "$DATA_OUT" | awk -F"|" '{print $1}'
+elif [[ $PROBLEMARG ]]; then
+  num_problems=$(grep -c "no certificate found\|possible name mismatch\|certificate near renewal date" "$DATA_OUT")
+  if [[ $num_problems -gt 0 ]]; then
+    column -t -s"|" < <(grep "possible issues\|no certificate found\|possible name mismatch\|certificate near renewal date" "$DATA_OUT")
+  fi
+elif [[ $COMMANDARG ]]; then
+  # read list of domains needing renewal and pass to relevent RUNCOMMAND
+  while IFS= read -r DOMAIN; do
+    $RUNCOMMAND "$DOMAIN"
+  done < <(grep "certificate near renewal date" < "$DATA_OUT" | awk -F"|" '{print $1}')
+else
+  echo ""
+  column -t -s"|" < "$DATA_OUT"
+fi
+
+graceful_exit

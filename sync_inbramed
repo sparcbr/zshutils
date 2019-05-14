@@ -1,0 +1,12 @@
+#!/bin/bash
+appDir=${1:-"Cicloergometer"}
+LOCAL_SOURCES=/media/sparc/7c748845-e49c-4812-9bb9-3b496956a2a0/sources
+PORTABLE=/media/sparc/UsbExt4/Inbramed
+#file=$(date +"%Y%m%d")
+#rsync -arvn $PORTABLE/$file-apps/ $LOCAL_SOURCES
+sourceDir="$CLOUD/data/Inbramed/$appDir"
+targetDir="$LOCAL_SOURCES/$appDir"
+run rsync -nucavP --exclude-from=$CFG/android.ignore $sourceDir/ $targetDir
+if confirm "Do it"; then
+	run rsync -cuavP --exclude-from=$CFG/android.ignore $sourceDir/ $targetDir
+fi

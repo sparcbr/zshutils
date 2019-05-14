@@ -1,0 +1,278 @@
+VERSION=1.0.3
+
+function findDev()
+{
+    local devin="$1"
+    if [[ ! -b "$devin" ]]; then
+        if [[ ! -f "$devin" ]]; then
+            devin="/dev/$devin"
+            [[ -b "$devin" ]] ||  { abort $? "Device not found: '$1'" ; return 1 }
+        fi
+    fi
+    echo "$devin"
+}
+
+#@bug: shows partition as not mounted while it was really mounted
+function lspart()
+{
+    sudo lsblk -o NAME,LABEL,SIZE,FSTYPE,MOUNTPOINT "$@" | awk "! /(SWAP)|(\/snap\/)|(system reserved)/"
+    imgs=$(losetup --noheadings -l -O name,back-file)
+    echo $imgs | grep -v '/snapd/' | sort
+}
+
+function sizeToKb()
+{
+	echo "$1" | sed 's/G/ * 1024 M/i;s/M/ * 1024 K/i;s/K//i' | bc
+}
+
+function sizeCompare()
+{
+	local s1 s2
+	s1=$(sizeToKb $1) ;  s2=$(sizeToKb $2)
+	[[ "$s1" -lt "$s2" ]] && echo -1 && return
+	[[ "$s1" -gt "$s2" ]] && echo 1 && return
+	echo 0
+}
+
+function deviceMount()
+{
+	isDevice $1 || return 127
+	if isDeviceMounted $1 && [[ "$(mntof $1)" == "$2" ]]; then
+		return 0
+	fi
+	if [[ $# -ge 2 ]]; then
+		isDir $2 || return 127
+		! isDirMounted || return 2
+		sudo mount $1 $2
+	else
+		udisksctl mount -b $1
+	fi
+}
+
+function dirUnmount()
+{
+	local err=0
+	for dir; do
+		if isDirMounted $dir; then
+			deviceUnmount $(deviceof $dir) || ((err+=$?))
+		fi
+	done
+	return $err
+}
+
+function deviceUnmount()
+{
+	local err=0
+	for dev; do
+		if isDeviceMounted $dev; then
+			udisksctl unmount -b $dev || ((err+=$?))
+		fi
+	done
+	return $err
+}
+
+function diskOff()
+{
+	udisksctl power-off -b $1
+}
+
+function sdMount()
+{
+	#local dev=$1 mnt=$2
+
+	diskMount ${1:-${SDDEVICE:-$(findSD)}}
+}
+
+function deviceInfo()
+{
+	local columns hotplug diskOnly args all
+	zparseopts -D -M - h=hotplug d=diskOnly a=all
+
+	columns='TYPE,NAME,SIZE,HOTPLUG,FSTYPE,LABEL,MOUNTPOINT,STATE,VENDOR,MODEL,SERIAL'
+	args=($all $diskOnly --include 8 -o $columns --noheadings --pairs)
+	if [[ -n "$hotplug" ]]; then
+		sudo lsblk $args "$@" | egrep 'HOTPLUG="1"'
+	else
+		sudo lsblk $args "$@"
+	fi
+	return $?
+}
+
+function findSD()
+{
+	local var dev parts fparts disks found disk i cmd loop sdDev oldDev diskOnly 
+	local TYPE NAME SIZE HOTPLUG FSTYPE LABEL MOUNTPOINT STATE VENDOR MODEL SERIAL
+
+	zparseopts -D -M -- l=loop d=diskOnly o:=oldDev -cmd:=cmd
+	while [[ -z "$sdDev" ]] || [[ ! -b "$sdDev" ]] || \
+		[[ "$(sudo sfdisk -s $sdDev 2>&1)" =~ 'No medium' ]]
+	do
+		parts=("${(@f)$(deviceInfo -h -a $diskOnly)}") ; var=$?
+		if [ $var -eq 0 ]; then
+			disks=("${(@f)$(printf "%s\n" ${parts[@]} | egrep '^TYPE="disk"')}")
+			var=$?
+		fi
+
+		if [ $var -ne 0 ]; then
+			techo -c err 'No SD devices'
+			[ -z "$loop" ] && return 1
+			sleep 1
+			continue
+		fi
+		if [ $var -eq 0 ] && [ -z "$diskOnly" ]; then
+			parts=("${(@f)$(printf "%s\n" ${parts[@]} | egrep '^TYPE="part"')}")
+		fi
+		
+		typeset -a found
+		i=1
+		for line in $disks; do
+			eval $line 
+			if [ -z "$SIZE" ]; then
+				techo -c warn "/dev/$NAME: $VENDOR $MODEL $SERIAL skipping: size 0: no media?"
+			elif [[ $(sizeCompare "$SIZE" '16G') -gt 0 ]]; then
+				techo -c warn "/dev/$NAME: $VENDOR $MODEL $SERIAL skipping: size too big ($SIZE)"
+			else
+				# prepend $i ? 
+				found+=("/dev/$NAME size=$SIZE state=$STATE vendor=$VENDOR model=$MODEL serial=$SERIAL")
+			fi
+			((i++))
+		done
+
+		if [ $#found -gt 1 ]; then
+			var=(${=$(chooser $found)})
+		elif [ -n "$found" ]; then
+			var=(${=found})
+		else
+			var=
+		fi
+		sdDev=$var[1]
+		if [ -n "$sdDev" ]; then
+			[ ! -b "$sdDev" ] && techo -c err "Not a block device: $sdDev"
+		else
+			techo -c err "No SD devices"
+		fi
+
+		if [ -z "$loop" ]; then
+			return 1
+		fi
+		sleep 1
+	done
+
+	techo -c ok $var
+	echo $sdDev
+	return 0
+
+		#if [[ "$CURRENTSDINFO" != "$var" ]]; then
+		#	techo "Device changed: $dev"
+		#	CURRENTSDINFO=($var)
+		#fi
+
+	#for i in $found; do
+	#	disk=${disks[$i]}
+	#	eval $disk
+	#	echo $NAME size=$SIZE state=$STATE vendor=$VENDOR model=$MODEL serial=$SERIAL
+	#	# udevadm info -n $NAME #| grep 'SD Reader'
+	#	# ID_SERIAL=Generic_USB_SD_Reader_058F312D81B-0:0
+	#	# ID_MODEL=USB_SD_Reader
+	#	fparts=("${(@f)$(printf "%s\n" ${parts[@]} | egrep "NAME=\"${NAME}[0-9]+\"")}")
+	#	for line in $fparts; do
+	#		eval $line
+	#		if [[ -n "$NAME" ]]; then
+	#			techo $NAME size=$SIZE fstype=$FSTYPE label=$LABEL mount=$MOUNTPOINT
+	#		fi
+	#	done
+	#done
+}
+
+# Added 2019-02-25 11:06:30
+function mntof()
+{
+    awk -v needle=$1 '$1==needle {print $2}' /proc/mounts 2>/dev/null
+}
+function isDeviceMounted()
+{
+	[[ -n "$(mntof $1)" ]]
+}
+
+function deviceof()
+{
+	awk -v needle="$1" '$2==needle {print $1}' /proc/mounts 2>/dev/null
+}
+function isDirMounted()
+{
+	[[ -n "$(deviceof $1)" ]]
+}
+
+# Added 2019-03-01 15:48
+function unloop()
+{
+    local loopNum devLoop devList
+	zparseopts -D -E -M -- i:=img -img:=i
+	if [[ -n "$img" ]]; then
+		devLoop=$(losetup --all | grep $img[2] | cut -d':' -f1)
+		[[ "$devLoop" =~ "loop([0-9]*)" ]] || return 1
+		loopNum=$match[1]
+	else
+	    loopNum=$1
+		devLoop=/dev/loop$loopNum
+	fi
+    devList=(${devLoop} /dev/mapper/loop${loopNum}p*(N) ${devLoop}p*(N))
+    sudo umount $devList ; sudo kpartx -d $devLoop ; sudo losetup -d $devLoop || true
+}
+
+# Added 2019-02-26 14:17
+function ptablecp()
+{
+    local tblbkp src dest
+    src=$1
+    dest=$2
+    shift 2
+    [[ -n $src && -n $dest ]] || { echo "need at least 2 arguments" ; return 1 }
+    #tblbkp="$(getfilename $dest).bkup"
+   # sudo sfdisk -d $dest | tee $dest.ptbl
+    sudo sfdisk -d $src | sudo sfdisk $dest
+}
+
+# Added 2019-02-14 09:24
+# Updated 2019-02-25 14:47
+function sdd()
+{
+    local devin devout bs quiet status ioffset ooffset offset args dryrun
+    zparseopts -M -D -K -E -A arr -- -dry=dryrun q=quiet -quiet=q -bs:=bs \
+        -ioffset:=ioffset -ooffset:=ooffset -offset:=offset
+
+    [[ $# -ge 2 ]] || return 1
+    devin=$1
+    devout=$2
+    if [[ ${devin:0:2} == 'f:' ]]; then
+        devin=${devin:2}
+    else
+        devin=$(findDev $devin)
+    fi
+    if [[ ${devout:0:2} == 'f:' ]]; then
+        devout=${devout:2}
+    else
+        devout=$(findDev $devout)
+    fi
+	shift 2
+
+    args=("$@")
+    if [[ -n $offset ]]; then
+        args+=("skip=$offset[2]")
+        args+=("seek=$offset[2]")
+    else
+        [[ -n $ioffset ]] && args+=("skip=$ioffset[2]")
+        [[ -n $ooffset ]] && args+=("seek=$ooffset[2]")
+    fi
+
+    echo "${C[b]}in=$devin => out=$devout$C_"
+	#@TODO techo watch -n5 'killall -USR1 dd'
+    ##oflag=dsync 
+    if [[ -z $quiet ]]; then
+        args+=('status=progress')
+    fi
+    args+=('conv=notrunc' 'conv=fdatasync')
+	bs=${bs[2]:-512}
+	run $quiet -s dd "if=$devin" "of=$devout" "bs=$bs" "${args[@]}"
+    sync
+}

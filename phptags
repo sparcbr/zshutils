@@ -1,0 +1,12 @@
+#!/bin/zsh
+ctags -h \".php\" -R \
+  --exclude=\"\.svn\" \
+  --exclude=\"backup\" \
+  --exclude=\"backup2\" \
+  --exclude=\"backup3\" \
+  --totals=yes \
+  --tag-relative=yes \
+  --PHP-kinds=+cf \
+  --regex-PHP='/abstract class ([^ ]*)//c/' \
+  --regex-PHP='/interface ([^ ]*)//c/' \
+  --regex-PHP='/(public |static |abstract |protected |private )+function ([^ (]*)//f/'
