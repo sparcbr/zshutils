@@ -1,4 +1,4 @@
-VERSION=1.0.4
+VERSION=1.0.5
 
 #@TODO check i it's the top shell, and i it is, don't exit, just return: [[ $- =~ m ]] || EXIT=1
 #		echo $ZSH_EVAL_CONTEXT
@@ -27,6 +27,13 @@ C=(
 	warn "\e[${COLORS[lyellow]}m"
 )
 C_="\e[0m"
+
+function colorSet()
+{
+	local c
+	[ -n "${c::=$COLORS[${2:-$1}]}" ] && C[$c]="\e[${c}m" || return 1
+}
+
 CANCEL=" [${C[warn]}CANCEL$C_]"
 FAIL=" [${C[err]}FAIL$C_]"
 OK=" [${C[ok]}OK$C_]"

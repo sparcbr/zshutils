@@ -1,4 +1,4 @@
-VERSION=1.0.4
+VERSION=1.0.5
 [[ "$SUDO_USER" != "" ]] && export HOME=~$SUDO_USER
 export PATH=$PATH:$HOME/bin
 export NOSND=1
@@ -10,6 +10,7 @@ function techo() {
 	[[ -n "$nonl" ]] && args=('-n')
 	if [[ -n "$c" ]]; then
 		c="$c[2]"
+		[ -z "${C[$c]}" ] && type colorSet >/dev/null && colorSet $c
 		while [[ ${1[1]} == '-' ]]; do
 			args+=("$1")
 			shift
