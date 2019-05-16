@@ -5,7 +5,7 @@ VERSION=1.0.5
 #		echo $SHLVL
 
 autoload throw catch
-setopt pipefail nomultios 2>/dev/null
+setopt extendedglob pipefail nomultios 2>/dev/null
 alias error="alert -e"
 alias success="alert"
 
@@ -30,8 +30,8 @@ C_="\e[0m"
 
 function colorSet()
 {
-	local c
-	[ -n "${c::=$COLORS[${2:-$1}]}" ] && C[$c]="\e[${c}m" || return 1
+	local c=$COLORS[${2:-$1}]
+	[ -n "$c" ] && C[$1]="\e[${c}m" || return 1
 }
 
 CANCEL=" [${C[warn]}CANCEL$C_]"
@@ -218,51 +218,50 @@ function run_end()
 
 function run()
 {
-    local ret cmd fullcmd sudo dryrun quiet color alert print pcolor cmdinst
+    local ret cmd fullcmd sudo dryrun quiet color alert print cmdinst
 
 	if [ "${1:0:1}" = '-' ]; then
 		zparseopts -M -D - s=sudo S=trysudo n=dryrun q=quiet c:=color a=alert p:=print I:=cmdinst
 		[ "$1" = '-' ] && shift
-	else
-		echo 'no option'
-		return
 	fi
 
     cmd=$1
 	if [ -n "$sudo" ]; then
-		sudo="sudo"
 		fullcmd="sudo $@"
 		trysudo=
 	else
 		fullcmd="$@"
 	fi
 
-	if [ ! -n "$quiet" ]; then
-		pcolor="-c head"
-		[ -n "$print" ] && techo $=pcolor $print[2] || techo $=pcolor $fullcmd
+	if [ -z "$color" ]; then
+		color=(-c head)
+	elif [ "$color" = 'none' ]; then
+		color=''
 	fi
+	if [ -z "$quiet" ]; then
+		[ -n "$print" ] && techo $=color $print[2] || techo $=color $fullcmd
+	fi
+	[ -n "$print" ] && print="$print[2] : $cmd" || print=$cmd
 
 	{
-		setopt pipefail
 		if [ -z "$dryrun" ]; then
 			if [ -n "$color" ]; then
 				color ${=fullcmd} # | colorify
-				ret=$?
 			else
-				color ${=fullcmd}
-				ret=$?
+				${=fullcmd}
 			fi
+			ret=$?
 
-			if [ $ret -eq 130 ]; then
-				throw $ret
-				# yelp 
-			fi
-
+			[ $ret -eq 130 ] && throw $ret
 			if [ $ret -eq 127 ]; then
 				chkCmdInstall $cmd $cmdinst[2]
 				ret=$?
 				if [ $ret -eq 0 ]; then
-					color ${=fullcmd}
+					if [ -n "$color" ]; then
+						color ${=fullcmd}
+					else
+						${=fullcmd}
+					fi
 					ret=$?
 				fi
 			fi
@@ -279,15 +278,15 @@ function run()
 			fi
 		fi
 	} always {
-		if noglob catch *; then
+		if catch '*'; then
 			CAUGHT=(${=CAUGHT})
 			ret=$CAUGHT[1]
 			if [ $ret -eq 130 ]; then
-				cancel $quiet "$cmd $CANCEL"
+				cancel $quiet "$print $CANCEL"
 				return $ret
 			fi
-			[ -z "$quiet" ] && techo "$cmd $FAIL ($CAUGHT)"
-			[ -n "$alert" ] && error "$cmd error: $CAUGHT"
+			[ -z "$quiet" ] && techo "$print $FAIL ($CAUGHT)"
+			[ -n "$alert" ] && error "$print error: $CAUGHT"
 			abort $ret
 			return $ret
 		fi
@@ -299,8 +298,8 @@ function run()
 		[ -n "$alert" ] && success "$cmd finished successfully."
 	;;
 	*)
-		[ -z "$quiet" ] && techo "$cmd $FAIL"
-		[ -n "$alert" ] && error "$cmd error: ret=$ret"
+		[ -z "$quiet" ] && techo "$print $FAIL"
+		[ -n "$alert" ] && error "$print error: ret=$ret"
 		abort $ret
 	;;
 	esac
