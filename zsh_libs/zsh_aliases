@@ -334,22 +334,15 @@ function sge()
 }
 function ge()
 {
-	local n inc incs s icase
-	zparseopts -D -E i=icase s=sudo
-	[[ -n "$sudo" ]] && s=sudo
-	[[ -n "$icase" ]] && icase="-i"
-	OIFS=$IFS;
-	IFS=',;:' read -rA NAMES <<< "$1"
-	IFS=$OIFS
-#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
-	exc=("--exclude-dir=bckup_extensions")
-	inc=
-	for inc in "${NAMES[@]}"; do
-		incs+=("--include=*.$inc")
-	done
+	local sudo icase args in_exts ex_exts
+	zparseopts -D -E - i=icase s=sudo --exclude:=ex_exts
+	[ -n "$icase" ] && args+=('-i')
+	IFS=',;:' read -rA in_exts <<<"$1"
 	shift
-
-	$s grep --color ${exc} ${incs} -rn $icase $@
+	#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
+	[ "$#ex_exts" -gt 0 ] && args+=('--exclude=*.'${^ex_exts[@]})
+	args+=('--include=*.'${^in_exts[@]})
+	$sudo[2] grep --color -rn $args $@
 }
 function duh()
 {
