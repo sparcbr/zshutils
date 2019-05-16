@@ -2,20 +2,24 @@
 # Format an SD card for Android on BeagleBone Black
 
 setopt extendedglob pipefail nomultios
-cd $(dirname $(readlink -f "$0"))
-
+cd $(dirname "$0")
 if [ -z "$ZSH_MAIN_VERSION" ] || [ -z "$ZSH_LIBS" ]; then
 	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS=$PWD
 	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; exit 127 }
 fi
+
 include -r functions || exit 127
 include -r device || exit 127
 include -r file || exit 127
+#var=2
+#input -p teste var
+#echo var=$var
 
 EXIT=1
 ABORT=end
 function end()
 {
+	set+x
 	techo "$@"
 	ABORT=return
 	umountAll
@@ -30,13 +34,7 @@ function umountAll()
 	run dirUnmount mnt/*
 }
 
-if [ $# -gt 1 ] || [ "$1" = '-h' ] || [ "$1" = '--help' ]; then
-	techo -c head "Usage: $0 [drive]"
-	techo -c head "		drive is 'sdb', 'mmcblk0'"
-	exit 1
-fi
-
-function make_ext4()
+function makeExt4()
 {
 	local device
 	device=$1
@@ -57,7 +55,8 @@ function get_size_from_image()
 
 function setupPartNames()
 {
-	if [ "$SDDRIVE" == 'mmcblk0' ]; then
+	SDDRIVE=${SDDEVICE#/dev/}
+	if [ "$SDDRIVE" = 'mmcblk0' ]; then
 		BOOT_PART=${SDDEVICE}p1
 		SYSTEM_PART=${SDDEVICE}p2
 		USER_PART=${SDDEVICE}p3
@@ -85,10 +84,10 @@ function makePartitions()
 	devname=$1 ; shift
 	sizes=($*)
 	run -s sfdisk $devname << EOF
-,${sizes[1]}M,0x0c,*
-,${sizes[2]}M,,,
-,${sizes[3]}M,,,
-,${sizes[4]}M,,,
+,${sizes[1]},0x0c,*
+,${sizes[2]},,,
+,${sizes[3]},,,
+,${sizes[4]},,,
 EOF
 
 	run sync
@@ -103,12 +102,18 @@ function copy_from_dir()
 {
 	local from_dir sd_part err perms sdmnt
 	from_dir=$1 ; sd_part=$2
-	[[ "$3" == "ext" ]] && perms='-a' || perms='-rv'
+	[ "$3" = "ext" ] && perms='-a' || perms='-rv'
 	sdmnt='mnt/sdpart'
-	run -s mount $sd_part $sdmnt || return $?
-	run -s rsync $perms --delete --info=progress2 $from_dir/ $sdmnt || return $?
-	run -c warn -p "Syncing caches to disk. Please wait." sync || return $?
-	run -p "Umounting $sd_part" deviceUnmount $sd_part
+	{
+		run -s mount $sd_part $sdmnt || throw $?
+		syncDirs "$from_dir" "$sdmnt" $3 || throw $?
+	} always {
+		run -p "Umounting $sd_part" deviceUnmount $sd_part
+		if catch '*'; then
+			[ "$CAUGHT" -eq 130 ] && cancel $CAUGHT
+			return $CAUGHT
+		fi
+	}
 }
 
 function copy_from_image()
@@ -122,27 +127,20 @@ function copy_from_image()
 			run -s mount -o loop $from_img $imgmnt || throw $?
 		fi
 
-		deviceUnmount $sddev || throw $?
-		dirUnmount $sdmnt || throw $?
+		deviceUnmount $sddev || throw "$? deviceUnmount $sddev"
+		dirUnmount $sdmnt || throw "$? dirUnmount $sdmnt"
 		run -s mount $sddev $sdmnt || throw $?
-
 		syncDirs "$imgmnt" "$sdmnt" $3 || throw $?
-	#	run -s rsync $perms --delete --info=progress2 $imgmnt/ $sdmnt || err=1
-		run -p "Umounting $sddev" deviceUnmount $sddev || throw $?
 	} always {
+		local ret cmd print
 		unloop --img $from_img
-		if noglob catch *; then
-			#CAUGHT=(${=CAUGHT})
-			#ret=$CAUGHT[1]
-			#CAUGHT=$CAUGHT[2]
-			ret=$CAUGHT
-			if [[ $ret -eq 130 ]]; then
-				[[ -z "$quiet" ]] && techo "$cmd $CANCEL" || cancel
-				return $ret
-			fi
-			[[ -z "$quiet" ]] && techo "$cmd $FAIL (caught $CAUGHT)"
-			[[ -n "$alert" ]] && error "$cmd error: caught $CAUGHT"
-			return $ret
+		run -p "Umounting $sddev" deviceUnmount $sddev
+		if catch '*'; then
+			CAUGHT=($=CAUGHT)
+			ret=$CAUGHT[1]
+			[ "$ret" -eq 130 ] && cancel ${CAUGHT:1}
+			techo -c err ${CAUGHT:1} $FAIL
+			return $CAUGHT
 		fi
 	}
 }
@@ -150,9 +148,9 @@ function copy_from_image()
 function syncDirs()
 {
 	local perms dryrun info from="$1" to="$2"
-	zparseopts -M -D -- n=dryrun q=quiet 
-	[[ "$3" == "ext" ]] && perms='-a' || perms='-r'
-	[[ -z "$quiet" ]] && info='--info=progress2'
+	zparseopts -M -D - n=dryrun q=quiet 
+	[ "$3" = "ext" ] && perms='-a' || perms='-r'
+	[ -z "$quiet" ] && info='--info=progress2'
 	run -s rsync $dryRun $perms -chil $info --delete $from/ $to && \
 		run -c warn -p "Flushing caches to disk. Please wait." sync
 }
@@ -175,17 +173,37 @@ function findImage()
 	ls -drv $basedir/$name.$version.([0-9]##.)#img | head -1
 }
 
+zparseopts -M -D - n=dryrun q=quiet -skip-parts:=skipParts h=help -help=h
+if [ -n "$help" ]; then
+	techo -c head "Usage: $0 [--skip-parts '1 3 n' ] [drive]"
+	techo -c head "		drive is 'sdb', 'mmcblk0'"
+	exit 1
+fi
+
 # SD device
 if [ -n "$1" ]; then
-	[ -b "$1" ] && SDDEVICE=$1 || techo -c warn "Device $1 does not exist or have no media"
+	isSD "$1" && SDDEVICE="$1" || techo -c warn "Device $1 does not exist or have no media"
 fi
+typeset -a SDDEVICEDATA SDPartitionSizes SDPartitionTypes
 if [ -z "$SDDEVICE" ]; then
-	techo -c warn 'No SD card found'
-	set -x
-	SDDEVICE=$(findSD -d -l \
-		--cmd 'techo -c warn "Remove SD card and plug it in again."') || abort $?
+	SDDEVICEDATA=("${(f)$(findSD -l \
+		--cmd 'techo -c warn "Remove SD card and plug it in again."')}") || abort $?
+	SDDEVICE=$SDDEVICEDATA[1]
+	shift SDDEVICEDATA
+	techo -c warn "Found SD device: $SDDEVICE"
+	for var in $SDDEVICEDATA; do
+		eval $var
+		SDPartitionSizes+=($SIZE)
+		SDPartitionTypes+=($FSTYPE)
+	done
+	if [ "$#SDDEVICEDATA" -gt 0 ]; then
+		techo "Partitions:"
+		for ((i=1; i <= $#SDDEVICEDATA; i++)); do
+			techo ${SDDEVICE}$i $SDPartitionSizes[$i] $SDPartitionTypes[$i]
+		done
+	fi
 fi
-SDDRIVE=${SDDEVICE#/dev/}
+setupPartNames
 
 # Version
 version=${2:-$(findLastVersion)}
@@ -194,41 +212,39 @@ if [ ! -d "$version" ]; then
 	exit 1
 fi
 IMAGES_DIR=$version
-
 BOOT_FILES=$IMAGES_DIR/boot
 
 # Unmount any partitions that have been automounted
 umountAll
-
-skip_make_partitions=
-
-zparseopts -M -D - n=dryrun q=quiet -skip-parts:=skipParts
-if [[ -n "$skipParts" ]]; then
+if [ -n "$skipParts" ]; then
 	skipParts=($=skipParts[2])
 	typeset -a skipPart
 	for i in $skipParts; do
 		skipPart[$i]=1
 	done
 fi
+
 ###################
 # make partitions #
 ###################
-if [[ "$skipPart" != '1 1 1 1' ]]; then
+partitionSizes=('64M' '512M' '900M' '900M')
+partitionTypes=('vfat' 'ext4' 'ext4' 'ext4')
+if [ "$SDPartitionSizes" != "$partitionSizes" ] || [ "SDPartitionTypes" != "$partitionTypes" ]; then
 	techo -c warn "\nPartitioning SD ($SDDEVICE)"
-	makePartitions $SDDEVICE 64 512 900 512
-	set -x
-	run -s -p "Ejecting $C[warn]$SDDEVICE$_C" - eject $SDDEVICE
-	while true; do
-		[ -n "$(lsblk -o SIZE $SDDEVICE)" ] || break
-		sleep 0.6
-	done
+	if confirm -c lblue "Partition SD"; then
+		makePartitions $SDDEVICE $partitionSizes
+		run -s -p "Ejecting $C[warn]$SDDEVICE$_C" - eject $SDDEVICE
+		#@disk identifier
 
-	SDDEVICE=$(findSD -d -l -o $SDDEVICE \
-		--cmd 'techo -c warn "Remove SD card and plug it in again."') || abort $?
-else
-	techo -c warn "Skipping partitioning SD ($SDDEVICE)"
+		SDDEVICE=$(findSD -d --loop -o $SDDEVICE \
+			--cmd 'techo -c warn "Remove SD card and plug it in again."') || abort $?
+		#TODO verify
+		setupPartNames
+		partitioningOK=1
+		techo -c warn SD=$SDDEVICE
+	fi
 fi
-techo -c lyellow SD=$SDDEVICE
+[ -n "$partitioningOK" ] || techo -c warn "Skiped partitioning"
 #ptbl=$(cat "$IMAGES_DIR/android.$version.ptbl")
 #diskptbl=$(sudo sfdisk --dump $SDDEVICE)
 #if [[ "$ptbl" != "$diskptbl" ]]; then
@@ -248,47 +264,57 @@ techo -c lyellow SD=$SDDEVICE
 # Boot #
 ########
 name="boot" ; part=$BOOT_PART
-if [[ -z "${skip_part[1]}" ]]; then
+if [ -z "${skipPart[1]}" ]; then
 	techo -c warn "\nFormatting $name ($part) SD partition (FAT)"
 	run -s mkfs.vfat -F 16 -n $name $part || abort
-	dir=${IMAGES_DIR}/$name
-	techo -c warn "Copying $name data to SD ($dir => $part)"
-	copy_from_dir $dir $part fat || abort
+else
+	deviceUnmount --used $part
+	run -s -p "\nChecking $name ($part: vfat)" fsck.vfat $part || abort
 fi
+dir=${IMAGES_DIR}/$name
+techo -c warn "Copying $name data to SD ($dir => $part)"
+copy_from_dir $dir $part fat || abort
 #run -s mkimage -A arm -O linux -T ramdisk -d ${IMAGES_DIR}/ramdisk.img uRamdisk
 ##########
 # System #
 ##########
 name="system" ; part=$SYSTEM_PART
-if [[ -z "${skip_part[2]}" ]]; then
+if [ -z "${skipPart[2]}" ]; then
 	techo -c warn "\nFormatting $name ($part) SD partition (EXT4)"
-	make_ext4 $part $name || abort
-	img=$(findImage $name $version $IMAGES_DIR)
-	techo -c warn "Copying $name data to SD ($img => $part)"
-	copy_from_image $img $part ext || abort
+	makeExt4 $part $name || abort
+else
+	deviceUnmount --used $part
+	run -s -p "\nChecking $name ($part: EXT4)" fsck.ext4 $part || abort
+	#@TODO ext
 fi
+img=$(findImage $name $version $IMAGES_DIR)
+techo -c warn "Copying $name data to SD ($img => $part)"
+copy_from_image $img $part ext || abort
 
 ############
 # Userdata #
 ############
 name="userdata" ; part=$USER_PART
-if [[ -z "${skip_part[3]}" ]]; then
-	if [[ -z "${skip_format[3]}" ]]; then
+if [ -z "${skipPart[3]}" ]; then
+	if [ -z "${skip_format[3]}" ]; then
 		techo -c warn "\nFormatting $name ($part) SD partition (EXT4)"
-		make_ext4 $part $name #@@@|| abort
+		makeExt4 $part $name #@@@|| abort
 	fi
-	img=$(findImage $name $version $IMAGES_DIR)
-	techo -c warn "Copying $name data to SD ($img => $part)"
-	copy_from_image $img $part ext || abort
+else
+	deviceUnmount --used $part
+	run -s -p "\nChecking $name ($part: EXT4)" fsck.ext4 $part || abort
 fi
+img=$(findImage $name $version $IMAGES_DIR)
+techo -c warn "Copying $name data to SD ($img => $part)"
+copy_from_image $img $part ext || abort
 
 #########
 # Cache #
 #########
 name="cache" ; part=$CACHE_PART
-if [[ -z "${skip_part[4]}" ]]; then
+if [ -z "${skipPart[4]}" ]; then
 	techo -c warn "Formatting $name ($part) SD partition (EXT4)"
-	make_ext4 $part $name || abort
+	makeExt4 $part $name || abort
 fi
 
 ##########
