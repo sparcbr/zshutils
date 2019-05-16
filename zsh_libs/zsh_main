@@ -106,19 +106,15 @@ function include()
 		[ -n "$required" ] && required=1 || required=0
 
 		if ! isScript $fpath; then 
-			set +x
 			techo "\e[91m$fpath is not a script\e[0m"
 			[ "$required" -eq 1 ] && return 2 || return 1
 		fi
-				
 		if [ -n "$ll" ]; then # @TODO lazy loading
+			return 0
 		else
 			techo -n "Including $name ($fpath)"
-			#[ ! -p '/tmp/pipe' ] && mkfifo /tmp/pipe
-			#2>&pipe source "$fpath" &
 			source "$fpath"
 			ret=$?
-			#read str </tmp/pipe
 			if [ $ret -eq 0 ]; then
 				typeset -Ag _temp_aarray
 				_temp_aarray[ver]="$VERSION"
@@ -129,14 +125,10 @@ function include()
 			else
 				local line
 				techo " [\e[1;101mFAIL\e[0m]"
-				#echo $str | while read line; do techo "\t$line"; done
-
 				if [ "$required" -eq 1 ]; then
 					#techo "Lib \e[1;92m$name is required\e[22m. Bailing out.\e[0m"
-					set +x
 					return 2
 				fi
-				set +x
 				return 1
 			fi
 		fi
