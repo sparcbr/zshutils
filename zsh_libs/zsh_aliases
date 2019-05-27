@@ -31,8 +31,12 @@ function inst()
 	local machine pkgs
 	zparseopts -D -E -M - m:=machine
 	if [[ -z "$machine" ]]; then
-		pkgs="${@:-$(fc -ln -1)}"
-		sudo apt-get install $pkgs
+		if [[ ${#@} -ge 1 ]]; then
+			pkgs=("${@}")
+		else
+			pkgs=${$(fc -ln -1)[1]}
+		fi
+		sudo apt-get install ${pkgs[@]}
 	else
 		echo "$@" >> "$CFG/${machine[2]}.pkgs.txt"
 	fi

@@ -6,12 +6,12 @@ export NOSND=1
 
 function techo() {
 	local c args nonl
-    zparseopts -M -D -- c:=c n=nonl
+    zparseopts -M -D - c:=c n=nonl
 	[[ -n "$nonl" ]] && args=('-n')
 	if [[ -n "$c" ]]; then
 		c="$c[2]"
 		[ -z "${C[$c]}" ] && type colorSet >/dev/null && colorSet $c
-		while [[ ${1[1]} == '-' ]]; do
+		while [[ ${1[1]} = '-' ]]; do
 			args+=("$1")
 			shift
 		done
@@ -26,18 +26,18 @@ function cancel() { abort 130 "Cancelled $@" }
 function abort() {
 	local cod=$1
 	[ $# -ge 1 ] && shift
-	[[ $# -ge 1 ]] && techo -c lred "$@"
-	[[ -n "$ABORT" ]] && $ABORT $cod "$@" 
-	[[ -n "$EXIT" ]] && exit $cod
+	[ $# -ge 1 ] && techo -c lred "$@"
+	[[ "$ABORT" -gt 0 ]] && $ABORT $cod "$@" 
+	{ [ -z "$EXIT" ] || [ $EXIT -gt 0 ] } && [[ ! -o interactive ]] && exit $cod
+	throw $cod
 	return $cod
 }
-
-
+# spaces 
 function explode()
 {
 	local _sep=${2:-${sep:-" "}}
-	s=("${(ps/$_sep/)1}")
-	[[ -n "$3" ]] && echo "${s[$3]}" || echo "${s[@]}"
+	s=(${(pqs/$_sep/)${1//[[:space:]]##/\x20}})
+	[ -n "$3" ] && echo $s[$3] || echo "${s[@]}"
 }
 
 function debug()
@@ -77,59 +77,70 @@ function getmime()
 function isScript()
 {
 	local mime=$(getmime "$@")
-	[[ "$mime" == "text/x-shellscript" ]] || {
-		[[ "$mime" == "text/plain" ]] && head -n1 "$*" | grep -q '^VERSION'
+	[[ "$mime" = "text/x-shellscript" ]] || {
+		[[ "$mime" = "text/plain" ]] && head -n1 "$*" | grep -q '^VERSION'
 	}
 }
 
 # Include a zsh lib
 function include()
 {
-	local name ver fpath ll opts=() prefix required reload str
-	zparseopts -D -M ll=ll f:=fpath -path=f r=required -required=r -reload=reload
+	local name ver lpath lazyload prefix required force str
+	zparseopts -D -M - l=lazyload p:=lpath -path:=l r=required -required=r f=force
 
 	name="$1"
-	if [[ -n "$fpath" ]]; then
-		fpath="${fpath[2]}"
+	if [[ -n "$lpath" ]]; then
+		lpath="${lpath[2]}"
 	else
-		fpath="$ZSH_LIBS/zsh_$name"
+		lpath="$ZSH_LIBS/zsh_$name"
 	fi
+		
+	[[ -n $required ]] && required=1 || required=0
 
-	if [[ ! -f "$fpath" ]]; then
-		techo "\e[91m$fpath not found\e[0m"
+	if [[ ! -f "$lpath" ]]; then
+		techo "[\e[1;101mFAIL\e[0m] \e[91m$lpath not found\e[0m"
+		if [[ $required -eq 1 ]]; then
+			techo "\e[1;91mRequired $name not loaded\e[0m"
+			[[ ! -o interactive ]] && abort 127
+		fi
 		return 127
 	fi
 
 	prefix="ZSH_${(U)name}"
     ver="${prefix}_VER"
-    if [[ -z ${(P)ver} ]] || [[ -n "$reload" ]]; then
-		[ -n "$required" ] && required=1 || required=0
-
-		if ! isScript $fpath; then 
-			techo "\e[91m$fpath is not a script\e[0m"
-			[ "$required" -eq 1 ] && return 2 || return 1
+    if [[ -z ${(P)ver} ]] || [[ -n "$force" ]]; then
+		if ! isScript $lpath; then 
+			techo "\e[91m$lpath is not a script\e[0m"
+			if [[ $required -eq 1 ]]; then
+				[[ ! -o interactive ]] && abort 2
+				return 2
+			fi
+			return 1
 		fi
-		if [ -n "$ll" ]; then # @TODO lazy loading
+		if [ -n "$lazyload" ]; then # @TODO
 			return 0
 		else
-			techo -n "Including $name ($fpath)"
-			source "$fpath"
+			#[[ -o interactive ]] && 
+			techo -n "Including $name ($lpath)"
+			source "$lpath"
 			ret=$?
 			if [ $ret -eq 0 ]; then
 				typeset -Ag _temp_aarray
 				_temp_aarray[ver]="$VERSION"
-				_temp_aarray[path]="$fpath"
-				_temp_aarray[required]="$required"
+				_temp_aarray[path]="$lpath"
+				_temp_aarray[required]=${required:-0}
 				lib_set_info $name $VERSION
+				#[[ -o interactive ]] &&
 				techo " [\e[92m$VERSION\e[0m]"
 			else
 				local line
 				techo " [\e[1;101mFAIL\e[0m]"
-				if [ "$required" -eq 1 ]; then
-					#techo "Lib \e[1;92m$name is required\e[22m. Bailing out.\e[0m"
+				if [[ $required -eq 1 ]]; then
+					techo "\n\e[1;92mRequired $name not loaded\e[0m"
+					[[ ! -o interactive ]] && abort 2
 					return 2
 				fi
-				return 1
+				return $ret
 			fi
 		fi
     fi

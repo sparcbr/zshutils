@@ -110,7 +110,7 @@ function dbsize()
 # Added 2019-03-23 23:36
 function sqldbdump()
 {
-	[ $# -gt 1 ] && { echo "Usage: ${funcstack[1]} database_name"; return }
+	[ $# -gt 1 ] && { echo "Usage: $0 database_name"; return }
 	dbname=${1:-${DBNAME:-$(usedb $dbname)}}
 	if [[ -f "$dbname.sql.bkup" ]]; then
 		techo -c warn "Saving backup $dbname.sql.bkup"

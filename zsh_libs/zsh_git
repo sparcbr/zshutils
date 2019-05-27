@@ -19,6 +19,12 @@ alias maquina="cd ~/MaquinaDeConversao/www/api.maquinadeconversao.com.br"
 alias idiomus="cd ~/xdata/idiomusAPI"
 alias q48="cd ~/Q48API"
 
+function gmergecheck()
+{
+    local branch=${1:-$(chooser $(git branch))}
+    [[ -n $branch ]] && run git merge $branch --no-ff --no-commit
+}
+
 function ggrep()
 {
     local files pattern

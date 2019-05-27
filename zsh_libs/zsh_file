@@ -1,8 +1,10 @@
 VERSION=1.0.5
 
+setopt nomultios
+
 function getfilename()
 {
-    echo "${1:t}"
+	echo "${1:t}"
 }
 
 function fullpath()
@@ -11,19 +13,19 @@ function fullpath()
 }
 function getpath()
 {
-    echo "${1:h}"
+	echo "${1:h}"
 }
 
 # ${file%%.old}
 function getext()
 {
-    # echo "${1##*.}"
-    echo "${1:e}"
+	# echo "${1##*.}"
+	echo "${1:e}"
 }
 
 function getfilenoext()
 {
-    echo "${1:t:r}"
+	echo "${1:t:r}"
 }
 
 function isDir()
@@ -39,11 +41,11 @@ function isEmptyDir()
 
 function noext()
 {
-    if [[ -n $2 ]]; then
-        echo "${1%%.$2}"
-    else
-        echo "${1:r}"
-    fi
+	if [[ -n $2 ]]; then
+		echo "${1%%.$2}"
+	else
+		echo "${1:r}"
+	fi
 }
 
 # Added 2019-04-15 18:36 @TODO
@@ -69,42 +71,76 @@ function rename()
 {
 	local name dir file
 	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
-	name="$(getfilename "$1")" dir="$(getpath "$1")"
+	name="$(getfilename "$1")"
+	dir="$(getpath "$1")"
 	#usr/lib/arm-linux-gnueabihf/libXpm.so.4.11.0
 	#usr/lib/arm-linux-gnueabihf/libXtst.so.6.1.0
 	[[ -f "$1" || -d "$1" ]] || { color "$1 doesn't exist or no file permission"; return 1 }
 	#file=$(dialog --title "Rename" --yes-label Rename --output-fd 1 --inputbox "Rename $1 to: " 10 120 "$name")
-	echo $-
-	#@ file="$(input -p "Remame \"$1\" to" $name)" || return $?
-	read "file?Remame \"$1\" to" $name || return $?
-	set -x
+	file="$(input -p "Remame \"${C[warn]}$1${C[head]}\" to" $name)" || return $?
+	#read "file?Remame \"$1\" to" $name || return $?
 	run $sudo mv "$1" "$dir/$file"
-	set +x
 }
 
 # Added 2019-05-03 16:50 @TODO
 function syncDirs()
 {
-	local quiet sudo target ignores
-	zparseopts -D -M -- q=quiet s=sudo i:=ignores
+	local integer n
+	local src target data rsArgs 
+	local quiet sudo ignores dry
+	zparseopts -D -M -- q=quiet s=sudo i:=ignores d=dry t:=target
+
 	[[ -z "$sudo" ]] && sudo='-S'
-	[[ -d "$1" ]] || abort 1 "$1 is not a dir"
-	if [[ -n "$2" ]]; then
-		target=($(explode "$2" ','))
+	[[ $# -ge 2 ]] || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
+	if [[ -n "$1" ]]; then
+		target="${@: -1}"
+		src=("${@:1:-1}")
 	else
-		target=($(box get backupdirs))
+		src=($(box get backupdirs))
 	fi
+	target=($(explode "$target" ','))
 
 	if [[ -z "$target" ]]; then
-		target=$(input "Enter target directory") || abort $?
+		target="$(input "Enter target directory")" || abort $?
 	fi
-	if [[ ! -d "$target" ]]; then
-		confirm "$target is not a dir. Create" || cancel
-		run $sudo mkdir $target || abort $?
-	fi
-	run $sudo rsync -ncai --delete --exclude-from=$ignores "$1"/ "$target"
-	confirm "Do it" || cancel
-	run $sudo rsync -cai --delete --exclude-from=$ignores "$1"/ "$target"
+
+	for ((n=1; n<=$#src; n++)); do
+		if isDir "${src[$n]}"; then
+			src[$n]="${src[$n]}/" #@ TODO check if src==target
+		fi
+	done
+	# -c	
+	rsArgs=('-aui' --exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*' --exclude-from="$ignores[2]")
+	for dir in $target; do
+		if [ ! -d "$dir" ]; then
+			if [ ! -e "$dir" ]; then
+				confirm "dir $dir doesn't exist. Create" && run $sudo mkdir $dir
+			else
+				techo -c err "$dir is a file"
+			fi
+		fi
+		if [ -d "$dir" ]; then
+			data="$(run $sudo rsync -n "$rsArgs[@]" "$src[@]" "$dir")"
+			if [ -n "$data" ]; then
+				echo "$data"
+				confirm "Do it" && run $sudo rsync "$rsArgs[@]" "$src[@]" "$dir"
+			fi
+
+			data="$(run $sudo rsync -n --delete --existing --ignore-existing \
+				"$rsArgs[@]" "$src[@]" "$dir")"
+
+			if [[ -n "$data" ]]; then
+				techo -c warn "Deletions:"
+				n=0
+				echo "$data" | while read stat name; do
+					echo "$deployDir/$name ${C[red]}❌$C_"
+					((n++))
+				done
+				confirm -c warn "Delete these $n files" || continue
+				run $sudo rsync --delete "$rsArgs[@]" "$src[@]"/ "$dir"
+			fi
+		fi
+	done
 }
 
 # Added 2019-01-22 18:07:09 @TODO
@@ -120,7 +156,7 @@ function syncIhm()
 # Added 2019-02-20 09:23:39 @TODO
 function boxStart()
 {
-    include boxes
-    box start
+	include boxes
+	box start
 }
 

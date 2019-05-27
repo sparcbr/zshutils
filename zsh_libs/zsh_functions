@@ -40,16 +40,13 @@ OK=" [${C[ok]}OK$C_]"
 
 function input()
 {
-	local var ret
-	set -x
-	setopt zle
+	local var ret p
 	zparseopts -M -D - p:=p
+	[[ -n $p ]] && p[2]="${C[head]}${p[2]}:$C_ "
 	var="$@"
-	[ -n "$p" ] && p[2]="${p[2]}: "
-	vared $p var
+	vared "$p[@]" var || return
 	ret=$?
-	echo "$var"
-	set +x
+	echo $var
 	return $ret
 }
 
@@ -77,18 +74,18 @@ function confirm()
 
 function chooser()
 {
-    local noSelect chosen ret
+	local noSelect chosen ret
 	zparseopts -M -D - c=color p:=print n:=noSelect R:=regex
 
 	#args=("${(@f)@}")
-    if [ $# -gt 1 ]; then
+	if [ $# -gt 1 ]; then
 		#if ! zmodload zsh/curses; then
 		#	return 1
 		#fi
 		chosen="$(ZSHSELECT_NONSELECTABLE="$noSelect[2]" ZSHSELECT_START_IN_SEARCH_MODE=0 zsh-select "$@")"
 	else
 		chosen="$1"
-    fi
+	fi
 	ret=$?
 	if [ -z "$regex" ]; then
 		[ -z "$chosen" ] && return 1
@@ -103,19 +100,19 @@ function chooser()
 
 function lnecho()
 {
-    for i; do
-        echo $i
-    done
+	for i; do
+		echo $i
+	done
 }
 
 function chkCmdInstall()
 {
 	local deb ret
 		# techo -c err "$cmd command not found"
-    if ! command -v $1 >/dev/null; then
-        [ -n "$2" ] && deb=$2 || deb=$1
-        techo "Installing $deb (provides $cmd)" 
-        sudo apt install $deb
+	if ! command -v $1 >/dev/null; then
+		[ -n "$2" ] && deb=$2 || deb=$1
+		techo "Installing $deb (provides $cmd)" 
+		sudo apt install $deb
 		ret=$?
 		[ $ret -ne 0 ] && techo -c err "Error installing $deb"
 		return $ret
@@ -124,108 +121,109 @@ function chkCmdInstall()
 
 function alert()
 {
-    local icon title body
-    if [ "$1" = "-e" ]; then
-        icon="error"
-        title="Error"
-        shift
+	local icon title body
+	if [ "$1" = "-e" ]; then
+		icon="error"
+		title="Error"
+		shift
 		[ -z "$NOSND" ] && sndplay error || vflash 
-    else
-        icon="trophy-gold"
-        title="Success"
+	else
+		icon="trophy-gold"
+		title="Success"
 		[ -z "$NOSND" ] && sndplay success || vflash 
-    fi
-    notify-send --icon=$icon "$title" "$*"
+	fi
+	notify-send --icon=$icon "$title" "$*"
 }
 
 function vflash()
 {
-    techo "\x1b[?5h" ; sleep .2 ; techo "\x1b[?5l"
+	techo "\x1b[?5h" ; sleep .2 ; techo "\x1b[?5l"
 }
 function sndplay()
 {
-    local dir
-    dir=$SOUNDS/$1
-    [ -d "$dir" ] || { techo -c err "$dir doesn't exist" ; return }
-    run -I libsox-fmt-mp3 - shuf -ezn 1 $dir/* | xargs -0 -n1 play
+	local dir
+	dir=$SOUNDS/$1
+	[ -d "$dir" ] || { techo -c err "$dir doesn't exist" ; return }
+	run -I libsox-fmt-mp3 - shuf -ezn 1 $dir/* | xargs -0 -n1 play
 }
 
 # Say the file, line number and optional message for debugging
 # Inspired by bash's `caller` builtin
 # Thanks to https://unix.stackexchange.com/a/453153/143394
 function yelp() {
-    # shellcheck disable=SC2154  # undeclared zsh variables in bash
-    if [ -n "$BASH_VERSION" ]; then
-        local file=${BASH_SOURCE[1]} func=${FUNCNAME[1]} line=${BASH_LINENO[0]}
-    else  # zsh
-        emulate -L zsh  # because we may be sourced by zsh `emulate bash -c`
-        # $funcfiletrace has format:  file:line
-        local file=${funcfiletrace[1]%:*} line=${funcfiletrace[1]##*:}
-        local func=${funcstack[2]}
-        [ "$func" =~ '/' ] && func=source  # $func may be filename. Use bash behaviour
-    fi
-    techo "${file##*/}:$func:$line $*"
+	# shellcheck disable=SC2154  # undeclared zsh variables in bash
+	if [ -n "$BASH_VERSION" ]; then
+		local file=${BASH_SOURCE[1]} func=${FUNCNAME[1]} line=${BASH_LINENO[0]}
+	else  # zsh
+		emulate -L zsh  # because we may be sourced by zsh `emulate bash -c`
+		# $funcfiletrace has format:  file:line
+		local file=${funcfiletrace[1]%:*} line=${funcfiletrace[1]##*:}
+		local func=${funcstack[2]}
+		[ "$func" =~ '/' ] && func=source  # $func may be filename. Use bash behaviour
+	fi
+	techo "${file##*/}:$func:$line $*"
 }
 [ -z "$BASH" ] || return
 function array_dump()
 {
-    local key val
-	[ "$(vartype "$1")" = 'association' ] || { echo "Not an associative array."; return 1 }
-    echo "dump of \"$1\":"
-    for key val in ${(kvP)1}; do
-        val="${${(P)1}[$key]}"
-        echo "$key -> $val"
-    done
+	local key val
+	[[ $(vartype "$1") = association ]] || echo "Not an associative array."
+	echo "dump of \"$1\":"
+#	for key in ${(k)1}; do
+ #	   val="${(P)1[$key]}"
+	for key val in ${(Pkv)1}; do
+		echo "$key -> $val"
+	done
 }
 function _push()
 {
-    local data l=${#stack[@]}
-    typeset -A data
-    data[name]=$1 ; data[verbose]=$2 # ; data[opts]=$3
-    stack[$l]=$data
+	local data l=${#stack[@]}
+	typeset -A data
+	data[name]=$1 ; data[verbose]=$2 # ; data[opts]=$3
+	stack[$l]=$data
 }
 function _pop()
 {
-    local l=$(( ${#stack[@]} - 1 ))
-    [ ${+stack[$l]} -eq 1 ] || { echo pop without push ; return 1 }
-    data=$stack[$l]
-    unset "stack[$l]"
+	local l=$(( ${#stack[@]} - 1 ))
+	[ ${+stack[$l]} -eq 1 ] || { echo pop without push ; return 1 }
+	data=$stack[$l]
+	unset "stack[$l]"
 }
 function run_begin()
 {
-    local ret=$? verbose run
-    zparseopts -M -D -A arr - v -verbose=v r: -run:=r
-    for key in ${(k)arr}; do
-        val=${arr[$key]}
-        case $key in
-            -v) verbose=1 ;;
-            -r) runargs=$val ;;
-        esac
-    done
-    name=$1
-    _push $name $verbose
-    if [ "$verbose" -eq 1 ]; then
-        banner Starting: $name
-    fi
+	local ret=$? verbose run
+	zparseopts -M -D -A arr - v -verbose=v r: -run:=r
+	for key in ${(k)arr}; do
+		val=${arr[$key]}
+		case $key in
+			-v) verbose=1 ;;
+			-r) runargs=$val ;;
+		esac
+	done
+	name=$1
+	_push $name $verbose
+	if [ "$verbose" -eq 1 ]; then
+		banner Starting: $name
+	fi
 }
 function run_end()
 {
-    _pop
-    if [ "${data[verbose]}" -eq 1 ]; then
-        banner Finished: $data[name]
-    fi
+	_pop
+	if [ "${data[verbose]}" -eq 1 ]; then
+		banner Finished: $data[name]
+	fi
 }
 
 function run()
 {
-    local ret cmd fullcmd sudo dryrun quiet color alert print cmdinst
+	local ret cmd fullcmd sudo dryrun quiet color alert print cmdinst
 
 	if [ "${1:0:1}" = '-' ]; then
-		zparseopts -M -D - s=sudo S=trysudo n=dryrun q=quiet c:=color a=alert p:=print I:=cmdinst
-		[ "$1" = '-' ] && shift
+	zparseopts -M -D - s=sudo S=trysudo n=dryrun q=quiet c:=color a=alert p:=print I:=cmdinst
+	[ "$1" = '-' ] && shift
 	fi
 
-    cmd=$1
+	cmd=$1
 	if [ -n "$sudo" ]; then
 		fullcmd="sudo $@"
 		trysudo=
@@ -292,7 +290,7 @@ function run()
 		fi
 	}
 
-    case $ret in
+	case $ret in
 	0)
 		[ -z "$quiet" ] && [ -z "$dryRun" ] && techo "$cmd $OK"
 		[ -n "$alert" ] && success "$cmd finished successfully."
@@ -304,7 +302,7 @@ function run()
 	;;
 	esac
 
-    return $ret
+	return $ret
 }
 
 # nice fonts:
@@ -325,7 +323,7 @@ function banner()
 		elif type yum >&/dev/null; then
 			sudo yum install figlet && cmd='figlet'
 		fi
-    fi
+	fi
 	if [ "$1" = '-c' ]; then
 		c=$2 ; shift 2
 	fi

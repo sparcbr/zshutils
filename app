@@ -1,5 +1,10 @@
 #!/bin/zsh
-source ../zsh_main
+cd $(dirname "$0")
+if [ -z "$ZSH_MAIN_VERSION" ] || [ -z "$ZSH_LIBS" ]; then
+	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS=$PWD
+	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; exit 127 }
+fi
+
 include -r functions
 
 ABORT='sexit'
@@ -8,8 +13,8 @@ function sexit()
     set +x
     exit $1
 }
-[[ "$1" == '-d' ]] && { set -x; shift }
-[[ $# -lt 1 ]] && { print commands: home wallpaper focuswindow focusactivity uninstall install; sexit 1 }
+[ "$1" = '-d' ] && { set -x; shift }
+[ $# -lt 1 ] && { print commands: home wallpaper focuswindow focusactivity uninstall install; sexit 1 }
 
 function findApk()
 {
@@ -19,8 +24,8 @@ function findApk()
 }
 function listPkg()
 {
-    local flags pkgs sorted sortedPkgs pkg tmp n=1
-    if [[ "$1" == "-a" ]]; then
+    local ret flags pkgs sorted sortedPkgs pkg tmp n=1 date
+    if [ "$1" = "-a" ]; then
         shift
         flags=""
     else
@@ -28,24 +33,26 @@ function listPkg()
     fi
 	sorted=() ; sortedPkgs=()
 	pkgs=$(run adb shell pm list packages $flags "$@")
-	tmp=$?
-	[[ -n $pkgs ]] || return $tmp
+	ret=$?
+	[ -n "$pkgs" ] || return 1
 	pkgs=(${(@f)$(echo $pkgs | cut -f2 -d: | tr -d '\r')})
 	for pkg in $pkgs; do
-		tmp=$(
+		date=$(
 			adb shell dumpsys package $pkg | awk -F'=' '/lastUpdateTime/{print $2}' | tr -d '\r\n'
 		)
-		sorted+=("${(@f)tmp}¬$n")
+		sorted+=("${(f)date}¬$n")
 		((n++))
 	done
 	sorted=("${(@O)sorted}")
 	for tmp in $sorted; do
-		explode "$tmp" '¬'
-		timestamps+=("${s[1]}")
-		n=$s[2]
+		#@@s=$(
+		explode "$tmp" '¬' >/dev/null
+		#s=("${(@)s}")
+		#timestamps+=("${s[1]}")
+		n=${s[2]}
 		sortedPkgs+=("${pkgs[$n]}")
 	done
-	echo ${sortedPkgs}
+	echo "${sortedPkgs[@]}"
 }
 function listRunningApk()
 {
@@ -70,7 +77,7 @@ function startApk()
 
 	if [[ "$1" =~ "/" ]]; then
 		act=$1
-   elif [[ -n "$2" ]]; then
+   elif [ -n "$2" ]; then
 		act=$1/$2
 	else
 		act=$(chooser $(listApkActivities $apk))
@@ -86,8 +93,8 @@ function stopApk()
 function enDisApk()
 {
     local cmd=$1
-    [[ $cmd == 'en' ]] && cmd='enable'
-    [[ $cmd == 'dis' ]] && cmd='disable'
+    [ $cmd = 'en' ] && cmd='enable'
+    [ $cmd = 'dis' ] && cmd='disable'
     shift
     foreach p; do
 	    run adb shell pm $cmd $p
@@ -117,19 +124,18 @@ function getPkgVersion()
 }
 function uninstallApk()
 {
-    if [[ "$1" == "-a" ]]; then
-		  shift 
-		  args=$(listPkg "$@")
-    elif [[ -n "$1" ]]; then
+    if [ "$1"= "-a" ]; then
+		shift 
+		args=("${(@)$(listPkg $@)}")
+    elif [ -n "$1" ]; then
         args="$@"
     else
-        chosen=$(chooser $(listPkg))
-        args=$chosen
+		args=("$(chooser ${(@)$(listPkg)})")
     fi
 
     for arg in $args; do
-        if [[ $(getext "$arg") == "apk" ]]; then
-            uninstallPkg $(getPkg $arg)
+        if [ "$(getext $arg)" = 'apk' ]; then
+            uninstallPkg "$(getPkg $arg)"
         else
             uninstallPkg "$arg"
         fi
@@ -142,17 +148,17 @@ function uninstallApk()
 # pm clear: deletes all data associated with a package.
 function uninstallPkg()
 {
-    local pkgs
+    local pkgs p
 
-    if [[ -n "$1" ]]; then
-        pkgs="$@"
+    if [ -n "$1" ]; then
+		pkgs=("$@")
     else
-        pkgs=$(listPkg)
+		pkgs=("${(@)$(listPkg)}")
     fi
 
     #@TODO -k: keep the data and cache directories around after package removal.
-    for p in ${=pkgs}; do
-    	run adb shell pm uninstall -k $p
+    for p in $pkgs; do
+    	run adb shell pm uninstall -k "$p"
     done
 }
 
@@ -174,7 +180,7 @@ case "$cmd" in
         enDisApk $cmd $@
 	;;
 	(install|inst)
-        if [[ $(getext "$1") != "apk" ]]; then
+        if [ $(getext "$1") != "apk" ]; then
             echo needs a APK
             sexit 1
         fi
@@ -191,7 +197,7 @@ case "$cmd" in
 	(stop|restart)
 		apk=$(listRunningApk ${1:-inbramed})
 		stopApk $apk
-		if [[ "$cmd" == "restart" ]]; then
+		if [ "$cmd" = "restart" ]; then
 				startApk $apk
 		fi
 	;;
@@ -199,7 +205,7 @@ case "$cmd" in
         uninstallApk -a
 	;;
 	(uninstall|remove|rm|del(ete)?)
-        if [[ "$1" == "-a" ]]; then
+        if [ "$1" = "-a" ]; then
             shift
             uninstallApk -a
         else
@@ -208,7 +214,7 @@ case "$cmd" in
 	;;
 	(wallpaper|anim|animation) #@TODO use rsync or md5
         ro=$(run adb shell mount | awk '/^\/dev\/block\/mmcblk0p2/{print $4}') || abort
-        if [[ ${ro:0:2} == 'ro' ]]; then
+        if [ "${ro:0:2}" = 'ro' ]; then
             run adb shell mount -o remount,rw /system || abort
         fi
 		techo -c head Transfering wallpaper

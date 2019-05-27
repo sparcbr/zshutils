@@ -1,6 +1,22 @@
-VERSION=1.0
-export ANDROID_HOME="$HOME/androidSDK/tools"
+VERSION=1.0.2
+export ANDROID_HOME="$HOME/androidSDK/tools" # "$HOME/androidSDK" ???
 export ANDROID_PLATFORM_TOOLS="$HOME/androidSDK/platform-tools"
+export ANDROID_SDK_ROOT="$HOME/androidSDK"
 export PATH="$PATH:$ANDROID_HOME:$ANDROID_PLATFORM_TOOLS"
 
-alias android='adb shell'
+APPS="${ANDROID_APPS:-$HOME/PeD/android}"
+[ -d "$APPS" ] || APPS="$HOME/apps"
+ANDROID_APPS="$APPS"
+export ANDROID_APPS APPS
+
+export TREADMILL=$APPS/Treadmill
+export TREADMILL_RES=$TREADMILL/app/src/main/res
+export TREADMILL_IMG=$TREADMILL_RES/drawable
+export TREADMILL_LAYOUT=$TREADMILL_RES/layout
+export TREADMILL_JAVA="$(echo $TREADMILL/app/src/main/java/**/treadmill)"
+
+export CICLOERGOMETER=$APPS/Cicloergometer
+export CICLOERGOMETER_RES=$CICLOERGOMETER/app/src/main/res
+export CICLOERGOMETER_IMG=$CICLOERGOMETER_RES/drawable
+export CICLOERGOMETER_LAYOUT=$CICLOERGOMETER_RES/layout
+export CICLOERGOMETER_JAVA="$(echo $CICLOERGOMETER/app/src/main/java/**/cicloergometer)"
