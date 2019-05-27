@@ -1,1 +1,298 @@
-../.composer/vendor/davidrjonas/composer-lock-diff/composer-lock-diff
+#!/usr/bin/env php
+<?php
+
+$opts = parseOpts();
+
+$changes = array();
+
+if (! $opts['only-dev']) {
+    $changes['changes'] = diff('packages', $opts['from'], $opts['to'], $opts['path']);
+}
+
+if (! $opts['only-prod']) {
+    $changes['changes-dev'] = diff('packages-dev', $opts['from'], $opts['to'], $opts['path']);
+}
+
+if ($opts['json']) {
+    $json_opts = ($opts['pretty']) ? JSON_PRETTY_PRINT : 0;
+    print json_encode($changes, $json_opts);
+    return;
+}
+
+$table_opts = array(
+    'no-links' => $opts['no-links'],
+);
+
+if ($opts['md']) {
+    $table_opts = array_merge($table_opts, array(
+        'capped' => false,
+        'joint' => '|',
+        'url_formatter' => 'urlFormatterMd',
+    ));
+}
+
+$table_titles = [
+    'changes' => 'Production Changes',
+    'changes-dev' => 'Dev Changes',
+];
+
+foreach($changes as $k => $diff) {
+    print tableize($table_titles[$k], $diff, $table_opts);
+}
+
+function diff($key, $from, $to, $base_path) {
+
+    $pkgs = array();
+
+    $data = load($from, $base_path);
+
+    foreach($data->$key as $pkg) {
+        $pkgs[$pkg->name] = array(version($pkg), 'REMOVED', '');
+    }
+
+    $data = load($to, $base_path);
+
+    foreach($data->$key as $pkg) {
+        if (! array_key_exists($pkg->name, $pkgs)) {
+            $pkgs[$pkg->name] = array('NEW', version($pkg), '');
+            continue;
+        }
+
+        if ($pkgs[$pkg->name][0] == version($pkg)) {
+            unset($pkgs[$pkg->name]);
+        } else {
+            $pkgs[$pkg->name][1] = version($pkg);
+            $pkgs[$pkg->name][2] = makeCompareUrl($pkg, $pkgs);
+        }
+    }
+
+    return $pkgs;
+}
+
+function version($pkg)
+{
+    if(substr($pkg->version,0,4) == 'dev-') {
+        $version = substr($pkg->source->reference,0,7) ?: '';
+    } else {
+        $version = (string) $pkg->version;
+    }
+
+    return $version;
+}
+
+function tableize($header, $data, $opts = array()) {
+    if (empty($data)) return '';
+
+    $opts = array_merge(array('capped' => true, 'joint' => '+'), $opts);
+
+    if ($opts['no-links']) {
+        array_walk($data, function(&$values) {
+            unset($values[2]);
+        });
+    } else {
+        if (array_key_exists('url_formatter', $opts)) {
+            $formatter = $opts['url_formatter'];
+            array_walk($data, function(&$values) use ($formatter) {
+                $values[2] = call_user_func($formatter, $values[2], '...');
+            });
+        }
+    }
+
+    $titles = array($header, 'From', 'To');
+    if (! $opts['no-links']) array_push($titles, 'Compare');
+
+    $widths = array(maxLength(array_merge(array($header), array_keys($data))));
+
+    $count = count(reset($data));
+    for($i = 0; $i < $count; $i++) {
+        $widths[] = max(strlen($titles[$i + 1]), maxLength(array_map(function($k) use ($data, $i) { return $data[$k][$i]; }, array_keys($data))));
+    }
+
+    if ($opts['capped']) {
+        $lines[] = separatorLine($widths, $opts['joint']);
+    }
+
+    $lines[] = tabelizeLine($titles, $widths);
+    $lines[] = separatorLine($widths, $opts['joint']);
+
+    foreach($data as $key => $v) {
+        $lines[] = tabelizeLine(array_merge(array($key), $v), $widths);
+    }
+
+    if ($opts['capped']) {
+        $lines[] = separatorLine($widths, $opts['joint']);
+    }
+
+    return implode(PHP_EOL, array_filter($lines)) . PHP_EOL . PHP_EOL;
+}
+
+function separatorLine($widths, $joint) {
+    return $joint . implode($joint, array_map(function($n) { return str_repeat('-', $n + 2); }, $widths)) . $joint;
+}
+
+function maxLength(array $array) {
+    return max(array_map('strlen', $array));
+}
+
+function tabelizeLine($data, $widths) {
+    $fields = array();
+    $count = max(array(count($data), count($widths)));
+    for($i = 0; $i < $count; $i++) {
+        $value = ($i >= count($data)) ? '' : $data[$i];
+        $width = ($i >= count($widths)) ? strlen($value) : $widths[$i];
+        $fields[] = sprintf("%-{$width}s", $value);
+    }
+    return '| ' . implode(' | ', $fields) . ' |';
+}
+
+function urlFormatterMd($url, $text) {
+    if (empty($url)) return '';
+    return sprintf('[%s](%s)', $text, $url);
+}
+
+function load($fileish, $base_path = '') {
+    $orig = $fileish;
+
+    if (empty($base_path)) {
+        $base_path = '.' . DIRECTORY_SEPARATOR;
+    } else {
+        $base_path = rtrim($base_path, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+    }
+
+    if (empty($fileish)) {
+        $fileish = $base_path . 'composer.lock';
+    }
+
+    if (isUrl($fileish)) {
+        if (! in_array(parse_url($fileish, PHP_URL_SCHEME), stream_get_wrappers())) {
+            error_log("Error: no stream wrapper to open '$fileish'");
+            exit(1);
+        }
+
+        return mustDecodeJson(file_get_contents($fileish), $fileish);
+    }
+
+    if (file_exists($fileish)) {
+        return mustDecodeJson(file_get_contents($fileish), $fileish);
+    }
+
+    if (strpos($orig, ':') === false) {
+        $fileish .= ':' . $base_path . 'composer.lock';
+    }
+
+    $lines = '';
+
+    exec('git show '. escapeshellarg($fileish), $lines, $exit);
+
+    if ($exit !== 0) {
+        error_log("Error: cannot open $orig or find it in git as $fileish");
+        exit(1);
+    }
+
+    return mustDecodeJson(implode("\n", $lines), $fileish);
+}
+
+function isUrl($string) {
+    return filter_var($string, FILTER_VALIDATE_URL,
+        FILTER_FLAG_SCHEME_REQUIRED | FILTER_FLAG_HOST_REQUIRED | FILTER_FLAG_PATH_REQUIRED);
+}
+
+function mustDecodeJson($json, $context) {
+    $data = json_decode($json);
+
+    if (empty($data)) {
+        error_log("Error: contents from $context does not decode as json");
+        exit(1);
+    }
+
+    return $data;
+}
+
+function makeCompareUrl($pkg, $diff) {
+    $func = 'formatCompare' . ucfirst(getSourceRepoType((string) @$pkg->source->url));
+    return call_user_func($func, $pkg->source->url, $diff[$pkg->name][0], $diff[$pkg->name][1]);
+}
+
+function getSourceRepoType($url) {
+    if (! preg_match('/^http/i', $url)) {
+        return 'unknown';
+    }
+
+    $host = strtolower(parse_url($url, PHP_URL_HOST));
+
+    if (strpos($host, 'github') !== false) {
+        return 'github';
+    } elseif (strpos($host, 'bitbucket') !== false) {
+        return 'bitbucket';
+    } elseif (strpos($host, 'gitlab') !== false) {
+        return 'gitlab';
+    }
+
+    return 'unknown';
+}
+
+function formatCompareUnknown($url, $from, $to) {
+    return '';
+}
+
+function formatCompareGithub($url, $from, $to) {
+    return sprintf('%s/compare/%s...%s', preg_replace('/\.git$/', '', $url), urlencode($from), urlencode($to));
+}
+
+function formatCompareBitbucket($url, $from, $to) {
+    return sprintf('%s/branches/compare/%s%%0D%s', preg_replace('/\.git$/', '', $url), urlencode($from), urlencode($to));
+}
+
+function formatCompareGitlab($url, $from, $to) {
+    return sprintf('%s/compare/%s...%s', preg_replace('/\.git$/', '', $url), urlencode($from), urlencode($to));
+}
+
+function parseOpts() {
+    $given = getopt('hp:', array('path:', 'from:', 'to:', 'md', 'json', 'pretty', 'no-links', 'only-prod', 'only-dev', 'help'));
+
+    foreach(array('help' => 'h', 'path' => 'p') as $long => $short) {
+        if (array_key_exists($short, $given)) {
+            $given[$long] = $given[$short];
+            unset($given[$short]);
+        }
+    }
+
+    if (array_key_exists('help', $given)) {
+        usage();
+    }
+
+    return array(
+        'path' => array_key_exists('path', $given) ? $given['path'] : '',
+        'from' => array_key_exists('from', $given) ? $given['from'] : 'HEAD',
+        'to' => array_key_exists('to', $given) ? $given['to'] : '',
+        'md' => array_key_exists('md', $given),
+        'json' => array_key_exists('json', $given),
+        'pretty' => version_compare(PHP_VERSION, '5.4.0', '>=') && array_key_exists('pretty', $given),
+        'no-links' => array_key_exists('no-links', $given),
+        'only-prod' => array_key_exists('only-prod', $given),
+        'only-dev' => array_key_exists('only-dev', $given),
+    );
+}
+
+function usage() {
+    print <<<EOF
+Usage: composer-lock-diff [options]
+
+Options:
+  -h --help    Print this message
+  --path, -p   Base to with which to prefix paths. Default "./"
+               E.g. `-p app` would look for HEAD:app/composer.lock and app/composer.lock
+  --from       The file, git ref, or git ref with filename to compare from (HEAD:composer.lock)
+  --to         The file, git ref, or git ref with filename to compare to (composer.lock)
+  --json       Format output as JSON
+  --pretty     Pretty print JSON output (PHP >= 5.4.0)
+  --md         Use markdown instead of plain text
+  --no-links   Don't include Compare links in plain text or any links in markdown
+  --only-prod  Only include changes from `packages`
+  --only-dev   Only include changes from `packages-dev`
+
+EOF;
+
+    exit(0);
+}
+

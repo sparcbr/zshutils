@@ -86,9 +86,9 @@ function rename()
 function syncDirs()
 {
 	local integer n
-	local src target data rsArgs 
+	local src target data rsArgs checksum
 	local quiet sudo ignores dry
-	zparseopts -D -M -- q=quiet s=sudo i:=ignores d=dry t:=target
+	zparseopts -D -M -- q=quiet s=sudo i:=ignores d=dry t:=target c=checksum
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	[[ $# -ge 2 ]] || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
@@ -109,8 +109,10 @@ function syncDirs()
 			src[$n]="${src[$n]}/" #@ TODO check if src==target
 		fi
 	done
-	# -c	
-	rsArgs=('-aui' --exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*' --exclude-from="$ignores[2]")
+	[[ -n $checksum ]] && checksum=(-c --no-times)
+	rsArgs=('-aui' $checksum --exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*')
+	[[ -n $ignores ]] && rsArgs+=(--exclude-from="${ignores[2]}")
+	[[ -f rsync.ignore ]] && rsArgs+=(--exclude-from=rsync.ignore)
 	for dir in $target; do
 		if [ ! -d "$dir" ]; then
 			if [ ! -e "$dir" ]; then
@@ -120,24 +122,27 @@ function syncDirs()
 			fi
 		fi
 		if [ -d "$dir" ]; then
-			data="$(run $sudo rsync -n "$rsArgs[@]" "$src[@]" "$dir")"
+			data="$(run $sudo rsync -n ${rsArgs[@]} "$src[@]" "$dir")"
 			if [ -n "$data" ]; then
 				echo "$data"
 				confirm "Do it" && run $sudo rsync "$rsArgs[@]" "$src[@]" "$dir"
 			fi
 
 			data="$(run $sudo rsync -n --delete --existing --ignore-existing \
-				"$rsArgs[@]" "$src[@]" "$dir")"
+				${rsArgs[@]} "$src[@]" "$dir")"
 
 			if [[ -n "$data" ]]; then
 				techo -c warn "Deletions:"
 				n=0
+				local files
 				echo "$data" | while read stat name; do
-					echo "$deployDir/$name ${C[red]}❌$C_"
+					echo "$dir/$name ${C[red]}❌$C_"
+					files+=($dir/$name)
 					((n++))
 				done
 				confirm -c warn "Delete these $n files" || continue
-				run $sudo rsync --delete "$rsArgs[@]" "$src[@]"/ "$dir"
+				rm $(chooser "$files[@]")
+				#run $sudo rsync --delete "$rsArgs[@]" "$src[@]"/ "$dir"
 			fi
 		fi
 	done

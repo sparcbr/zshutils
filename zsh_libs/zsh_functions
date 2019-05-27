@@ -52,17 +52,14 @@ function input()
 
 function confirm()
 {
-	local ret a str
-	if [ "$1" = "-c" ]; then
-		techo -nc $2 "$@ (y/N)"
-		shift 2
-		str="? "
-	else
-		str="$@ (y/N)? "
+	local ret a c
+	if [[ "$1" != -c ]]; then
+		c=(-c lcyan)
 	fi
+	techo -n $c "$@" "(y/N)? "
 	if [ -n "$BASH" ]; then
 		while [ "$a" != 'y' ] && [ "$a" != 'n' ]; do
-			read -p $str -n 1 -r a
+			read -n 1 -r a
 		done
 		return $ret
 	fi
@@ -242,37 +239,37 @@ function run()
 	[ -n "$print" ] && print="$print[2] : $cmd" || print=$cmd
 
 	{
-		if [ -z "$dryrun" ]; then
-			if [ -n "$color" ]; then
-				color ${=fullcmd} # | colorify
-			else
-				${=fullcmd}
-			fi
+		[[ -n $dryrun ]] && return 0
+
+		if [ -n "$color" ]; then
+			color ${=fullcmd} # | colorify
+		else
+			${=fullcmd}
+		fi
+		ret=$?
+
+		[ $ret -eq 130 ] && throw $ret
+		if [ $ret -eq 127 ]; then
+			chkCmdInstall $cmd $cmdinst[2]
 			ret=$?
-
-			[ $ret -eq 130 ] && throw $ret
-			if [ $ret -eq 127 ]; then
-				chkCmdInstall $cmd $cmdinst[2]
-				ret=$?
-				if [ $ret -eq 0 ]; then
-					if [ -n "$color" ]; then
-						color ${=fullcmd}
-					else
-						${=fullcmd}
-					fi
-					ret=$?
-				fi
-			fi
-
-			if [ $ret -ne 0 ]; then
-				if [ -n "$trysudo" ]; then
-					techo "Trying with sudo"
-					color sudo ${=fullcmd}
-					ret=$?
-					[ $ret -ne 0 ] && throw $ret
+			if [ $ret -eq 0 ]; then
+				if [ -n "$color" ]; then
+					color ${=fullcmd}
 				else
-					throw $ret
+					${=fullcmd}
 				fi
+				ret=$?
+			fi
+		fi
+
+		if [ $ret -ne 0 ]; then
+			if [ -n "$trysudo" ]; then
+				techo "Trying with sudo"
+				color sudo ${=fullcmd}
+				ret=$?
+				[ $ret -ne 0 ] && throw $ret
+			else
+				throw $ret
 			fi
 		fi
 	} always {
@@ -292,7 +289,7 @@ function run()
 
 	case $ret in
 	0)
-		[ -z "$quiet" ] && [ -z "$dryRun" ] && techo "$cmd $OK"
+		[[ -z $quiet && -z $dryRun ]] && techo "$cmd $OK"
 		[ -n "$alert" ] && success "$cmd finished successfully."
 	;;
 	*)
