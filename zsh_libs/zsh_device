@@ -16,9 +16,10 @@ function findDev()
 #@bug: shows partition as not mounted while it was really mounted
 function lspart()
 {
-    sudo lsblk -o NAME,LABEL,SIZE,FSTYPE,MOUNTPOINT "$@" | awk "! /(SWAP)|(\/snap\/)|(system reserved)/"
-    imgs=$(losetup --noheadings -l -O name,back-file)
-    echo $imgs | grep -v '/snapd/' | sort
+	awk "! /SWAP|(\/snap\/)|(system reserved)/" \
+		<(sudo lsblk -o NAME,LABEL,SIZE,FSTYPE,MOUNTPOINT,SERIAL "$@")
+
+	grep -v '/snapd/' <(losetup --noheadings -l -O name,back-file) | sort
 }
 
 function sizeToKb()
@@ -34,46 +35,99 @@ function sizeCompare()
 	[[ "$s1" -gt "$s2" ]] && echo 1 && return
 	echo 0
 }
-
+function labelof()
+{
+	lsblk $1 -n -o FSTYPE
+}
 function deviceMount()
 {
-	local integer ret mnt
-	local devtmp
+	local integer ret err=0
+	local var dev devs mnt baseMnt
+	zparseopts -D -M - M:=baseMnt
 	[[ -n "$1" ]] || return 1
-	[[ -b "$1" ]] || abortDevError NOBLKDEV "$1"
-	mnt=$(isDeviceMounted "$1" "$2")
-	ret=$?
-	[[ $ret -eq 2 ]] && return 0
-	if [[ $ret -eq 0 ]]; then
-		techo -c red "$1 already mounted ($mnt)"
-		return 2
-	fi
+	[[ -n $baseMnt ]] && baseMnt=$baseMnt[2] || baseMnt=/m
+	
+	#[[ -b "$1" ]] || abortDevError NOBLKDEV "$1"
+	#mnt=$(isDeviceMounted "$1" "$2")
+	#ret=$?
+	#[[ $ret -eq 2 ]] && return 0
+	#if [[ $ret -eq 0 ]]; then
+#		techo -c red "$1 already mounted ($mnt)"
+#		return 2
+#	fi
 
-	if [ $# -ge 2 ]; then
-		if isDir "$2"; then
-			devtmp=$(isDirMounted "$2")
-			ret=$?
-			[[ $ret -eq 2 ]] && return 0
-			[[ $ret -eq 0 ]] && {
-				run -s umount $devtmp || abortDevError MNTBUSY "$2 ($devtmp)"
-			}
-		elif ! confirm "Create dir $2" || ! run -S mkdir "$2"; then
-			return 127
+	#[[ $2 = (/dev/(mapper/)#)#loop(#b)([0-9]##)p([0-9]##) ]] && {
+	#	loopdev=/dev/loop$match[1]
+	#}
+	typeset -a devs
+	for dev; do
+		var=$(isDevice $dev)
+		if [[ $? -eq 0 ]]; then
+			devs+=($var)
+		elif isDir $dev; then
+			mnt=$var
+		elif confirm "Create dir $var"; then
+			run -S mkdir $var || return
+			mnt=$var
+		else
+			cancel
 		fi
-		color sudo mount "$1" "$2"
+	done
+
+	if [[ $#devs -eq 1 ]] && [[ -n $mnt ]]; then
+		dev=$devs[1]
+		var=$(isDeviceMounted "$dev" "$mnt")
+		ret=$?
+		[[ $ret -eq 2 ]] && return 0
+		if [[ $ret -eq 0 ]]; then
+			techo -c red "$dev already mounted ($var)"
+			return 0
+			# deviceUnmount $dev || abortDevError MNTBUSY "$var ($dev)"
+		fi
+		var=$(isDirMounted $mnt $dev)
+		ret=$?
+		[[ $ret -eq 2 ]] && return 0
+		[[ $ret -eq 0 ]] && {
+			deviceUnmount $var || abortDevError MNTBUSY "$mnt ($var)"
+		}
+		run -s mount $dev $mnt
 	else
-		udisksctl mount -b $1
+		local parts line TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT pids
+		parts=("${(f)$(deviceInfo -t part --short $devs)}")
+		typeset -a pids
+		for line in $parts; do
+			eval $line
+			if [[ -n "$MOUNTPOINT" ]]; then
+				techo -c warn "$NAME already mounted on $MOUNTPOINT"
+				continue
+			fi
+			if [[ -z "$FSTYPE" ]]; then
+				#@ no label, try to redetect, 
+				# ask user to give a label
+				techo -c red "$NAME: no file system detected"
+				((err++))
+				continue
+			fi
+			deviceMount $NAME "$baseMnt/$LABEL" &
+			pids+=($!)
+		done
+		for var in $pids; do
+			wait $var || ((err++))
+		done
+
+		[[ $err -eq 0 ]] && techo $OK || techo -c warn $err errors
+		return err
 	fi
 }
 #@TODO In the case of more than one mount of same device,
 # all of them are unmounted
 function dirUnmount()
 {
-	local err=0 dir
+	local err=0 dir dev
 	for dir; do
 		if [[ -d "$dir" ]]; then
-			if isDirMounted "$dir"; then
-				deviceUnmount $(deviceof "$dir") || ((err++))
+			if dev=$(isDirMounted $dir); then
+				deviceUnmount $dev || ((err++))
 			fi
 		else
 			techo -c err "\"$dir\"$C_$C[red]: not a directory"
@@ -85,32 +139,56 @@ function dirUnmount()
 
 function deviceUnmount()
 {
-	local err=0 used var mnt
-	local integer ret
+	local err=0 used var mnt dev
+	local integer ret i
 	zparseopts -D -M - u:=used -used:=u
 	for dev; do
-		mnt=$(isDeviceMounted $dev)
-		ret=$?
-		if [[ $ret -eq 0 ]]; then
-			var=$(udisksctl unmount -b $dev 2>&1)
-			if [[ $? -ne 0 ]]; then
-				techo -c warn "Trying with sudo.."
-				sudo umount $dev && continue
-				((err+=1))
+		dev=$(isDevice $dev) || {
+			isDir $dev && dirUnmount $dev || { ((err++)); techo -c warn $dev is not a device; continue }
+			continue
+		}
+
+			#@bug || { ((err++)); techo -c warn $dev is not a device; continue }
+		mnt=$(isDeviceMounted $dev) || continue
+		var=$(run -s -p "Unmounting $dev ($mnt)" udisksctl unmount -b $dev 2>&1) && continue
+		var=$(run -s umount $dev)
+		if [[ "$var" = *busy* ]]; then
+			var=$(egrep -v '^(lsof|sudo|grep) ' <(sudo lsof $mnt))
+			echo $var
+			egrep '^adb ' <<< $var && {
+				run adb kill-server
+				isDeviceMounted $dev || continue
+			}
+			i=0
+			while ! var=$(run -s umount $dev) && [[ $i -lt 4 ]]; do
+				isDeviceMounted $dev || continue
 				if [[ "$var" = *busy* ]]; then
-					mnt=$(mntof $dev)
-					techo -c warn "Can't unmount. $dev is busy ($mnt)"
-					sudo lsof $mnt | egrep -v '^(lsof|sudo|grep) '
+					techo -c warn "$mnt is busy"
+					var=$(egrep -v '^(lsof|sudo|grep) ' <(sudo lsof -f -- $mnt))
+					echo $var
+					egrep '^zsh ' <<< $var #@ show which shells are occupying $mnt
 				fi
-			fi
+				((i++))
+				sleep 1
+			done
 		fi
+		isDeviceMounted $dev && ((err++))
 	done
 	return $err
 }
 
+function diskUnmount()
+{
+	local dev parts eject force
+	zparseopts -D -M - e=eject f=force
+	dev=$1
+	parts=($(grep 'MOUNTPOINT=".\+"' <(deviceInfo -o NAME,MOUNTPOINT -t part $dev) | cut -f4 -d'"'))
+	deviceUnmount $parts
+	[[ -n $eject ]] && run -s eject $dev
+}
 function diskOff()
 {
-	udisksctl power-off -b $1
+	sudo udisksctl power-off -b $1
 }
 NOBLKDEV=32
 MNTBUSY=33
@@ -136,24 +214,27 @@ function diskMount()
 	[[ -n "$mnt" ]] && mnt="${mnt[2]}" || mnt="${2:-/m}"
 	isDir "$mnt" || { confirm "Create dir $mnt" && run -S mkdir "$mnt" } || return $?
 
-	parts=("${(f)$(deviceInfo -t part --short $dev)}")
-	for line in $parts; do
-		eval $line
-		if [[ -n "$MOUNTPOINT" ]]; then
-			techo -c warn "$NAME already mounted on $MOUNTPOINT"
-			continue
-		fi
-		if [[ -z "$FSTYPE" ]]; then
-			#@ no label, try to redetect, 
-			# ask user to give a label
-			techo -c red "$NAME: no file system detected"
-			((err++))
-			continue
-		fi
-		deviceMount "/dev/$NAME" "$mnt/$LABEL" || ((err++))
-	done
-	[[ $err -eq 0 ]] && techo $OK || techo -c warn $err errors
-	return err
+	deviceMount -M $mnt ${dev}[0-9]##
+#	parts=("${(f)$(deviceInfo -t part --short $dev)}")
+#	local TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT
+#	for line in $parts; do
+#		eval $line
+#		if [[ -n "$MOUNTPOINT" ]]; then
+#			techo -c warn "$NAME already mounted on $MOUNTPOINT"
+#			continue
+#		fi
+#		if [[ -z "$FSTYPE" ]]; then
+#			#@ no label, try to redetect. How to be sure when "loading" is over? 
+#			# How to be sure if loading is over and there is no label
+#			# ask user to give a label
+#			techo -c warn "$NAME: no file system detected"
+#			((err++))
+#			continue
+#		fi
+#		deviceMount $NAME "$mnt/$LABEL" || ((err++))
+#	done
+#	[[ $err -eq 0 ]] && techo $OK || techo -c warn $err errors
+#	return err
 }
 
 #@TODO SD wrapper util
@@ -164,12 +245,13 @@ function diskMount()
 # NOMOUNTS: no mounted partitions
 # SOMEMOUNTS: not all partitions mounted
 # ALLMOUNTS: all mounted
-function SD()
+function sd()
 {
 	local status cmd
 	status=SOMEMOUNTS
 	case "$status" in
 		(SOME|ALL)MOUNTS)
+			run -s umount
 			;;
 	esac
 }
@@ -177,29 +259,31 @@ function mountSD()
 {
 	local dev mnt p
 	zparseopts -D -M - m:=mnt
-	[ -n "$mnt" ] && mnt="${mnt[2]}" || mnt=${2:-/m/SD}
-	dev=${1:-$SDDEVICE}
-	isSD $dev || dev=$(findSD -d) || return 1
-	SDDEVICE=$dev
-	while ! diskMount $dev "$mnt"; do
-		sleep 0.6
-	done
+	dev=$(findSD -ld) || return
+	diskMount $dev ${mnt[2]:-${2:-/m/SD}}
 }
 function deviceInfo()
 {
 	local ret columns hotplug diskOnly args all short type data
-	zparseopts -D -M - h=hotplug d=diskOnly a=all s=short -short=s t:=type -type:=t
+	zparseopts -D -M - h=hotplug d=diskOnly a=all s=short -short=s t:=type -type:=t o:=columns
 
-	columns='TYPE,NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT'
-	[ -z "$short" ] && columns+=',STATE,VENDOR,MODEL,SERIAL'
-	[ -n "$hotplug" ] && columns+=',HOTPLUG,RM'
+	if [[ -n $columns ]]; then
+		columns="TYPE,${columns[2]}"
+	else
+		columns='TYPE,NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT'
+		if [[ -z "$short" ]]; then
+			columns+=',STATE,VENDOR,MODEL,SERIAL,HOTPLUG,RM'
+		elif [[ -n "$hotplug" ]]; then
+			columns+=',HOTPLUG,RM'
+		fi
+	fi
 
 	args=($all $diskOnly --include 8 -o $columns --noheadings --pairs)
 	data=$(sudo lsblk $args "$@")
 	ret=$?
-	[ -n "$diskOnly" ] && type=disk || type=$type[2]
-	[ -n "$hotplug" ] && data=$(egrep 'HOTPLUG="1" RM="1"' <<<$data)
-	[ -n "$type" ] && data=$(egrep '^TYPE="'$type'"' <<<$data)
+	[[ -n "$diskOnly" ]] && type=disk || type=$type[2]
+	[[ -n "$hotplug" ]] && data=$(egrep 'HOTPLUG="1" RM="1"' <<<$data)
+	[[ -n "$type" ]] && data=$(egrep '^TYPE="'$type'"' <<<$data)
 	print -l $data
 	return $ret
 }
@@ -211,13 +295,18 @@ function isSD()
 
 function findSD()
 {
-	local var dev parts fparts disks found disk i cmd loop sdDev oldDev diskOnly 
+	local var parts disks disk sdDev found
+	local integer i n=0 tries=1
 	local TYPE NAME SIZE RM HOTPLUG FSTYPE LABEL MOUNTPOINT STATE VENDOR MODEL SERIAL
+	local loop diskOnly oldDev cmd
 
 	zparseopts -D -M -- l=loop d=diskOnly o:=oldDev -cmd:=cmd
 
 	typeset -a found
-	while [ -z "$sdDev" ] || ! isSD "$sdDev"; do
+	sdDev=$SDDEV
+	[[ -n $loop ]] && tries=1000
+	while ((n++ < tries))  && ! isSD $sdDev; do
+		((n > 1)) && sleep 1
 		parts=("${(@f)$(deviceInfo -h -a $diskOnly)}") ; var=$?
 		if [ $var -eq 0 ]; then
 			disks=("${(@f)$(printf "%s\n" ${parts[@]} | egrep '^TYPE="disk"')}")
@@ -225,9 +314,8 @@ function findSD()
 		fi
 
 		if [ $var -ne 0 ]; then
+			SDDEV=
 			techo -c err 'No SD devices'
-			[ -z "$loop" ] && return 1
-			sleep 1
 			continue
 		fi
 		if [ $var -eq 0 ] && [ -z "$diskOnly" ]; then
@@ -235,13 +323,14 @@ function findSD()
 		fi
 		SDCARDSIZELIMIT='32G'
 		i=1
+		found=()
 		for line in $disks; do
 			eval $line 
 			if [[ -z "$SIZE" || -z "$SERIAL" ]]; then
-				techo -c warn "/dev/$NAME: $VENDOR $MODEL $SERIAL skipping: \ 
-					size=$SIZE, serial=$SERIAL : no media?"
+				techo -c warn "/dev/$NAME: $VENDOR $MODEL skipping: " \
+					"size=$SIZE, serial=$SERIAL : no media?"
 			elif [[ $(sizeCompare "$SIZE" $SDCARDSIZELIMIT) -gt 0 ]]; then
-				techo -c warn "/dev/$NAME: $VENDOR $MODEL $SERIAL skipping: size too big ($SIZE)"
+				techo -c warn "/dev/$NAME: $VENDOR $MODEL $SERIAL skipping: too big ($SIZE)"
 				#@techo -c warn "if this is a mistake, setup a new size limit"
 				#input -e '[[:digit:]][MG]' -p "Enter new size limit for SD cards" var
 				#config set SDCARDSIZELIMIT $var
@@ -252,29 +341,24 @@ function findSD()
 			((i++))
 		done
 
+		#@TODO use a simple chooser 
 		if [ $#found -gt 1 ]; then
 			var=(${=$(chooser $found)})
 		elif [ -n "$found" ]; then
 			var=(${=found})
 		else
 			var=
+			SDDEV=
+			techo -c err 'No SD devices'
 		fi
 		sdDev=$var[1]
-		if [ -n "$sdDev" ]; then
-			isSD $sdDev && break
-		else
-			techo -c err "No SD devices"
-		fi
-
-		[ -z "$loop" ] && return 1
-		sleep 1
 	done
-
-	techo -c ok $var
-	#@TODO	SDDEVICE=$sddev
+	isSD $sdDev || { SDDEV= ; return 1 }
+	techo -c ok SD=$sdDev
+	SDDEV=$sdDev
 	echo $sdDev
-	dev=${sdDev#/dev/}
-	[ -z "$diskOnly" ] && print -l "${parts[@]}" | egrep "NAME=\"${dev}[0-9]+\""
+	var=${sdDev#/dev/}
+	[ -z "$diskOnly" ] && print -l "${parts[@]}" | egrep "NAME=\"${var}[0-9]+\""
 	return 0
 
 		#if [[ "$CURRENTSDINFO" != "$var" ]]; then
@@ -299,23 +383,51 @@ function findSD()
 	#done
 }
 
+# Added 2019-02-31 15:06:30
+# and exists?
+function isDevice()
+{
+	local loop dev=$1
+	if [[ $dev = (#b)(/dev/(mapper/)#)#loop([0-9]##)(p[0-9]##)# ]]; then # isloop
+		loop=$match[3]
+		[[ -n $match[4] ]] && dev=/dev/mapper/loop$loop$match[4] || dev=/dev/loop$loop
+		return 0
+	fi
+	if [[ -b $dev ]]; then # is device
+		getfullpath $dev
+		return
+	fi
+	if [[ ${dev:0:5} = /dev/ ]]; then # ghost device
+		getfullpath $dev
+		return
+	fi
+	if isDir $dev || [[ ${dev:0:1} = / ]]; then # not a device
+		echo $dev
+		return 1
+	fi
+	isDevice /dev/$dev # try again
+}
+
 # Added 2019-02-25 11:06:30
 function mntof()
 {
-    awk -v needle="$(fullpath "$1")" '$1==needle {print $2}' /proc/mounts 2>/dev/null
+	local dev loop
+	dev=$(isDevice $1)
+	# [[ -b $dev ]] || return 1
+    awk -v needle="$dev" '$1==needle {print $2}' /proc/mounts 2>/dev/null
 }
 function isDeviceMounted()
 {
 	local mnt="$(mntof $1)" 
 	[[ -z "$mnt" ]] && return 1
-	[[ -n "$2"  && "$mnt" = "$(fullpath "$2")" ]] && return 2 # 0
+	[[ -n "$2"  && "$mnt" = "$(getfullpath "$2")" ]] && return 2 # 0
 	echo $mnt
 	return 0
 }
 
 function deviceof()
 {
-	awk -v needle="$(fullpath "$1")" '$2==needle {print $1}' /proc/mounts 2>/dev/null
+	awk -v needle="$(getfullpath "$1")" '$2==needle {print $1}' /proc/mounts 2>/dev/null
 }
 function isDirMounted()
 {
@@ -331,15 +443,15 @@ function isDirMounted()
 function imageof()
 {
 	local name=$1 loopdev
-	[ -z "$name" ] && return 1
+	[[ -z $name ]] && return 1
 	if isDir "$name"; then
 		loopdev=$(deviceof "$name")
-	elif [ "${name:0:1}" = '/' ]; then
+	elif [[ "${name:0:1}" = / ]]; then
 		loopdev=$name
 	else
 		loopdev=/dev/loop${name#loop}
 	fi
-	[ -b "$loopdev" ] || { abortDevError NOBLKDEV "$loopdev" }
+	[[ -b $loopdev ]] || abortDevError NOBLKDEV "$loopdev"
 	[[ $loopdev = (/dev/(mapper/)#)#loop(#b)([0-9]##)p([0-9]##) ]] && loopdev=/dev/loop$match[1]
 	losetup $loopdev -O BACK-FILE --noheadings
 }
@@ -416,4 +528,11 @@ function sdd()
 	bs=${bs[2]:-512}
 	run $quiet -s dd "if=$devin" "of=$devout" "bs=$bs" "${args[@]}"
     sync
+}
+
+# Added 2019-06-03 09:00
+function ejectSD()
+{
+	isSD $SDDEV || findSD -d || return 0
+	diskUnmount -e $SDDEV
 }
