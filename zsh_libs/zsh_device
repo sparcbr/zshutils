@@ -47,18 +47,6 @@ function deviceMount()
 	[[ -n "$1" ]] || return 1
 	[[ -n $baseMnt ]] && baseMnt=$baseMnt[2] || baseMnt=/m
 	
-	#[[ -b "$1" ]] || abortDevError NOBLKDEV "$1"
-	#mnt=$(isDeviceMounted "$1" "$2")
-	#ret=$?
-	#[[ $ret -eq 2 ]] && return 0
-	#if [[ $ret -eq 0 ]]; then
-#		techo -c red "$1 already mounted ($mnt)"
-#		return 2
-#	fi
-
-	#[[ $2 = (/dev/(mapper/)#)#loop(#b)([0-9]##)p([0-9]##) ]] && {
-	#	loopdev=/dev/loop$match[1]
-	#}
 	typeset -a devs
 	for dev; do
 		var=$(isDevice $dev)
@@ -81,8 +69,7 @@ function deviceMount()
 		[[ $ret -eq 2 ]] && return 0
 		if [[ $ret -eq 0 ]]; then
 			techo -c red "$dev already mounted ($var)"
-			return 0
-			# deviceUnmount $dev || abortDevError MNTBUSY "$var ($dev)"
+			confirm Remount on $mnt && deviceUnmount $dev || return 0
 		fi
 		var=$(isDirMounted $mnt $dev)
 		ret=$?
