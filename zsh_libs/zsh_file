@@ -7,9 +7,12 @@ function getfilename()
 	echo "${1:t}"
 }
 
-function fullpath()
+function getfullpath()
 {
-	echo "${1:P}"
+	local relative
+	zparseopts -D - r:=relative
+	[[ -n $relative ]] && type realpath >/dev/null &&
+		realpath --relative-base=${relative[2]#=} $1 2>/dev/null || echo "${1:P}"
 }
 function getpath()
 {
@@ -30,7 +33,7 @@ function getfilenoext()
 
 function isDir()
 {
-	[[ -d "$1" ]]
+	[[ -d $1 ]]
 }
 
 function isEmptyDir()
@@ -82,38 +85,55 @@ function rename()
 	run $sudo mv "$1" "$dir/$file"
 }
 
-# Added 2019-05-03 16:50 @TODO
+# Added 2019-05-03 16:50
 function syncDirs()
 {
-	local integer n
-	local src target data rsArgs checksum
-	local quiet sudo ignores dry
-	zparseopts -D -M -- q=quiet s=sudo i:=ignores d=dry t:=target c=checksum
+	local integer i n
+	local src targets dir data rsArgs checksum arg
+	local quiet sudo ignores dry extraArgs
+	local files stat name
+	typeset -a src targets rsArgs extraArgs files
+	zparseopts -D -M - q=quiet s=sudo i:=ignores d=dry t:=targets c=checksum
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	[[ $# -ge 2 ]] || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
-	if [[ -n "$1" ]]; then
-		target="${@: -1}"
-		src=("${@:1:-1}")
-	else
-		src=($(box get backupdirs))
-	fi
-	target=($(explode "$target" ','))
+	
+	n=$#
+	i=1
+	for arg; do
+		if [[ ${arg:0:1} = - ]]; then # option parameter
+			extraArgs+=($arg)
+		else # sources
+			src+=($arg)
+		fi
+		((i++))
+	done
+	targets=${src: -1}
+	targets=($(explode $targets ','))
+	src[$#src]=()
 
-	if [[ -z "$target" ]]; then
-		target="$(input "Enter target directory")" || abort $?
-	fi
+#	if [[ -n "$1" ]]; then
+#		targets="${@: -1}"
+#		src=("${@:1:-1}")
+#	else
+#		src=($(box get backupdirs))
+#	fi
+#	if [[ -z "$targets" ]]; then
+#		targets="$(input "Enter target directory")" || abort $?
+#	fi
 
 	for ((n=1; n<=$#src; n++)); do
 		if isDir "${src[$n]}"; then
-			src[$n]="${src[$n]}/" #@ TODO check if src==target
+			if [[ -f "${src[$n]}/rsync.ignore" ]]; then
+				rsArgs+=(--exclude-from="${src[$n]}/rsync.ignore")
+			fi
+			[[ ${src[$n]: -1} != / ]] && src[$n]+=/
 		fi
 	done
 	[[ -n $checksum ]] && checksum=(-c --no-times)
-	rsArgs=('-aui' $checksum --exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*')
+	rsArgs=('-hirl' $checksum --exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*' "${extraArgs[@]}")
 	[[ -n $ignores ]] && rsArgs+=(--exclude-from="${ignores[2]}")
-	[[ -f rsync.ignore ]] && rsArgs+=(--exclude-from=rsync.ignore)
-	for dir in $target; do
+	for dir in $targets; do
 		if [ ! -d "$dir" ]; then
 			if [ ! -e "$dir" ]; then
 				confirm "dir $dir doesn't exist. Create" && run $sudo mkdir $dir
@@ -125,7 +145,7 @@ function syncDirs()
 			data="$(run $sudo rsync -n ${rsArgs[@]} "$src[@]" "$dir")"
 			if [ -n "$data" ]; then
 				echo "$data"
-				confirm "Do it" && run $sudo rsync "$rsArgs[@]" "$src[@]" "$dir"
+				confirm "Do it" && run $sudo rsync "$rsArgs[@]" "$src[@]" "$dir" && run sync
 			fi
 
 			data="$(run $sudo rsync -n --delete --existing --ignore-existing \
@@ -134,15 +154,15 @@ function syncDirs()
 			if [[ -n "$data" ]]; then
 				techo -c warn "Deletions:"
 				n=0
-				local files
 				echo "$data" | while read stat name; do
 					echo "$dir/$name ${C[red]}❌$C_"
 					files+=($dir/$name)
 					((n++))
 				done
 				confirm -c warn "Delete these $n files" || continue
-				rm $(chooser "$files[@]")
-				#run $sudo rsync --delete "$rsArgs[@]" "$src[@]"/ "$dir"
+				#@TODO rm $(chooser "$files[@]")
+				run $sudo rsync --delete --existing --ignore-existing "$rsArgs[@]" "$src[@]" "$dir"
+				run sync
 			fi
 		fi
 	done
@@ -152,8 +172,10 @@ function syncDirs()
 function syncIhm()
 {
 	( cd $HOME/PeD/android && {
-		syncDirs -i $CFG/android.ignore Treadmill $CLOUD/data/Inbramed/android/Treadmill
-		syncDirs -i $CFG/android.ignore Cicloergometer $CLOUD/data/Inbramed/android/Cicloergometer
+		syncDirs -c -i $CFG/android.ignore $TREADMILL \
+			$CLOUD_APPS/Treadmill,/m/home/inbramed/android/Treadmill
+		syncDirs -c -i $CFG/android.ignore $CICLOERGOMETER \
+			$CLOUD_APPS/Cicloergometer,/m/home/inbramed/android/Cicloergometer
 	  }
 	)
 }
@@ -165,3 +187,19 @@ function boxStart()
 	box start
 }
 
+
+# Added 2019-06-05 16:55
+function attributeSync()
+{
+	local stats name dir1 dir2 rsArgs
+	[[ $# -eq 2 ]] || return 10
+	dir1=$1 ; dir2=$2
+	[[ -d $dir1 && -d $dir2 ]] || return 127
+	shift 2 ; rsArgs=${@:-au}
+	while read stats name; do
+		#echo stat=$stats name=$name ;
+		[[ $stats[5] == t ]] && e touch --reference "$dir1/$name" $dir2/$name
+		[[ $stats[6] == p ]] && e chmod --reference="$dir1/$name" $dir2/$name
+		[[ $stats[7] == o || $stats[8] == g ]] && e chown --reference="$dir1/$name" $dir2/$name
+	done < <(run -s rsync -ni $rsArgs $dir1/ $dir2)
+}
