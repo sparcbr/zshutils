@@ -8,6 +8,7 @@ function techo() {
 	local c args nonl
     zparseopts -M -D - c:=c n=nonl
 	[[ -n "$nonl" ]] && args=('-n')
+	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null  # stdout
 	if [[ -n "$c" ]]; then
 		c="$c[2]"
 		[ -z "${C[$c]}" ] && type colorSet >/dev/null && colorSet $c
