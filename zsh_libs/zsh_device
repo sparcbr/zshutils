@@ -39,9 +39,10 @@ function labelof()
 {
 	lsblk $1 -n -o FSTYPE
 }
+
 function deviceMount()
 {
-	local integer ret err=0
+	local integer ret err=0 i
 	local var dev devs mnt baseMnt
 	zparseopts -D -M - M:=baseMnt
 	[[ -n "$1" ]] || return 1
@@ -95,15 +96,13 @@ function deviceMount()
 				((err++))
 				continue
 			fi
-			deviceMount $NAME "$baseMnt/$LABEL" &
-			pids+=($!)
+			deviceMount $NAME "$baseMnt/$LABEL" # &
+			# pids+=($!)
 		done
-		for var in $pids; do
-			wait $var || ((err++))
-		done
-
+		# waitOnPids $pids
+		((err+=$?))
 		[[ $err -eq 0 ]] && techo $OK || techo -c warn $err errors
-		return err
+		return $err
 	fi
 }
 #@TODO In the case of more than one mount of same device,
