@@ -82,7 +82,6 @@ function deviceMount()
 	else
 		local parts line TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT pids
 		parts=("${(f)$(deviceInfo -t part --short $devs)}")
-		typeset -a pids
 		for line in $parts; do
 			eval $line
 			if [[ -n "$MOUNTPOINT" ]]; then
@@ -96,10 +95,8 @@ function deviceMount()
 				((err++))
 				continue
 			fi
-			deviceMount $NAME "$baseMnt/$LABEL" # &
-			# pids+=($!)
+			deviceMount $NAME "$baseMnt/$LABEL"
 		done
-		# waitOnPids $pids
 		((err+=$?))
 		[[ $err -eq 0 ]] && techo $OK || techo -c warn $err errors
 		return $err
@@ -250,27 +247,32 @@ function mountSD()
 }
 function deviceInfo()
 {
-	local ret columns hotplug diskOnly args all short type data
-	zparseopts -D -M - h=hotplug d=diskOnly a=all s=short -short=s t:=type -type:=t o:=columns
+	local ret columns hotplug diskOnly args all short type data mounted
+	zparseopts -D -M - h=hotplug d=diskOnly a=all \
+		s=short -short=s t:=type -type:=t \
+		o:=columns m=mounted
 
 	if [[ -n $columns ]]; then
-		columns="TYPE,${columns[2]}"
+		columns=(TYPE $(explode $columns[2] ','))
+		[[ -n $mounted && -z ${mounted[(i)MOUNTPOINT} ]] && columns+=(MOUNTPOINT)
 	else
-		columns='TYPE,NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT'
+		columns=(TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT)
 		if [[ -z "$short" ]]; then
-			columns+=',STATE,VENDOR,MODEL,SERIAL,HOTPLUG,RM'
+			columns+=(STATE VENDOR MODEL SERIAL HOTPLUG RM)
 		elif [[ -n "$hotplug" ]]; then
-			columns+=',HOTPLUG,RM'
+			columns+=(HOTPLUG RM)
 		fi
 	fi
 
-	args=($all $diskOnly --include 8 -o $columns --noheadings --pairs)
+	args=($all $diskOnly --include 8 -o ${(j.,.)columns} --noheadings --pairs)
 	data=$(sudo lsblk $args "$@")
 	ret=$?
 	[[ -n "$diskOnly" ]] && type=disk || type=$type[2]
 	[[ -n "$hotplug" ]] && data=$(egrep 'HOTPLUG="1" RM="1"' <<<$data)
 	[[ -n "$type" ]] && data=$(egrep '^TYPE="'$type'"' <<<$data)
-	print -l $data
+	[[ -n "$mounted" ]] && data=$(egrep -o 'MOUNTPOINT=".+"' <<<$data)
+
+	echo "$data"
 	return $ret
 }
 
@@ -295,7 +297,6 @@ function findSD()
 		((n > 1)) && sleep 1
 		disks=("${(@f)$(deviceInfo -hda)}")
 		if [ $? -ne 0 ]; then
-			SDDEV=
 			techo -c err 'No removable devices found'
 			continue
 		fi
@@ -325,7 +326,6 @@ function findSD()
 			var=(${=found})
 		else
 			var=
-			SDDEV=
 			techo -c err 'No SD devices found'
 		fi
 		sdDev=$var[1]
@@ -335,8 +335,7 @@ function findSD()
 	SDDEV=$sdDev
 	echo $sdDev
 	var=${sdDev#/dev/}
-	#[ -z "$diskOnly" ] && print -l "${parts[@]}" | egrep "NAME=\"${var}[0-9]+\""
-	[ -z "$diskOnly" ] && print -l $(deviceInfo -st part $sdDev)
+	[ -z "$diskOnly" ] && echo "$(deviceInfo -st part $sdDev)"
 	return 0
 
 		#if [[ "$CURRENTSDINFO" != "$var" ]]; then
@@ -360,15 +359,25 @@ function findSD()
 	#	done
 	#done
 }
-
+function isLoop()
+{
+	local loop dev
+	if [[ $1 = (#b)(/dev/(mapper/)#)#loop([0-9]##)(p[0-9]##)# ]]; then
+		loop=$match[3]
+		[[ -n $match[4] ]] && dev=/dev/mapper/loop$loop$match[4] || dev=/dev/loop$loop
+		echo $dev
+		return 0
+	fi
+	echo $1
+	return 1
+}
 # Added 2019-02-31 15:06:30
 # and exists?
 function isDevice()
 {
-	local loop dev=$1
-	if [[ $dev = (#b)(/dev/(mapper/)#)#loop([0-9]##)(p[0-9]##)# ]]; then # isloop
-		loop=$match[3]
-		[[ -n $match[4] ]] && dev=/dev/mapper/loop$loop$match[4] || dev=/dev/loop$loop
+	local dev=$1
+	if dev=$(isLoop $dev); then
+		echo $dev
 		return 0
 	fi
 	if [[ -b $dev ]]; then # is device
@@ -386,12 +395,23 @@ function isDevice()
 	isDevice /dev/$dev # try again
 }
 
+# Find loop device of image file
+function loopof()
+{
+	local dev
+	if [[ ! -f $1 ]]; then
+		techo -c lred "$1: file not found"
+		return 127
+	fi
+	dev=$(losetup -j "$1" -O NAME --noheadings)
+	[[ -n $dev ]] && echo $dev
+}
+
 # Added 2019-02-25 11:06:30
 function mntof()
 {
 	local dev loop
-	dev=$(isDevice $1)
-	# [[ -b $dev ]] || return 1
+	dev=$(isDevice $1) || dev=$(loopof $dev) || return
     awk -v needle="$dev" '$1==needle {print $2}' /proc/mounts 2>/dev/null
 }
 function isDeviceMounted()
@@ -405,7 +425,11 @@ function isDeviceMounted()
 
 function deviceof()
 {
-	awk -v needle="$(getfullpath "$1")" '$2==needle {print $1}' /proc/mounts 2>/dev/null
+	if [[  -d $1 ]]; then
+		awk -v needle="$(getfullpath "$1")" '$2==needle {print $1}' /proc/mounts 2>/dev/null
+	elif [[ -f $1 ]]; then
+		loopof $1
+	fi
 }
 function isDirMounted()
 {
@@ -434,21 +458,71 @@ function imageof()
 	losetup $loopdev -O BACK-FILE --noheadings
 }
 
+comp+=(imgMount='loop mount' image='loop mount')
+alias imgMount='loop mount'
+alias image='loop mount'
+function loop()
+{
+	local cmd=$1 img dir var dev
+	[[ -n $cmd ]] || return 1
+	shift
+	case $cmd in
+	mount)
+		if [[ $# -ne 2 ]]; then
+			echo Usage: $0 loop mount imageFile mountDir
+			return 1
+		fi
+		img=$1 ; dir=$2
+		if [[ ! -f $1 ]]; then
+			techo -c lred "$1: file not found"
+			return 1
+		fi
+		if ! isDir $dir && [[ ! -e $dir ]]; then
+			confirm Create dir $dir && run -S mkdir $dir || return
+		else
+			if dev=$(isDirMounted $dir); then
+				if var=$(isLoop $dev); then
+					var=$(imageof $var)
+					if [[ $? -eq 0 && $var != $img ]]; then
+						techo -c warn "$dir already mounted ($dev $var)"
+						confirm "Unmount $dev" || return
+						unloop $dev || abortDevError MNTBUSY "$dir ($dev)"
+					else
+						return 0
+					fi
+				else
+					techo -c warn "$dir already mounted ($dev)"
+					confirm "Unmount $dev" || return
+					deviceUnmount $dev || abortDevError MNTBUSY "$dir ($dev)"
+				fi
+			fi
+		fi
+		run -s mount -o loop $img $dir
+	;;
+	*)
+	;;
+	esac
+}
 # Added 2019-03-01 15:48
 function unloop()
 {
     local loopNum devLoop devList
 	zparseopts -D -E -M -- i:=img -img:=i
-	if [[ -n "$img" ]]; then
-		devLoop=$(losetup --all | grep $img[2] | cut -d':' -f1)
+	if isLoop $1 && [[ -z $img ]]; then
+		loopNum=$1
+		isDevice $loopNum && devLoop=$loopNum || devLoop=/dev/loop$loopNum
+		#devLoop=$(isDevice $1) || devLopp=$(isDevice /dev/loop$1) ||
+	else
+		[[ -n $img ]] && img=$img[2] || img=$1
+		devLoop=$(losetup --all | grep $img | cut -d':' -f1)
 		[[ "$devLoop" =~ "loop([0-9]*)" ]] || return 1
 		loopNum=$match[1]
-	else
-	    loopNum=$1
-		devLoop=/dev/loop$loopNum
 	fi
     devList=(${devLoop} /dev/mapper/loop${loopNum}p*(N) ${devLoop}p*(N))
-    sudo umount $devList ; sudo kpartx -d $devLoop ; sudo losetup -d $devLoop || true
+    run deviceUnmount $devList || return
+	sudo kpartx -d $devLoop
+	[[ -b $devLoop ]] && sudo losetup -d $devLoop
+	return 0
 }
 
 # Added 2019-02-26 14:17
