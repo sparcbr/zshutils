@@ -11,6 +11,7 @@ function getfullpath()
 {
 	local relative
 	zparseopts -D - r:=relative
+	[[ $# -ge 1 ]] || return 1
 	[[ -n $relative ]] && type realpath >/dev/null &&
 		realpath --relative-base=${relative[2]#=} $1 2>/dev/null || echo "${1:P}"
 }
@@ -85,33 +86,58 @@ function rename()
 	run $sudo mv "$1" "$dir/$file"
 }
 
+function ddiff()
+{
+	local dset list
+	zparseopts -D - s=dset l=list
+	if [[ -n $dset || -z $dir1 || -z $dir2 ]]; then
+		[[ -n $1 ]] && { dir1=${1%/} ; shift }
+		[[ -n $1 ]] && { dir2=${1%/} ; shift }
+		#[[ -z $dir1 ]] && dir1=$(input -p "Dir 1" $dir1)
+		#[[ -z $dir2 ]] && dir2=$(input -p "Dir 2" $dir2)
+		d1=$dir1 d2=$dir2
+		list=1
+	fi
+
+	if [[ -n $list ]]; then
+		echo "dir1=$dir1 dir2=$dir2"
+		return 0
+	fi
+
+	if [[ -d $dir1 && -d $dir2 ]]; then 
+		[[ -n $1 ]] && run -s diff -ur $dir1/$1 $dir2/$1 || run -s diff -ur $dir1 $dir2
+	fi
+}
 # Added 2019-05-03 16:50
 function syncDirs()
 {
 	local integer i n
 	local src targets dir data rsArgs checksum arg
-	local quiet sudo ignores dry extraArgs
+	local quiet sudo ignores dry extraArgs reverse fat
 	local files stat name
 	typeset -a src targets rsArgs extraArgs files
-	zparseopts -D -M - q=quiet s=sudo i:=ignores d=dry t:=targets c=checksum
+	zparseopts -D -M - q=quiet s=sudo i:=ignores d=dry t:=targets c=checksum r=reverse -fat=fat
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	[[ $# -ge 2 ]] || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
 	
 	n=$#
-	i=1
 	for arg; do
 		if [[ ${arg:0:1} = - ]]; then # option parameter
 			extraArgs+=($arg)
 		else # sources
 			src+=($arg)
 		fi
-		((i++))
 	done
 	targets=${src: -1}
-	targets=($(explode $targets ','))
 	src[$#src]=()
+	targets=($(explode $targets ','))
 
+	if [[ -n $reverse ]]; then
+		files=($targets)
+		targets=($src)
+		src=($files)
+	fi
 #	if [[ -n "$1" ]]; then
 #		targets="${@: -1}"
 #		src=("${@:1:-1}")
@@ -122,6 +148,20 @@ function syncDirs()
 #		targets="$(input "Enter target directory")" || abort $?
 #	fi
 
+
+	# # # # # # # # # #	   -t, --times           preserve modification times
+	# rsync arguments #    -O, --omit-dir-times  omit directories from --times
+	# # # # # # # # # #    -J, --omit-link-times
+	# [[ -n $fat ]]
+	rsArgs=( -hlDrpog )
+	if [[ -n $checksum ]]; then
+		rsArgs+=(-c --no-times)
+	else
+		rsArgs+=(-tu)
+	fi 
+	# exclusions
+	rsArgs+=(--exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*')
+	[[ -n $ignores ]] && rsArgs+=(--exclude-from="${ignores[2]}")
 	for ((n=1; n<=$#src; n++)); do
 		if isDir "${src[$n]}"; then
 			if [[ -f "${src[$n]}/rsync.ignore" ]]; then
@@ -130,39 +170,50 @@ function syncDirs()
 			[[ ${src[$n]: -1} != / ]] && src[$n]+=/
 		fi
 	done
-	[[ -n $checksum ]] && checksum=(-c --no-times)
-	rsArgs=('-hirl' $checksum --exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*' "${extraArgs[@]}")
-	[[ -n $ignores ]] && rsArgs+=(--exclude-from="${ignores[2]}")
+	# rsync arguments from command line
+	rsArgs+=("${extraArgs[@]}")
+
+	# # # # # #
+	# Targets #
+	# # # # # #
 	for dir in $targets; do
-		if [ ! -d "$dir" ]; then
+		if [ ! -d "$dir" ]; then # turn this into a function
 			if [ ! -e "$dir" ]; then
 				confirm "dir $dir doesn't exist. Create" && run $sudo mkdir $dir
 			else
-				techo -c err "$dir is a file"
+				techo -c err "$dir is a file. Skipping."
+				continue
 			fi
 		fi
 		if [ -d "$dir" ]; then
-			data="$(run $sudo rsync -n ${rsArgs[@]} "$src[@]" "$dir")"
+			data="$(run $sudo rsync -ni ${rsArgs[@]} "$src[@]" "$dir")"
 			if [ -n "$data" ]; then
-				echo "$data"
-				confirm "Do it" && run $sudo rsync "$rsArgs[@]" "$src[@]" "$dir" && run sync
+				echo $data
+				confirm "Do it" &&
+					run $sudo rsync --info=PROGRESS2 "$rsArgs[@]" "$src[@]" "$dir"
+					_sync
+	
 			fi
 
-			data="$(run $sudo rsync -n --delete --existing --ignore-existing \
-				${rsArgs[@]} "$src[@]" "$dir")"
+			# # # # # # #
+			# Deletions #
+			# # # # # # #
+			data="$(run $sudo rsync -ni --delete --existing --ignore-existing \
+				-JO ${rsArgs[@]} $src[@] $dir)"
 
 			if [[ -n "$data" ]]; then
 				techo -c warn "Deletions:"
 				n=0
-				echo "$data" | while read stat name; do
+				echo $data | while read stat name; do
 					echo "$dir/$name ${C[red]}❌$C_"
 					files+=($dir/$name)
 					((n++))
 				done
 				confirm -c warn "Delete these $n files" || continue
 				#@TODO rm $(chooser "$files[@]")
-				run $sudo rsync --delete --existing --ignore-existing "$rsArgs[@]" "$src[@]" "$dir"
-				run sync
+				run $sudo rsync --delete --existing --ignore-existing \
+					--info=PROGRESS2 "$rsArgs[@]" "$src[@]" "$dir"
+				_sync
 			fi
 		fi
 	done
@@ -191,15 +242,36 @@ function boxStart()
 # Added 2019-06-05 16:55
 function attributeSync()
 {
-	local stats name dir1 dir2 rsArgs
-	[[ $# -eq 2 ]] || return 10
-	dir1=$1 ; dir2=$2
-	[[ -d $dir1 && -d $dir2 ]] || return 127
-	shift 2 ; rsArgs=${@:-au}
-	while read stats name; do
+	local stats name dir1 dir2 rsArgs skip dry
+	#[[ $# -gt 2 ]] || return 10
+	zparseopts -D - d=dry
+
+	[[ -n $dry ]] && dry=techo
+	[[ -n $1 ]] && { dir1=$1 ; shift }
+	[[ -n $1 ]] && { dir2=$1 ; shift }
+
+	if [[ ! -d $dir1 || ! -d $dir2 ]]; then
+		[[ -d $dir1 ]] || techo -c lred "$dir1: not a directory"
+		[[ -d $dir2 ]] || techo -c lred "$dir2: not a directory"
+		return 127
+	fi
+	confirm "$dir1 -> $dir2" || return
+	rsArgs=(${@:--u})
+	while read stats name skip; do
 		#echo stat=$stats name=$name ;
-		[[ $stats[5] == t ]] && e touch --reference "$dir1/$name" $dir2/$name
-		[[ $stats[6] == p ]] && e chmod --reference="$dir1/$name" $dir2/$name
-		[[ $stats[7] == o || $stats[8] == g ]] && e chown --reference="$dir1/$name" $dir2/$name
-	done < <(run -s rsync -ni $rsArgs $dir1/ $dir2)
+		[[ $stats == skipping ]] 
+		[[ $stats[5] == t ]] && $dry sudo touch --reference "$dir1/$name" $dir2/$name
+		[[ $stats[6] == p ]] && $dry sudo chmod --reference "$dir1/$name" $dir2/$name
+		if [[ $stats[7] == o || $stats[8] == g ]] && [[ $stats != skipping ]]; then
+			$dry sudo chown --reference "$dir1/$name" $dir2/$name
+		fi
+	done < <(run -s rsync -n -hDirtpog $rsArgs $dir1/ $dir2 | tee $TTY)
+	sync
+}
+
+function _sync() {
+	local pid
+	techo "Flushing caches to disk. Please wait."
+	run sync & pid=$!
+	watch -n 1 -c -t  "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
 }
