@@ -19,7 +19,7 @@ function lspart()
 	awk "! /SWAP|(\/snap\/)|(system reserved)/" \
 		<(sudo lsblk -o NAME,LABEL,SIZE,FSTYPE,MOUNTPOINT,SERIAL "$@")
 
-	grep -v '/snapd/' <(losetup --noheadings -l -O name,back-file) | sort
+	grep -v '/snapd/' <(losetup --noheadings -l -O NAME,BACK-FILE) | sort
 }
 
 function sizeToKb()
@@ -44,7 +44,7 @@ function deviceMount()
 {
 	local integer ret err=0 i
 	local var dev devs mnt baseMnt
-	zparseopts -D -M - M:=baseMnt
+	zparseopts -D -M - m:=baseMnt
 	[[ -n "$1" ]] || return 1
 	[[ -n $baseMnt ]] && baseMnt=$baseMnt[2] || baseMnt=/m
 	
@@ -186,8 +186,8 @@ function abortDevError()
 
 function diskMount()
 {
-	local mnt dev parts line devtmp err=0
-	zparseopts -D -M - m:=mnt
+	local mnt dev parts line devtmp err=0 pnum
+	zparseopts -D -M - m:=mnt p:=pnum
 	
 	dev=${1:-$(chooser $(deviceInfo -d))}
 	dev="/dev/${dev#/dev/}"
@@ -195,29 +195,10 @@ function diskMount()
 	
 	#@TODO: use disk uuid or disk identifier as default?
 	[[ -n "$mnt" ]] && mnt="${mnt[2]}" || mnt="${2:-/m}"
-	isDir "$mnt" || { confirm "Create dir $mnt" && run -S mkdir "$mnt" } || return $?
+	isDir -m "$mnt" || return
 
-	deviceMount -M $mnt ${dev}[0-9]##
-#	parts=("${(f)$(deviceInfo -t part --short $dev)}")
-#	local TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT
-#	for line in $parts; do
-#		eval $line
-#		if [[ -n "$MOUNTPOINT" ]]; then
-#			techo -c warn "$NAME already mounted on $MOUNTPOINT"
-#			continue
-#		fi
-#		if [[ -z "$FSTYPE" ]]; then
-#			#@ no label, try to redetect. How to be sure when "loading" is over? 
-#			# How to be sure if loading is over and there is no label
-#			# ask user to give a label
-#			techo -c warn "$NAME: no file system detected"
-#			((err++))
-#			continue
-#		fi
-#		deviceMount $NAME "$mnt/$LABEL" || ((err++))
-#	done
-#	[[ $err -eq 0 ]] && techo $OK || techo -c warn $err errors
-#	return err
+	[[ -n $pnum ]] && pnum="[${pnum[2]}]" || pnum='[0-9]'
+	deviceMount -m $mnt ${dev}${~pnum}
 }
 
 #@TODO SD wrapper util
@@ -238,12 +219,17 @@ function sd()
 			;;
 	esac
 }
+
 function mountSD()
 {
 	local dev mnt p
-	zparseopts -D -M - m:=mnt
+	zparseopts -D -M - m:=mnt p:=p
 	dev=$(findSD -ld) || return
-	diskMount $dev ${mnt[2]:-${2:-/m/SD}}
+	if [[ -z $mnt ]]; then
+		isDir $1 && { mnt=(-m $1); shift } || mnt=(-m /m/SD)
+	fi
+	[[ -z $p && $# -gt 0 ]] && p=(-p "$*")
+	diskMount $p $mnt $dev
 }
 function deviceInfo()
 {
@@ -508,13 +494,13 @@ function unloop()
 {
     local loopNum devLoop devList
 	zparseopts -D -E -M -- i:=img -img:=i
-	if isLoop $1 && [[ -z $img ]]; then
-		loopNum=$1
-		isDevice $loopNum && devLoop=$loopNum || devLoop=/dev/loop$loopNum
-		#devLoop=$(isDevice $1) || devLopp=$(isDevice /dev/loop$1) ||
+	if devLoop=$(isLoop $1) && [[ -z $img ]]; then
+		loopNum=${1}
+		isDevice $1 && devLoop=$loopNum || devLoop=/dev/loop$loopNum
 	else
 		[[ -n $img ]] && img=$img[2] || img=$1
-		devLoop=$(losetup --all | grep $img | cut -d':' -f1)
+		[[ -b $devLoop ]] && loopNum=${devLoop#/dev/loop}
+		#devLoop=$(losetup --all | grep "^$img" | cut -d':' -f1)
 		[[ "$devLoop" =~ "loop([0-9]*)" ]] || return 1
 		loopNum=$match[1]
 	fi

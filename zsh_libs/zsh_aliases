@@ -293,17 +293,21 @@ function forvim()
 }
 function f()
 {
-	local d i s
-	zparseopts -D -E d:=d i=i s=s
+	local d i s p g
+	zparseopts -D - d:=d i=i s=s p=p g:=g
 	#if [ "${1:0:2}" = "-d" ]; then
 	#	d=${1:2}
 	#echo "d[]=>$d[1] $d[2] $d[3]"
 	[[ -n $s ]] && s="sudo"
-	[[ -n $d ]] && d="-maxdepth ${d[2]}"
+	[[ -n $d ]] && d[1]='-maxdepth'
 	[[ -n $i ]] && name="-iname" || name="-name"
-
+	#[[ $1 = - ]] && shift
 	#$s find ${=d} \( -path ./bckup_extensions -or -path ./extensions \) -prune -or $name $@ -print
-	$s find ${=d} $name $@ -print
+	
+	[[ -n $g ]] && {
+		$s find ${=d} $name $@ $p | group $g
+
+	} || $s find ${=d} $name $@ $p
 }
 function aldd() {
 	local R=$USER_HOME/clp
@@ -340,13 +344,14 @@ function ge()
 {
 	local sudo icase args in_exts ex_exts
 	zparseopts -D -E - i=icase s=sudo --exclude:=ex_exts
-	[ -n "$icase" ] && args+=('-i')
+	[[ -n $icase ]] && args+=('-i')
+	[[ -n $sudo ]] && sudo=sudo
 	IFS=',;:' read -rA in_exts <<<"$1"
 	shift
 	#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
 	[ "$#ex_exts" -gt 0 ] && args+=('--exclude=*.'${^ex_exts[@]})
 	args+=('--include=*.'${^in_exts[@]})
-	$sudo[2] grep --color -rn $args $@
+	$sudo grep --color -rn $args $@
 }
 function duh()
 {
@@ -377,85 +382,108 @@ function v()
 # Added 2019-01-10 11:26:22
 function extract_cpio_image()
 {
-    local ret name mime sourcedir imgfile=$(fullpath "$1") targetroot targetdir uncompressed tmp
-	sourcedir=$(getpath "$imgfile")
-	name=$(getfilename "$imgfile")
-    targetdir=${2:-$(noext "$imgfile")}
+    local ret name mime sourceDir imgfile=$(getfullpath "$1") targetroot targetDir uncompressed tmp
+	[[ -n $imgfile ]] || abort 1 "No image given"
+	[[ -s $imgfile ]] || { abort 127 "$imgfile: not found" ; return }
+	sourceDir=$(getpath "$imgfile")
+	name=${$(getfilename "${(L)imgfile}")#u}
+    targetDir=${2:-$PWD/$name}
     (
-		if [[ -f "$targetdir" ]]; then
-			techo -c warn "A file exists in place of target dir: \"$C[warn]$targetdir$C_\""
-			targetdir=$(input "Choose another path/filename" "$targetdir")
+		if [[ -f "$targetDir" ]]; then
+			# targetDir=${targetDir}
+			techo -c warn "A file exists in place of target dir: \"$C[warn]$targetDir$C_\""
+			return 1
+			#targetDir=$(input "Choose another path/filename" "$targetDir")
 		fi
 		
-		if [[ -d "$targetdir" ]] && ! isEmptyDir "$targetdir"; then
-			confirm "Dir $targetdir not empty. $C[lred]Remove files and continue" || { cancel ; return $? }
-			run -s rm -rf "$targetdir"/* || { abort $? ; return $? }
+		if [[ -d "$targetDir" ]]; then
+			isEmptyDir "$targetDir" || {
+				confirm "Dir $targetDir not empty. $C[lred]Remove files and continue" \
+					|| { cancel ; return }
+				run -s rm -rf "$targetDir"/* || { abort $? ; return }
+			}
 		else
-			run -s mkdir -p "$targetdir" || { abort $? ; return $? }
+			confirm Create dir '"$targetDir"' && \
+				run -s mkdir -p "$targetDir" || { abort $? ; return }
 		fi
-		uncompressed="$imgfile.uncompressed"
-		if [[ "$imgfile" -ot "$uncompressed" ]] && [[ -s "$uncompressed" ]] &&  \
-			! confirm -c warn "$uncompressed is newer than $imgfile.\n Overwrite it" ]]
-		then
-			{ cancel ; return $? }
-		fi
+		#uncompressed="$imgfile.cpio"
+		#if [[ "$imgfile" -ot "$uncompressed" ]] && [[ -s "$uncompressed" ]] && \
+		#	! confirm -c warn "$uncompressed is newer than $imgfile\nOverwrite it"
+		#then
+		#	{ cancel ; return }
+		#fi
 		mime=$(getmime "$imgfile")
+		tmp="$imgfile"
 		if [[ "$mime" == 'application/octet-stream' ]]; then
 			mime=$(file "$imgfile")
 			if [[ $mime =~ 'cpio archive' ]]; then
-				# already a cpio file
-				uncompressed="$imgfile"
+				uncompressed="$imgfile" # already a cpio file
 				tmp=
 			elif [[ $mime =~ 'u-boot' ]]; then
-				tmp="$sourcedir/$name.tmp.gz"
+				tmp="$sourceDir/$name.img.gz"
 				[[ -f "$tmp" ]] && rm -f "$tmp"
 				run -S -p 'U-Boot image detected. Extracting ramdisk.' \
 					dd if="$imgfile" of="$tmp" bs=64c skip=1
 				mime=$(getmime "$tmp")
 			fi
-		else
-			tmp="$imgfile"
 		fi
 		
+		techo cd $targetDir
+		cd $targetDir || return
 		if [[ -n "$tmp" ]]; then
 			if [[ "$mime" == 'application/gzip' ]]; then
-				zcat "$tmp" > "$uncompressed" || return $?
+				run -s -p "cpio: inflating $tmp -> $PWD/" \
+					cpio -idmv < <(run zcat "$tmp") || return
 			else
-				techo -c warn "$tmp is not a gzip (mime=$mime)"
+				abort 2 "$tmp is not a gzip (mime=$mime)"
 				return 1
 			fi
+		else
+			run -s -p "cpio: inflating $uncompressed -> $PWD/" \
+				cpio -idmv --file="$uncompressed" || return
 		fi
-
-		cd "$targetdir" && run -s cpio -idmv --file="$uncompressed" || { abort $? ; return $? }
-    ) && cd "$targetdir"
+    ) && cd $targetDir
 }
 function compress()
 {
-    local alg=$1
-    shift
+    local alg sudo
+	[[ $1 == -s ]] && { sudo=sudo ; shift }
+	alg=$1 ; shift
     case "$alg" in
         "gzip")
-            gzip -c < $1 > $2
+            $sudo gzip -c < $1 > $2
             ;;
 
         "lzo")
-            lzop $1 -o $2
+            $sudo lzop $1 -o $2
             ;;
 
         *)
-            minigzip < $1 > $2
+            $sudo minigzip < $1 > $2
             ;;
     esac
 }
 
 function compress_cpio_image()
 {
-    local sourcedir=$1 targetimg=$(fullpath ${2:-$1}".img") compalg=${3:-minizip}
-	#.. ${ANDROID_PRODUCT_OUT}/$name.img
-	(cd $sourcedir && \
-		sudo find | sudo cpio -ov -H newc -R root:root --file=${targetimg}.uncompressed && \
-			compress $compalg ${targetimg}.uncompressed $targetimg && \
-			mkimage -A arm -O linux -T ramdisk -d $targetimg $(getpath $targetimg)/uRamdisk)
+    local sourceDir targetImg imgName compalg ignore var
+	zparseopts -D - i:=ignore
+	sourceDir=$1 ; [[ -z $sourceDir || $sourceDir = . ]] && sourceDir=$PWD
+	targetImg=$(getfullpath "${2:-$sourceDir}.img")
+	targetDir=$(getpath $targetImg)
+	imgName=u${(C)$(getfilenoext $targetImg)}
+	compalg=${3:-mzip}
+	if [[ -n $ignore ]]; then
+		ignore=($(explode $ignore[2]))
+		ignore=('-path ./'${^ignore})
+		ignore="( ${(j. -o .)ignore} ) -prune -o -print"
+	fi
+	
+	(techo cd $sourceDir ; cd $sourceDir && run compress -s $compalg \
+		<(cpio -ov -H newc -R root:root < <(run -s find ${(z)ignore}) ) $targetImg
+	) &&
+		run mkimage -A arm -O linux -T ramdisk \
+			-d $(getfullpath -r=$PWD $targetImg) $(getfullpath -r=$PWD $targetDir/$imgName)
 }
 
 # Added 2019-01-11 16:33:46
@@ -627,3 +655,20 @@ function logs()
 {
 	tail logs/{api,debug}.txt -f &
 }
+
+# Added 2019-06-06 15:21
+function todo()
+{
+	# message syncDirs warn empty dirs
+}
+
+# Added 2019-06-07 17:27
+function fordo()
+{
+	local v
+	cmd=$1 ; shift
+	for v; do
+		run $cmd $v
+	done
+}
+

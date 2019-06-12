@@ -25,12 +25,15 @@ function techo() {
 function cancel() { abort 130 "Cancelled $@" }
 
 function abort() {
-	local cod=$1
-	[ $# -ge 1 ] && shift
-	[ $# -ge 1 ] && techo -c lred "$@"
+	local cod=$1 skipErrors noexception verbose
+	zparseopts -D - E=skipErrors e=noexception v:=verbose
+	verbose=${verbose[2]:-2}
+	[[ $# -ge 1 ]] && shift
+	[[ $# -ge 1 && $verbose -gt 0 ]] && techo -c lred "$@"
+	[[ -n $nostop ]] && return $cod
 	[[ "$ABORT" -gt 0 ]] && $ABORT $cod "$@" 
 	{ [ -z "$EXIT" ] || [ $EXIT -gt 0 ] } && [[ ! -o interactive ]] && exit $cod
-	throw $cod
+	[[ -z $noexception ]] && throw $cod
 	return $cod
 }
 # spaces 

@@ -34,7 +34,17 @@ function getfilenoext()
 
 function isDir()
 {
-	[[ -d $1 ]]
+	local dir mk
+	[[ $1 = -m ]] && { mk=1; shift }
+	dir=$1
+	if [[ ! -d $dir ]]; then
+		if [[ -e $dir ]]; then
+			techo -c err "$dir is a file."
+			return 2
+		fi
+		[[ -z $mk ]] && return 1
+		confirm "dir $dir doesn't exist. Create" && run -S mkdir $dir
+	fi
 }
 
 function isEmptyDir()
@@ -88,9 +98,9 @@ function rename()
 
 function ddiff()
 {
-	local dset list
-	zparseopts -D - s=dset l=list
-	if [[ -n $dset || -z $dir1 || -z $dir2 ]]; then
+	local list cmd file sudo config
+	zparseopts -D - c=config l=list s=sudo
+	if [[ -n $config || -z $dir1 || -z $dir2 ]]; then
 		[[ -n $1 ]] && { dir1=${1%/} ; shift }
 		[[ -n $1 ]] && { dir2=${1%/} ; shift }
 		#[[ -z $dir1 ]] && dir1=$(input -p "Dir 1" $dir1)
@@ -105,7 +115,17 @@ function ddiff()
 	fi
 
 	if [[ -d $dir1 && -d $dir2 ]]; then 
-		[[ -n $1 ]] && run -s diff -ur $dir1/$1 $dir2/$1 || run -s diff -ur $dir1 $dir2
+		if [[ -n $1 ]] && type $1 >/dev/null; then
+			cmd=$1
+			shift
+		fi
+		if [[ -z $cmd ]]; then
+			[[ -n $1 ]] && run $sudo -p "diff -ur \$d1/$1 \$d2/$1" diff -ur $dir1/$1 $dir2/$1 ||
+				run $sudo -p "diff -ur \$dir1 \$dir2" diff -ur $dir1 $dir2
+		else
+			[[ -n $1 ]] && run $sudo -p "${=cmd} \$dir1/$1 \$dir2/$1" $=cmd $dir1/$1 $dir2/$1 ||
+				run $sudo -p "${=cmd} \$dir1 \$dir2" $=cmd $dir1 $dir2
+		fi
 	fi
 }
 # Added 2019-05-03 16:50
@@ -153,7 +173,7 @@ function syncDirs()
 	# rsync arguments #    -O, --omit-dir-times  omit directories from --times
 	# # # # # # # # # #    -J, --omit-link-times
 	# [[ -n $fat ]]
-	rsArgs=( -hlDrpog )
+	rsArgs=( -hlDr )
 	if [[ -n $checksum ]]; then
 		rsArgs+=(-c --no-times)
 	else
@@ -167,6 +187,10 @@ function syncDirs()
 			if [[ -f "${src[$n]}/rsync.ignore" ]]; then
 				rsArgs+=(--exclude-from="${src[$n]}/rsync.ignore")
 			fi
+			if isEmptyDir $src[$n]; then
+				techo -c err "Empty directory$C_: $C[lred]$src[$n]"
+				return 1
+			fi
 			[[ ${src[$n]: -1} != / ]] && src[$n]+=/
 		fi
 	done
@@ -177,22 +201,13 @@ function syncDirs()
 	# Targets #
 	# # # # # #
 	for dir in $targets; do
-		if [ ! -d "$dir" ]; then # turn this into a function
-			if [ ! -e "$dir" ]; then
-				confirm "dir $dir doesn't exist. Create" && run $sudo mkdir $dir
-			else
-				techo -c err "$dir is a file. Skipping."
-				continue
-			fi
-		fi
-		if [ -d "$dir" ]; then
-			data="$(run $sudo rsync -ni ${rsArgs[@]} "$src[@]" "$dir")"
+		if isDir -m "$dir"; then
+			data="$(run $sudo rsync -nipog ${rsArgs[@]} "$src[@]" "$dir")"
 			if [ -n "$data" ]; then
 				echo $data
-				confirm "Do it" &&
-					run $sudo rsync --info=PROGRESS2 "$rsArgs[@]" "$src[@]" "$dir"
-					_sync
-	
+				confirm "Do it" && # run --confirm "Do it"
+					run $sudo rsync -pog --info=PROGRESS2 "$rsArgs[@]" "$src[@]" "$dir"
+				_sync
 			fi
 
 			# # # # # # #
