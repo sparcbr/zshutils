@@ -5,7 +5,7 @@ alias op="xdg-open"
 alias open="xdg-open"
 alias vmake="make SHELL='$$SHELL -x'"
 alias web="cd gp3320/app/bcm-webconf ; . venv/bin/activate ; ./webconf.py &"
-alias sv="sudo vim"
+alias sv="v -s"
 alias pytags="ctags -R --python-kinds=-i ."
 alias cfg="cd $CFG"
 alias s="sudo"
@@ -159,7 +159,7 @@ function mkscript()
 	fi
 
 	echo ${data}$'\n' >> $file
-	$isLib && source $file && { type $func ; which $func }
+	$isLib && source $file && { type $func ; which $func; }
 
 	# setup file
 	[[ -x "$file" || $isLib ]] || chmod +x $file
@@ -217,8 +217,8 @@ function edfunc()
 {
 	local arg
 	arg=($(type $1))
-	[[ $? -ne 0 ]] && { echo $arg; return 1 }
-	[[ "${arg[5]}" != "function" ]] && { echo "$1 is not a function:\n\t$arg"; return 2 }
+	[[ $? -ne 0 ]] && { echo $arg; return 1; }
+	[[ "${arg[5]}" != "function" ]] && { echo "$1 is not a function:\n\t$arg"; return 2; }
 	edalias "function $1\(\)" 2 ${arg[-1]}
 }
 comp+=("vw=exec")
@@ -229,7 +229,7 @@ function vw()
 	ret=`which $fpath`
 	if [ -f "$ret" ]; then
 		mime=$(getmime $fpath)
-		[[ "$mime" == "application/x-sharedlib" ]] && { echo "$fpath is binary executable" ; return 1 }
+		[[ "$mime" == "application/x-sharedlib" ]] && { echo "$fpath is binary executable" ; return 1; }
 		gvim $ret
 	else
 		ret=`which -w $@`
@@ -293,7 +293,7 @@ function forvim()
 }
 function f()
 {
-	local d i s p g
+	local d i s p g dir
 	zparseopts -D - d:=d i=i s=s p=p g:=g
 	#if [ "${1:0:2}" = "-d" ]; then
 	#	d=${1:2}
@@ -301,13 +301,20 @@ function f()
 	[[ -n $s ]] && s="sudo"
 	[[ -n $d ]] && d[1]='-maxdepth'
 	[[ -n $i ]] && name="-iname" || name="-name"
+	dir=()
+	while [[ -d $1 ]]; do
+		dir+=($1)
+		shift
+	done
+	if [[ -z $dir ]]; then
+		dir+=(.)
+	fi
 	#[[ $1 = - ]] && shift
 	#$s find ${=d} \( -path ./bckup_extensions -or -path ./extensions \) -prune -or $name $@ -print
 	
 	[[ -n $g ]] && {
-		$s find ${=d} $name $@ $p | group $g
-
-	} || $s find ${=d} $name $@ $p
+		$s find $dir ${=d} $name $@ $p | group $g
+	} || $s find $dir ${=d} $name $@ $p
 }
 function aldd() {
 	local R=$USER_HOME/clp
@@ -356,25 +363,30 @@ function ge()
 function duh()
 {
 	local sudo
-	[[ "$1" == '-s' ]] && { shift; sudo='sudo' }
+	[[ "$1" == '-s' ]] && { shift; sudo='sudo'; }
 	$sudo du -csh "$@" | sort -h
 }
+
+# call vim to each file:line argument
+# file1:l4 file2:l66 
 function v()
 {
-	local opt
+	local opt sudo
 	if [ "${1:0:1}" = "-" ]; then
-		opt=$1
+		if [[ $1 = -s ]]; then
+			sudo='sudo'
+		else
+			opt=$1
+		fi
 		shift
 	fi
-	# convert "filename:linenum" to "filename" "+linenum"
-	# file1:l4 file2:l66 
 	for arg; do
 		if [[ "$arg" =~ ":" ]]; then
 			line=+$(echo $arg | cut -d: -f2)
 			file=$(echo $arg | cut -d: -f1)
-			gvim $opt $line $file
+			$sudo gvim $opt $line $file
 		else
-			gvim $opt $arg
+			$sudo gvim $opt $arg
 		fi
 	done
 }
@@ -384,9 +396,9 @@ function extract_cpio_image()
 {
     local ret name mime sourceDir imgfile=$(getfullpath "$1") targetroot targetDir uncompressed tmp
 	[[ -n $imgfile ]] || abort 1 "No image given"
-	[[ -s $imgfile ]] || { abort 127 "$imgfile: not found" ; return }
+	[[ -s $imgfile ]] || { abort 127 "$imgfile: not found" ; return; }
 	sourceDir=$(getpath "$imgfile")
-	name=${$(getfilename "${(L)imgfile}")#u}
+	name=${$(getfilename "${(L)imgfile%.img}")#u}
     targetDir=${2:-$PWD/$name}
     (
 		if [[ -f "$targetDir" ]]; then
@@ -399,18 +411,18 @@ function extract_cpio_image()
 		if [[ -d "$targetDir" ]]; then
 			isEmptyDir "$targetDir" || {
 				confirm "Dir $targetDir not empty. $C[lred]Remove files and continue" \
-					|| { cancel ; return }
-				run -s rm -rf "$targetDir"/* || { abort $? ; return }
+					|| { cancel ; return; }
+				run -s rm -rf "$targetDir"/* || { abort $? ; return; }
 			}
 		else
 			confirm Create dir '"$targetDir"' && \
-				run -s mkdir -p "$targetDir" || { abort $? ; return }
+				run -s mkdir -p "$targetDir" || { abort $? ; return; }
 		fi
 		#uncompressed="$imgfile.cpio"
 		#if [[ "$imgfile" -ot "$uncompressed" ]] && [[ -s "$uncompressed" ]] && \
 		#	! confirm -c warn "$uncompressed is newer than $imgfile\nOverwrite it"
 		#then
-		#	{ cancel ; return }
+		#	{ cancel ; return; }
 		#fi
 		mime=$(getmime "$imgfile")
 		tmp="$imgfile"
@@ -447,7 +459,7 @@ function extract_cpio_image()
 function compress()
 {
     local alg sudo
-	[[ $1 == -s ]] && { sudo=sudo ; shift }
+	[[ $1 == -s ]] && { sudo=sudo ; shift; }
 	alg=$1 ; shift
     case "$alg" in
         "gzip")
@@ -515,66 +527,6 @@ function pbar()
 	else
 		return 1
 	fi
-}
-
-function tobin
-{
-    #@TODO pad to 8-multiple, sep 8-bit groups by space
-    printf "%08d" $(([##2]$1))
-}
-function tooct
-{
-    echo -n $(([##8]$1))
-}
-function tohex
-{
-    echo -n $(([##16]$1))
-}
-function chartoint()
-{
-    local i=`printf %3d \'"$1"`
-    #printf %d \'"$1""\n"
-    printf "$i 0x%2x %s\n" $i $(tobin $i)
-
-    # Bizarre:
-    # function chartoint()
-    # {
-    #     printf %d \'$1\n
-    # }
-    # Does not work for T: 
-    #   chartoint T
-    #   0
-
-    # Quoting the argument solves the problem:
-    #   printf %d \'"$1"\n
-    # function chartoint()
-    # {
-    #     printf %d \'$1\n
-    # }
-    # But directly on prompt without the function:
-    #   printf %d \'T
-    #   84
-    # Any other char works:
-    #   chartoint U
-    #   85
-    # Quoted works
-    #   chartoint 'T'
-    #   84
-    # works: for l in {A..Z}; do [[ "$l" == "T" ]] && e "Attention:"; echo -n "$l="; chartoint $l; echo ; done
-    #   
-    # What is this sorcery?
-}
-function hextochar()
-{
-    local i str
-	for ((i=0; i<$#1 ; i+=2)); do 
-		str+="\x${1:$i:2}"
-	done
-    printf "$str"
-}
-function inttochar()
-{
-    [[ $(ishex $1) ]] && hextochar $1 || printf "\\$(printf %o $1)"
 }
 
 # Added 2019-02-20 09:23:39 @TODO
@@ -653,18 +605,13 @@ function procmon()
 # Added 2019-04-11 01:43
 function logs()
 {
-	tail logs/{api,debug}.txt -f &
-}
-
-# Added 2019-06-06 15:21
-function todo()
-{
-	# message syncDirs warn empty dirs
+	tail {.,$(git root)}/logs/{api,debug}.txt -f &
 }
 
 # Added 2019-06-07 17:27
 function fordo()
 {
+	e FIXME
 	local v
 	cmd=$1 ; shift
 	for v; do

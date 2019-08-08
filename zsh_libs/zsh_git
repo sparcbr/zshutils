@@ -1,9 +1,9 @@
-VERSION=1.0.0
+VERSION=1.0.1
 
 export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 alias pull="git pull"
-alias push="git push"
+alias push="git push --tags"
 alias gdiff="git diff --ignore-space-at-eol -b -w --ignore-blank-lines --minimal"
 alias gadd="git add"
 alias gadd-modified="git add \$(git diff --name-only --relative)"
@@ -19,7 +19,16 @@ alias maquina="cd ~/MaquinaDeConversao/www/api.maquinadeconversao.com.br"
 alias idiomus="cd ~/xdata/idiomusAPI"
 alias q48="cd ~/Q48API"
 
-function gmergecheck()
+function gtag()
+{
+	local tag hash
+	echo TODO
+	return 1
+	hash=${2:-$(gselect -h)}
+	tag=$()
+	git tag -a $tag $hash
+}
+function gmerge()
 {
     local branch=${1:-$(chooser $(git branch))}
     [[ -n $branch ]] && run git merge $branch --no-ff --no-commit

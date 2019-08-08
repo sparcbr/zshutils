@@ -36,12 +36,33 @@ function abort() {
 	[[ -z $noexception ]] && throw $cod
 	return $cod
 }
-# spaces 
+
+function _test()
+{
+	local f="$1", test_f
+	test_f="_test_$f"
+	$test_f && techo "$f $OK" || {
+		techo "$f $FAIL"
+		yelp
+	}
+}
+
+function _test_explode()
+{
+	local a=()
+	a=($($1 'a;b' ';'))
+	[[ -n $a && $a[1] = 'a' && $a[2] = 'b' ]] || return false
+	a=($($1 'a  b ;; b' ';'))
+	[[ -n $a && $a[1] = 'a  b ' && -z $a[2] && $a[3] = ' b' ]] || return false
+	a=($($1 'a  b ;; b' ' '))
+	[[ -n $a && $a[1] = 'a' && $a[2] = 'b' && $a[3] = ';;' && $a[4] = 'b' ]] || return false
+	return true
+}
 function explode()
 {
-	local _sep=${2:-${sep:-" "}}
-	s=(${(pqs/$_sep/)${1//[[:space:]]##/\x20}})
-	[ -n "$3" ] && echo $s[$3] || echo "${s[@]}"
+	local _sep=${2:-${sep:- }} str=${1//[[:space:]]/¬}
+	s=(${(ps/$_sep/)str})
+	[ -n "$3" ] && echo "${s[$3]//¬/ }" || echo "${(@)s//¬/\\\x20}"
 }
 
 function debug()

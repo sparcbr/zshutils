@@ -83,28 +83,37 @@ function backup()
 #@TODO
 function rename()
 {
-	local name dir file
+	local name dir fullpath
 	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
 	name="$(getfilename "$1")"
-	dir="$(getpath "$1")"
+	dir="$(getpath $(getfullpath $1))"
+	fullpath="$dir/$name"
 	#usr/lib/arm-linux-gnueabihf/libXpm.so.4.11.0
 	#usr/lib/arm-linux-gnueabihf/libXtst.so.6.1.0
-	[[ -f "$1" || -d "$1" ]] || { color "$1 doesn't exist or no file permission"; return 1 }
+	[[ -f "$1" || -d "$1" ]] || { abort 127 "$1 doesn't exist or no file permission"; return }
 	#file=$(dialog --title "Rename" --yes-label Rename --output-fd 1 --inputbox "Rename $1 to: " 10 120 "$name")
-	file="$(input -p "Remame \"${C[warn]}$1${C[head]}\" to" $name)" || return $?
-	#read "file?Remame \"$1\" to" $name || return $?
-	run $sudo mv "$1" "$dir/$file"
+	#file="$(input -p "Remame \"${C[warn]}$1${C[head]}\" to" $name)" || return $?
+	# calling input in subshell doesn't work, vared complains
+	if input -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -s name && [[ -n $name ]]; then
+		run $sudo mv "$fullpath" "$dir/$name"
+	fi
 }
 
 function ddiff()
 {
-	local list cmd file sudo config
-	zparseopts -D - c=config l=list s=sudo
+	local list cmd file sudo config var
+	zparseopts -D - c=config l=list s=sudo i:=ignore #@TODO ignore
 	if [[ -n $config || -z $dir1 || -z $dir2 ]]; then
-		[[ -n $1 ]] && { dir1=${1%/} ; shift }
-		[[ -n $1 ]] && { dir2=${1%/} ; shift }
-		#[[ -z $dir1 ]] && dir1=$(input -p "Dir 1" $dir1)
-		#[[ -z $dir2 ]] && dir2=$(input -p "Dir 2" $dir2)
+		[[ -n $1 ]] && isDir $1 && { dir1=${1%/} ; shift }
+		[[ -n $1 ]] && isDir $1 && { dir2=${1%/} ; shift }
+		if [[ -z $dir1 ]]; then
+			input -p "Dir 1" -s var || return
+			isDir -m $var && dir1=$var || return
+		fi
+		if [[ -z $dir2 ]]; then
+			input -p "Dir 2" -s var || return
+			isDir -m $var && dir2=$var || return
+		fi
 		d1=$dir1 d2=$dir2
 		list=1
 	fi
@@ -133,10 +142,10 @@ function syncDirs()
 {
 	local integer i n
 	local src targets dir data rsArgs checksum arg
-	local quiet sudo ignores dry extraArgs reverse fat
+	local quiet sudo ignores dry extraArgs reverse
 	local files stat name
 	typeset -a src targets rsArgs extraArgs files
-	zparseopts -D -M - q=quiet s=sudo i:=ignores d=dry t:=targets c=checksum r=reverse -fat=fat
+	zparseopts -D -M - q=quiet s=sudo i:=ignores d=dry t:=targets c=checksum r=reverse
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	[[ $# -ge 2 ]] || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
@@ -172,7 +181,6 @@ function syncDirs()
 	# # # # # # # # # #	   -t, --times           preserve modification times
 	# rsync arguments #    -O, --omit-dir-times  omit directories from --times
 	# # # # # # # # # #    -J, --omit-link-times
-	# [[ -n $fat ]]
 	rsArgs=( -hlDr )
 	if [[ -n $checksum ]]; then
 		rsArgs+=(-c --no-times)
@@ -183,7 +191,7 @@ function syncDirs()
 	rsArgs+=(--exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*')
 	[[ -n $ignores ]] && rsArgs+=(--exclude-from="${ignores[2]}")
 	for ((n=1; n<=$#src; n++)); do
-		if isDir "${src[$n]}"; then
+		if [[ -d "${src[$n]}" ]]; then
 			if [[ -f "${src[$n]}/rsync.ignore" ]]; then
 				rsArgs+=(--exclude-from="${src[$n]}/rsync.ignore")
 			fi
@@ -194,19 +202,25 @@ function syncDirs()
 			[[ ${src[$n]: -1} != / ]] && src[$n]+=/
 		fi
 	done
+	
+	techo -c lcyan "Sources: ${src[@]}"
+	techo -c lcyan "Targets: ${targets[@]}"
+
 	# rsync arguments from command line
 	rsArgs+=("${extraArgs[@]}")
-
 	# # # # # #
 	# Targets #
 	# # # # # #
+	local nothing=1 permFlags
 	for dir in $targets; do
 		if isDir -m "$dir"; then
-			data="$(run $sudo rsync -nipog ${rsArgs[@]} "$src[@]" "$dir")"
+			[[ "$(fstypeof $dir)" != "vfat" ]] && permFlags='-pog'
+			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" "$dir")"
 			if [ -n "$data" ]; then
+				nothing=0
 				echo $data
 				confirm "Do it" && # run --confirm "Do it"
-					run $sudo rsync -pog --info=PROGRESS2 "$rsArgs[@]" "$src[@]" "$dir"
+					run $sudo rsync --info=PROGRESS2 "$rsArgs[@]" $permFlags "$src[@]" "$dir" || abort
 				_sync
 			fi
 
@@ -214,9 +228,10 @@ function syncDirs()
 			# Deletions #
 			# # # # # # #
 			data="$(run $sudo rsync -ni --delete --existing --ignore-existing \
-				-JO ${rsArgs[@]} $src[@] $dir)"
+				-JO ${rsArgs[@]} $src[@] $dir)" || abort
 
 			if [[ -n "$data" ]]; then
+				nothing=0
 				techo -c warn "Deletions:"
 				n=0
 				echo $data | while read stat name; do
@@ -227,11 +242,13 @@ function syncDirs()
 				confirm -c warn "Delete these $n files" || continue
 				#@TODO rm $(chooser "$files[@]")
 				run $sudo rsync --delete --existing --ignore-existing \
-					--info=PROGRESS2 "$rsArgs[@]" "$src[@]" "$dir"
+					--info=PROGRESS2 "$rsArgs[@]" "$src[@]" "$dir" || abort
 				_sync
 			fi
 		fi
 	done
+	[[ $nothing -eq 1 ]] && techo -c cyan "Nothing to do"
+	return 0
 }
 
 # Added 2019-01-22 18:07:09 @TODO
@@ -281,12 +298,11 @@ function attributeSync()
 			$dry sudo chown --reference "$dir1/$name" $dir2/$name
 		fi
 	done < <(run -s rsync -n -hDirtpog $rsArgs $dir1/ $dir2 | tee $TTY)
-	sync
+	_sync
 }
 
 function _sync() {
-	local pid
-	techo "Flushing caches to disk. Please wait."
-	run sync & pid=$!
-	watch -n 1 -c -t  "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
+	run -w "isDirty" -p "Flushing caches to disk. Please wait." sync
+	
+	#watch -n 1 -c -t  "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
 }

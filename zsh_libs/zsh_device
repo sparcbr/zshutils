@@ -24,7 +24,7 @@ function lspart()
 
 function sizeToKb()
 {
-	echo "$1" | sed 's/G/ * 1024 M/i;s/M/ * 1024 K/i;s/K//i' | bc
+	echo "$1" | sed 's/Gb\?/ * 1024 M/i; s/Mb\?/ * 1024 K/i; s/Kb\?//i' | bc
 }
 
 function sizeCompare()
@@ -43,8 +43,8 @@ function labelof()
 function deviceMount()
 {
 	local integer ret err=0 i
-	local var dev devs mnt baseMnt
-	zparseopts -D -M - m:=baseMnt
+	local var dev devs mnt baseMnt remount
+	zparseopts -D -M - m:=baseMnt r=remount
 	[[ -n "$1" ]] || return 1
 	[[ -n $baseMnt ]] && baseMnt=$baseMnt[2] || baseMnt=/m
 	
@@ -67,7 +67,7 @@ function deviceMount()
 		dev=$devs[1]
 		var=$(isDeviceMounted "$dev" "$mnt")
 		ret=$?
-		[[ $ret -eq 2 ]] && return 0
+		[[ $ret -ne 2 || -n $remount ]] || return 0
 		if [[ $ret -eq 0 ]]; then
 			techo -c red "$dev already mounted ($var)"
 			confirm Remount on $mnt && deviceUnmount $dev || return 0
@@ -211,11 +211,12 @@ function diskMount()
 # ALLMOUNTS: all mounted
 function sd()
 {
-	local status cmd
-	status=SOMEMOUNTS
-	case "$status" in
+	local stat cmd
+	sdDev=$(findSD -ld) || return
+	stat=SOMEMOUNTS
+	case "$stat" in
 		(SOME|ALL)MOUNTS)
-			run -s umount
+			mountSD $sdDev
 			;;
 	esac
 }
@@ -224,7 +225,11 @@ function mountSD()
 {
 	local dev mnt p
 	zparseopts -D -M - m:=mnt p:=p
-	dev=$(findSD -ld) || return
+	if [[ -n $1 ]] && isSD $1; then
+		dev=$1 ; shift
+	else
+		dev=$(findSD -ld) || return
+	fi
 	if [[ -z $mnt ]]; then
 		isDir $1 && { mnt=(-m $1); shift } || mnt=(-m /m/SD)
 	fi
@@ -233,21 +238,26 @@ function mountSD()
 }
 function deviceInfo()
 {
-	local ret columns hotplug diskOnly args all short type data mounted
-	zparseopts -D -M - h=hotplug d=diskOnly a=all \
-		s=short -short=s t:=type -type:=t \
-		o:=columns m=mounted
+	local ret columns hotplug diskOnly args
+	local all short type data mounted mpat
+	zparseopts -D -M - h=hotplug d=diskOnly a=all m=mounted \
+		s=short -short=s t:=type -type:=t o:=columns u=mounted
 
 	if [[ -n $columns ]]; then
 		columns=(TYPE $(explode $columns[2] ','))
-		[[ -n $mounted && -z ${mounted[(i)MOUNTPOINT} ]] && columns+=(MOUNTPOINT)
 	else
 		columns=(TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT)
 		if [[ -z "$short" ]]; then
 			columns+=(STATE VENDOR MODEL SERIAL HOTPLUG RM)
-		elif [[ -n "$hotplug" ]]; then
-			columns+=(HOTPLUG RM)
 		fi
+	fi
+
+	if [[ -n $mounted && ${columns[(i)MOUNTPOINT]} -gt $#columns ]]; then
+		columns+=(MOUNTPOINT)
+	fi
+
+	if [[ -n $hotplug && ${columns[(i)HOTPLUG]} -gt $#columns ]]; then
+		columns+=(HOTPLUG RM)
 	fi
 
 	args=($all $diskOnly --include 8 -o ${(j.,.)columns} --noheadings --pairs)
@@ -256,15 +266,24 @@ function deviceInfo()
 	[[ -n "$diskOnly" ]] && type=disk || type=$type[2]
 	[[ -n "$hotplug" ]] && data=$(egrep 'HOTPLUG="1" RM="1"' <<<$data)
 	[[ -n "$type" ]] && data=$(egrep '^TYPE="'$type'"' <<<$data)
-	[[ -n "$mounted" ]] && data=$(egrep -o 'MOUNTPOINT=".+"' <<<$data)
-
+	if [[ -n "$mounted" ]]; then
+		[[ $mounted == '-m' ]] && mpat='.+'
+		data=$(egrep -o "MOUNTPOINT=\"$mpat\"" <<<$data)
+	fi
 	echo "$data"
 	return $ret
 }
 
+SDCARDSIZELIMIT='32G'
 function isSD()
 {
-	[[ -n "$1" ]] && [[ -b "$1" ]] && sudo fdisk -s "$1" >/dev/null 2>&1
+	local size=$2
+	[[ -z $1 || ! -b $1 ]] && return 1
+	[[ -z $2 ]] && size=$(sudo blockdev --getsz $1 2>/dev/null) || return
+	[[ $(sizeCompare "$size /2" $SDCARDSIZELIMIT) -le 0 ]]
+	#@techo -c warn "if this is a mistake, setup a new size limit"
+	#input -e '[[:digit:]][MG]' -p "Enter new size limit for SD cards" var
+	#config set SDCARDSIZELIMIT $var
 }
 
 function findSD()
@@ -286,7 +305,6 @@ function findSD()
 			techo -c err 'No removable devices found'
 			continue
 		fi
-		SDCARDSIZELIMIT='32G'
 		i=1
 		found=()
 		for line in $disks; do
@@ -320,8 +338,7 @@ function findSD()
 	techo -c ok SD=$sdDev
 	SDDEV=$sdDev
 	echo $sdDev
-	var=${sdDev#/dev/}
-	[ -z "$diskOnly" ] && echo "$(deviceInfo -st part $sdDev)"
+	[[ -z $diskOnly ]] && echo "$(deviceInfo -st part $sdDev)"
 	return 0
 
 		#if [[ "$CURRENTSDINFO" != "$var" ]]; then
@@ -374,6 +391,10 @@ function isDevice()
 		getfullpath $dev
 		return
 	fi
+	if [[ -f $dev ]]; then # file
+		echo $dev
+		return 1
+	fi
 	if isDir $dev || [[ ${dev:0:1} = / ]]; then # not a device
 		echo $dev
 		return 1
@@ -403,10 +424,10 @@ function mntof()
 function isDeviceMounted()
 {
 	local mnt="$(mntof $1)" 
-	[[ -z "$mnt" ]] && return 1
-	[[ -n "$2"  && "$mnt" = "$(getfullpath "$2")" ]] && return 2 # 0
+	[[ -z "$mnt" ]] && return 1 # not mounted
+	[[ -n "$2"  && "$mnt" = "$(getfullpath "$2")" ]] && return 2 # mounted already on right place
 	echo $mnt
-	return 0
+	return 0 # mounted
 }
 
 function deviceof()
@@ -417,13 +438,19 @@ function deviceof()
 		loopof $1
 	fi
 }
+
+function fstypeof()
+{
+	df --output=fstype "$1" | tail +2
+}
+
 function isDirMounted()
 {
 	local dev=$(deviceof "$1")
-	[[ -z "$dev" ]] && return 1
-	[[ "$dev" = "$2" ]] && return 2 #0
+	[[ -z "$dev" ]] && return 1 # mounted on wrong place
+	[[ "$dev" = "$2" ]] && return 2 # mounted on right place
 	echo $dev
-	return 0
+	return 0 # mounted
 }
 # take a mount dir, loop device or loop number
 # $1: dir|[[/dev/]loop]N
@@ -444,9 +471,36 @@ function imageof()
 	losetup $loopdev -O BACK-FILE --noheadings
 }
 
-comp+=(imgMount='loop mount' image='loop mount')
-alias imgMount='loop mount'
-alias image='loop mount'
+comp+=(image='imageMount')
+alias image='imageMount'
+function imageMount()
+{
+	local img dir var dev
+	if [[ $# -ne 2 ]]; then
+		echo Usage: $0 imageFile mountDir
+		return 1
+	fi
+	img=$1 ; dir=$2
+	if [[ ! -f $1 ]]; then
+		techo -c lred "$1: file not found"
+		return 1
+	fi
+	isDir -m $dir || return 1
+	if dev=$(isDirMounted $dir); then
+		if var=$(isLoop $dev); then
+			var=$(imageof $var)
+			[[ $? -ne 0 || $var == $img ]] && return 0
+			techo -c warn "$dir already mounted ($dev $var)"
+			confirm "Unmount $dev" || return
+			unloop $dev || abortDevError MNTBUSY "$dir ($dev)"
+		else
+			techo -c warn "$dir already mounted ($dev)"
+			confirm "Unmount $dev" || return
+			deviceUnmount $dev || abortDevError MNTBUSY "$dir ($dev)"
+		fi
+	fi
+	run -s mount -o loop $img $dir
+}
 function loop()
 {
 	local cmd=$1 img dir var dev
@@ -454,45 +508,18 @@ function loop()
 	shift
 	case $cmd in
 	mount)
-		if [[ $# -ne 2 ]]; then
-			echo Usage: $0 loop mount imageFile mountDir
-			return 1
-		fi
-		img=$1 ; dir=$2
-		if [[ ! -f $1 ]]; then
-			techo -c lred "$1: file not found"
-			return 1
-		fi
-		if ! isDir $dir && [[ ! -e $dir ]]; then
-			confirm Create dir $dir && run -S mkdir $dir || return
-		else
-			if dev=$(isDirMounted $dir); then
-				if var=$(isLoop $dev); then
-					var=$(imageof $var)
-					if [[ $? -eq 0 && $var != $img ]]; then
-						techo -c warn "$dir already mounted ($dev $var)"
-						confirm "Unmount $dev" || return
-						unloop $dev || abortDevError MNTBUSY "$dir ($dev)"
-					else
-						return 0
-					fi
-				else
-					techo -c warn "$dir already mounted ($dev)"
-					confirm "Unmount $dev" || return
-					deviceUnmount $dev || abortDevError MNTBUSY "$dir ($dev)"
-				fi
-			fi
-		fi
-		run -s mount -o loop $img $dir
+		imageMount "$@"
 	;;
 	*)
+		imageof $1
+		mntof $1
 	;;
 	esac
 }
 # Added 2019-03-01 15:48
 function unloop()
 {
-    local loopNum devLoop devList
+    local loopNum devLoop devList img
 	zparseopts -D -E -M -- i:=img -img:=i
 	if devLoop=$(isLoop $1) && [[ -z $img ]]; then
 		loopNum=${1}

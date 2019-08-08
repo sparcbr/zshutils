@@ -1,4 +1,4 @@
-VERSION=1.0
+VERSION=1.0.3
 # databases data dir
 DB_DATA_DIR=/var/lib/mysql
 
@@ -21,42 +21,45 @@ function mklist()
 	first=$1
 	list=($1)
 	shift
-	for i; do
-		[[ "$i" != "$first" ]] && list+=($i)
-	done
-	echo ${list[@]}
+	for i; do [[ "$i" != "$first" ]] && list+=($i) ; done
+	echo "${list[@]}"
 }
-
+sqlPass='my7866'
 # execute mysql command
-# usage: sql [-d mydatabase] 'SELECT * FROM table1'
+# sql [-d dbname] [-f file.sql] SELECT ...
 function sql()
 {
-	if [[ "$1" == "-d" ]]; then
-		usedb $2
-        shift 2
-	elif [[ "$1" == "-n" ]]; then
-		shift
+	local file name sql nodb verbose pass silent
+	zparseopts -D - f:=file d:=name n=nodb v=verbose p:=pass s=silent
+	pass="${pass[2]:-$sqlPass}"
+	[[ -n $nodb ]] || usedb $name[2]
+	if [[ -n $file ]]; then
+		file=$file[2]
+		# [[ $file size greater than X lines ]] && 
+			#  run mysqlimport -u $user -p$pass ql $db
+			#  return
+		sql=$(<$file)
 	else
-        #dbname=${${dbname:-$(proj get dbname)}}
-		usedb
+		sql="$*"
 	fi
-	mysql -u root -pmy7866 -e "$*" $db
+
+	mysql $silent -u root -p$pass -e $sql $db
 }
+
 function isdb()
 {
 	[[ -n "$1" ]] && [[ -d "$DB_DATA_DIR/$1" ]]
 }
+
 function usedb()
 {
-	isdb $db && return
+	#${${dbname:-$(proj get dbname)}}
+	[[ $1 == '-s' ]] && { db= ; shift }
 	if [ $# -gt 0 ]; then
-		db=$1
-	else
-		[[ -n $DBNAME ]] && isdb $DBNAME && return
-		db=$dbname
+		isdb $1 && db=$1 || abort "$1: database not found"
+	elif [[ -z $db ]]; then
+		db=$(chooser $(mklist $DBNAME $(dblist)))
 	fi
-	db=$(zsh-select $(mklist $db $(dblist)))
-	dbname=$db
 }
 function dblist()
 {
@@ -70,9 +73,7 @@ function istable()
 }
 function tablelist()
 {
-	local args
-	[[ $1 == '-d' ]] && usedb $2 && shift 2
-	sql $args 'show tables' | tail -n +2
+	sql 'show tables' | tail -n +2
 }
 
 function gettable()
@@ -83,20 +84,19 @@ function gettable()
 
 function tableshow()
 {
-	local tblname args t
+	local tblname args t result
 	if [[ "$1" == "-d" ]]; then
-		usedb $2 || return
+		usedb $2
 		shift 2
 	else
-		usedb || return
+		usedb
 	fi
 	[[ "$1" == '-t' ]] && { shift; t=1 }
 	tblname=$(gettable $1)
 	if [[ -n "$t" ]]; then
 		sql "describe $tblname"
 	else
-		echo "CREATE TABLE $tblname ("
-		echo $(sql show create table "$tblname" | tail -n +2) | tail -n +2
+		echo $(tail -n +2 <(sql "show create table $tblname") | cut -f2-)
 	fi
 }
 
@@ -104,20 +104,20 @@ function tableshow()
 # usage: dbsize mydatabase
 function dbsize()
 {
-	sql 'SELECT table_name AS "Table Name", ROUND(((data_length + index_length) / 1024 / 1024), 2) AS "Size in (MB)" FROM information_schema.TABLES WHERE table_schema = "'$1'" ORDER BY (data_length + index_length)'
+	usedb "$@"
+	sql -n 'SELECT table_name AS "Table Name", ROUND(((data_length + index_length) / 1024 / 1024), 2) AS "Size in (MB)" FROM information_schema.TABLES WHERE table_schema = "'$db'" ORDER BY (data_length + index_length)'
 }
 
 # Added 2019-03-23 23:36
 function sqldbdump()
 {
-	[ $# -gt 1 ] && { echo "Usage: $0 database_name"; return }
-	dbname=${1:-${DBNAME:-$(usedb $dbname)}}
-	if [[ -f "$dbname.sql.bkup" ]]; then
-		techo -c warn "Saving backup $dbname.sql.bkup"
-		mv $dbname.sql $dbname.sql.bkup
+	usedb "$@"
+	if [[ -f "$db.sql.bkup" ]]; then
+		techo -c warn "Saving backup $db.sql.bkup"
+		mv $db.sql $db.sql.bkup
 	fi
-	mysqldump $dbname --no-data --single-transaction --skip-add-drop-table | \
+	mysqldump $db --no-data --single-transaction --skip-add-drop-table | \
 		sed -e 's/ AUTO_INCREMENT=[0-9]*\b//g' | \
-		grep -v '^\/\*![0-9]\{5\}.*character_set_client.*\/;$' > $dbname.sql
+		grep -v '^\/\*![0-9]\{5\}.*character_set_client.*\/;$' > $db.sql
 }
-
+DBNAME=idiomus

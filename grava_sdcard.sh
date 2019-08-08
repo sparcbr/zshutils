@@ -2,10 +2,12 @@
 # Format an SD card for Android on BeagleBone Black
 
 setopt extendedglob pipefail nomultios
-cd $(dirname "$0")
-if [ -z "$ZSH_MAIN_VERSION" ] || [ -z "$ZSH_LIBS" ]; then
+#cd $(dirname "$0")
+cd $HOME/PeD/android
+
+if [ -z "$ZSH_MAIN_VER" ] || [ -z "$ZSH_LIBS" ]; then
 	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS=$PWD
-	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; exit 127 }
+	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; set +x; exit 127 }
 fi
 
 include -r functions || exit 127
@@ -36,13 +38,16 @@ function umountAll()
 
 function makeExt4()
 {
-	local device
+	local device features='^64bit'
 	device=$1
 	label=$2
 	#androidmnt=$3
 	#size=$4
 	#[[ -n $size ]] || { echo size error ; exit 1 }
-	run -s mkfs.ext4 -L $label -O '^metadata_csum,^64bit' $device
+	if grep -q "metadata_csum" /etc/mke2fs.conf; then
+		features+=",^metadata_csum"
+	fi
+	run -s mkfs.ext4 -L $label -O $features $device
 
 	#./mkuserimg.sh $srcdir $outimgfile ext4 $androidmnt $size
 	#SRC_DIR OUTPUT_FILE EXT_VARIANT MOUNT_POINT SIZE
@@ -83,14 +88,14 @@ function makePartitions()
 	local sizes devname
 	devname=$1 ; shift
 	sizes=($*)
-	run -s sfdisk $devname << EOF
-,${sizes[1]},0x0c,*
-,${sizes[2]},,,
-,${sizes[3]},,,
-,${sizes[4]},,,
-EOF
+	run -s sfdisk $devname <<- EOF
+		,${sizes[1]},0x0c,*
+		,${sizes[2]},,,
+		,${sizes[3]},,,
+		,${sizes[4]},,,
+	EOF
 
-	run sync
+	_sync
 	#sleep 1
 	#@ sudo partprobe $devname
 
@@ -100,60 +105,57 @@ EOF
 
 function copy_from_dir()
 {
-	local from_dir sd_part err perms sdmnt
+	local from_dir sd_part err sdmnt
 	from_dir=$1 ; sd_part=$2
-	[ "$3" = "ext" ] && perms='-a' || perms='-rv'
 	sdmnt='mnt/sdpart'
 	{
-		run -s mount $sd_part $sdmnt || throw $?
-		syncDirs "$from_dir" "$sdmnt" $3 || throw $?
+		deviceMount $sd_part $sdmnt || throw $?
+		syncDirs -s $dryrun "$from_dir" "$sdmnt" || throw $?
 	} always {
-		run -p "Umounting $sd_part" deviceUnmount $sd_part
+		#DEBUG=1 run -p "Umounting $sd_part" deviceUnmount $sd_part
+		echo "return=$?"
 		if catch '*'; then
 			[ "$CAUGHT" -eq 130 ] && cancel $CAUGHT
+			set +x
 			return $CAUGHT
 		fi
+		set +x
+		return 0
 	}
 }
 
 function copy_from_image()
 {
-	local from_img sddev err imgmnt sdmnt
+	local from_img sddev err imgmnt sdmnt ret
 	from_img=$1 ; sddev=$2
 	imgmnt='mnt/image' ; sdmnt='mnt/sdpart'
 	
 	{
-		if ! isDeviceMounted $from_img; then
-			run -s mount -o loop $from_img $imgmnt || throw $?
-		fi
-
-		deviceUnmount $sddev || throw "$? deviceUnmount $sddev"
-		dirUnmount $sdmnt || throw "$? dirUnmount $sdmnt"
-		run -s mount $sddev $sdmnt || throw $?
-		syncDirs "$imgmnt" "$sdmnt" $3 || throw $?
+		imageMount $from_img $imgmnt || throw $?
+		deviceMount $sddev $sdmnt || throw $?
+		syncDirs -s "$imgmnt" "$sdmnt" || throw $?
 	} always {
 		local ret cmd print
 		unloop --img $from_img
-		run -p "Umounting $sddev" deviceUnmount $sddev
+		deviceUnmount $sddev
 		if catch '*'; then
 			CAUGHT=($=CAUGHT)
 			ret=$CAUGHT[1]
-			[ "$ret" -eq 130 ] && cancel ${CAUGHT:1}
+			[[ $ret -eq 130 ]] && cancel ${CAUGHT:1}
 			techo -c err ${CAUGHT:1} $FAIL
 			return $CAUGHT
 		fi
 	}
 }
 
-function syncDirs()
-{
-	local perms dryrun info from="$1" to="$2"
-	zparseopts -M -D - n=dryrun q=quiet 
-	[ "$3" = "ext" ] && perms='-a' || perms='-r'
-	[ -z "$quiet" ] && info='--info=progress2'
-	run -s rsync $dryRun $perms -chil $info --delete $from/ $to && \
-		run -c warn -p "Flushing caches to disk. Please wait." sync
-}
+#function syncDirs()
+#{
+#	local perms dryrun info from="$1" to="$2"
+#	zparseopts -M -D - n=dryrun q=quiet 
+#	[ "$3" = "ext" ] && perms='-a' || perms='-r'
+#	[ -z "$quiet" ] && info='--info=progress2'
+#	run -s rsync $dryRun $perms -chil $info --delete $from/ $to && _sync
+#}
 
 #srcdir=$1 ; outimgfile=$2 ; androidmnt=$3
 #size=${4:-$(ls -l $1.img | cut -f5 -d' ')}
@@ -273,8 +275,9 @@ else
 fi
 dir=${IMAGES_DIR}/$name
 techo -c warn "Copying $name data to SD ($dir => $part)"
-copy_from_dir $dir $part fat || abort
+copy_from_dir $dir $part || abort
 #run -s mkimage -A arm -O linux -T ramdisk -d ${IMAGES_DIR}/ramdisk.img uRamdisk
+
 ##########
 # System #
 ##########
@@ -320,7 +323,7 @@ fi
 ##########
 # Ending #
 ##########
-sync
+_sync
 
 techo -c ok "SUCCESS! SD card written"
 if confirm "Eject SD card"; then
