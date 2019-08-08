@@ -26,3 +26,62 @@ function waitOnPids()
 	done
 	return $err
 }
+
+# If not given a pid, run command in background
+# Check command (-c): run periodically a command until main program ends
+function waitPid()
+{
+	local ret pid cmd retCheck=2 checkCmd delay=0.4 killSent
+	integer ret=0 pid killSent=0
+	zparseopts -D - p:=pid c:=checkCmd d:=delay
+	cmd=(${(z)@})
+	[[ -n $checkCmd ]] && checkCmd=(${(z)checkCmd})
+	$cmd & pid=$!
+	while kill -0 $pid 2>/dev/null; do
+		sleep $delay
+		if [[ -n $checkCmd ]]; then
+			if [[ "$killSent" -gt 3 ]]; then
+				confirm "Force kill $cmd" && kill -9 $pid && break ||
+					killSent=0
+			fi
+			$checkCmd ; ret=$?
+			if [[ -n $retCheck && $ret -gt $retCheck ]]; then
+				techo -c warn "Killing ${cmd[1]} ($pid)"
+				kill $pid ; sleep 1
+				((killSent++))
+			fi
+		fi
+	done
+	wait $pid
+}
+
+function dirtyMem()
+{
+	local name number
+	while read name number; do
+		if [[ $name = Dirty: ]]; then
+			toBytes -k "$number"
+			break
+		fi
+	done < /proc/meminfo
+}
+
+# Added 2019-07-01 16:59
+function k()
+{
+	local kopts arg args forceProcName
+	for arg; do
+		if [[ ${arg:0:1} = '-' ]] && [[ $arg = -[0-9]## || ${arg:0:4} = '-sig' ]]; then
+			kopts+=($arg)
+		else
+			args+=($arg)
+		fi
+	done
+	set - $args
+	zparseopts -M -D - f:=forceProcName
+	if [[ $1 = [0-9]## ]]; then
+		sudo kill "$@"
+	else
+		sudo killall "$@"
+	fi
+}

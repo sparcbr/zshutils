@@ -1,0 +1,75 @@
+#!/bin/zsh
+VERSION=1.0.0
+
+#function tobin()
+#{
+#    #@TODO pad to 8-multiple, sep 8-bit groups by space
+#    printf "%08d" $(([##2]$1))
+#}
+#function tooct()
+#{
+ #   echo -n $(([##8]$1))
+#}
+#function tohex()
+#{
+#    echo -n $(([##16]$1))
+#}
+function chartoint()
+{
+    local i=`printf %3d \'"$1"`
+    #printf %d \'"$1""\n"
+    printf "$i 0x%2x %s\n" $i $(tobin $i)
+
+    # Bizarre:
+    # function chartoint()
+    # {
+    #     printf %d \'$1\n
+    # }
+    # Does not work for T: 
+    #   chartoint T
+    #   0
+
+    # Quoting the argument solves the problem:
+    #   printf %d \'"$1"\n
+    # function chartoint()
+    # {
+    #     printf %d \'$1\n
+    # }
+    # But directly on prompt without the function:
+    #   printf %d \'T
+    #   84
+    # Any other char works:
+    #   chartoint U
+    #   85
+    # Quoted works
+    #   chartoint 'T'
+    #   84
+    # works: for l in {A..Z}; do [[ "$l" == "T" ]] && e "Attention:"; echo -n "$l="; chartoint $l; echo ; done
+    #   
+    # What is this sorcery?
+}
+function hextochar()
+{
+    local i str
+	for ((i=0; i<$#1 ; i+=2)); do 
+		str+="\x${1:$i:2}"
+	done
+    printf "$str"
+}
+function inttochar()
+{
+    [[ $(ishex $1) ]] && hextochar $1 || printf "\\$(printf %o $1)"
+}
+
+function toBytes()
+{
+	local integer factor=1
+	if [[ $1 = -k ]]; then
+		((factor=1024)) ; shift
+	elif [[ $1 = -m ]]; then
+		((factor=1024*1024)) ; shift
+	fi
+	[[ $1 =~ [0-9]
+	calc
+
+}

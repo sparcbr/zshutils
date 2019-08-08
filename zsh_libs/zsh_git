@@ -3,14 +3,13 @@ VERSION=1.0.1
 export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 alias pull="git pull"
-alias push="git push --tags"
+alias push="gpush"
 alias gdiff="git diff --ignore-space-at-eol -b -w --ignore-blank-lines --minimal"
 alias gadd="git add"
 alias gadd-modified="git add \$(git diff --name-only --relative)"
 alias gshow="git show"
 alias gunstage="git reset HEAD --"
 alias unstage="git reset HEAD --"
-alias gfollow="git log --follow"
 alias git_get_tag='git describe --tags $(git rev-list --tags --max-count=1)'
 alias gchk='git checkout'
 alias glog2='git log --date=iso -g'
@@ -18,6 +17,16 @@ alias glog2='git log --date=iso -g'
 alias maquina="cd ~/MaquinaDeConversao/www/api.maquinadeconversao.com.br"
 alias idiomus="cd ~/xdata/idiomusAPI"
 alias q48="cd ~/Q48API"
+
+function gfollow()
+{
+	local hash diff log
+	zparseopts -M -D - d=diff -diff=d
+	log=$(egrep '^commit' <(git log --follow "$@") | awk '{print $2}')
+	for hash in $log; do
+		gdiff  $hash -- "$@" | more
+	done
+}
 
 function gtag()
 {
@@ -51,7 +60,14 @@ function ggrep()
 }
 function commit()
 {
-	git commit -m "$*"
+	local m args
+	zparseopts -D -M - m:=m
+	if [[ -n "$1" && ${1:0:1} != - ]]; then
+		m=(-m "$*")
+	else
+		args="$@"
+	fi
+	git commit $m $args
 }
 function croot()
 {
@@ -95,4 +111,32 @@ function gselect()
 	done
 	chooser -n "$noSelect" -R '([a-f0-9]{5,40} .*)' "$lines[@]"
     #line=(${=line##[^a-f0-9]#})
+}
+
+function gpush()
+{
+	local remote
+	if ! git push "$@"; then
+		remote=${1:-$VCS_STATUS_REMOTE_NAME}
+		[[ -z $remote ]] && gremote
+		branch=${2:-$VCS_STATUS_LOCAL_BRANCH}
+		[[ -z $branch ]] && gbranch
+		git push --set-upstream $remote[1] $branch
+	fi
+}
+
+function gbranch()
+{
+	#local current
+	#zparseopts c=current
+	
+	branch=$(git symbolic-ref --short ${1:-HEAD})
+}
+
+function gremote()
+{
+	#local current
+	#zparseopts c=current
+	
+	remote=($(git remote))
 }

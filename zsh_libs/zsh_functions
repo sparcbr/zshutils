@@ -87,8 +87,8 @@ function confirm()
 
 function chooser()
 {
-	local noSelect chosen ret
-	zparseopts -M -D - c=color p:=print n:=noSelect R:=regex
+	local noSelect chosen ret sep
+	zparseopts -M -D - c=color p:=print n:=noSelect R:=regex s:=sep
 
 	#args=("${(@f)@}")
 	if [ $# -gt 1 ]; then
@@ -100,12 +100,17 @@ function chooser()
 		chosen="$1"
 	fi
 	ret=$?
-	if [[ -z $regex ]]; then
-		[ -z "$chosen" ] && return 1
-		echo "$chosen"
+	[[ -z "$chosen" ]] && return 1
+	if [[ -n $regex ]]; then
+		if [[ $chosen =~ $regex[2] ]]; then
+			echo "$match[@]"
+			return 0
+		fi
+	elif [[ -n $sep ]]; then
+		echo $(explode "$chosen" $sep)
 		return 0
-	elif [[ $chosen =~ $regex[2] ]]; then
-		echo "$match[@]"
+	else
+		echo "$chosen"
 		return 0
 	fi
 	return 1
@@ -174,13 +179,19 @@ function yelp()
 function array_dump()
 {
 	local key val
-	[[ $(vartype "$1") = association ]] || echo "Not an associative array."
-	echo "dump of \"$1\":"
-#	for key in ${(k)1}; do
- #	   val="${(P)1[$key]}"
-	for key val in ${(Pkv)1}; do
-		echo "$key -> $val"
-	done
+	if [[ $(vartype "$1") = association* ]]; then
+		echo "dump of \"$1\":"
+		for key val in ${(Pkv)1}; do
+			echo "${(q)key} -> ${(q)val}"
+		done
+	elif [[ $(vartype "$1") = array* ]]; then
+		echo "dump of \"$1\":"
+		for key in ${(k)1}; do
+			echo "${(qqqP)1[$key]}"
+		done
+	else
+		echo "Not an array."
+	fi
 }
 function _push()
 {
@@ -286,13 +297,17 @@ function run()
 		# # # # # # # # # #
 		if [[ -n "$color" ]]; then
 			if [[ -n $watch ]]; then
-				#waitPid -c "dirtyMem -P" color $fullcmd
+				waitPid -c "dirtyMem -P" color $fullcmd
 				color $fullcmd
 			else
 				color $fullcmd
 			fi
 		else
-			$fullcmd
+			if [[ -n $watch ]]; then
+				waitPid -c "dirtyMem -P" $fullcmd
+			else
+				$fullcmd
+			fi
 		fi
 		ret=$?
 
@@ -441,6 +456,48 @@ function colorify()
 # Added 2019-05-08 23:55
 function refactor()
 {
-	find . -type f -name '*.php' -print0 | xargs -0 sed -i "s/$search/$replace/g"
+	local dir=${1:-.}
+	#run -S find . -type f -name '*.php' -exec perl -pi -e "s/$search/$replace/g" {} +
+	run -S grep < <(
+		find $dir -type f -name '*.php' -print0 | xargs -0 sed "s/$search/${C[cyan]}${replace}${_C}/g"
+	)
+	confirm Replace || abort
+	find $dir -type f -name '*.php' -print0 | xargs -0 sed -ised "s/$search/$replace/g"
+}
+
+alias q=queue
+# Added 2019-06-04 17:47
+function queue()
+{
+	local qid qidFilter place cmd queue
+	zparseopts -D - p:=place
+	if [[ $# -eq 0 ]]; then
+		cmd=show
+		qidFilter='*'
+	else
+		cmd=$1 ; shift
+		if [[ -n $1 ]]; then
+			qidFilter=$1
+			shift
+		fi
+	fi
+	place=${place[2]:-all}
+
+	case $cmd in
+	add)
+		for queue in $CFG/queue.$place.$~qidFilter; do
+			echo "$@" >> $queue
+		done
+	;;
+	show|*)
+		include file
+		[[ $cmd != show && -z $qidFilter ]] && qidFilter=$cmd
+		for queue in $CFG/queue.$place.$~qidFilter; do
+			qid=$(getext $queue)
+			run -p "Queue: $qid ($place)" more $queue 
+		done
+	;;
+	esac
+
 }
 

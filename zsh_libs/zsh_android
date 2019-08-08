@@ -7,6 +7,8 @@ export PATH="$PATH:$ANDROID_HOME:$ANDROID_PLATFORM_TOOLS"
 APPS="${ANDROID_APPS:-$HOME/PeD/android}"
 [ -d "$APPS" ] || APPS="$HOME/apps"
 ANDROID_APPS="$APPS"
+SEAGATE_INBRAMED=/seagate
+SEAGATE_APPS=$SEAGATE_INBRAMED/android
 CLOUD_INBRAMED=$CLOUD/data/Inbramed
 CLOUD_APPS=$CLOUD_INBRAMED/android
 export ANDROID_APPS APPS CLOUD_APPS CLOUD_INBRAMED
@@ -22,3 +24,13 @@ export CICLOERGOMETER_RES=$CICLOERGOMETER/app/src/main/res
 export CICLOERGOMETER_IMG=$CICLOERGOMETER_RES/drawable
 export CICLOERGOMETER_LAYOUT=$CICLOERGOMETER_RES/layout
 export CICLOERGOMETER_JAVA="$(echo $CICLOERGOMETER/app/src/main/java/**/cicloergometer)"
+export CHIPSEE_JB=$HOME/images/Chipsee-BBB-JB-42-Source-20140413/device/ti/beagleboneblack
+
+# Added 2019-06-10 17:59
+	function checkdbs()
+{
+	for db in $(s find $1 -name \*.db); do
+		run -Esp "check DB $db" sqlite3 $db 'pragma integrity_check'
+	done
+}
+

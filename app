@@ -1,10 +1,9 @@
 #!/bin/zsh
 cd $(dirname "$0")
 if [ -z "$ZSH_MAIN_VERSION" ] || [ -z "$ZSH_LIBS" ]; then
-	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS=$PWD
+	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS="$PWD"
 	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; exit 127 }
 fi
-
 include -r functions
 
 ABORT='sexit'
@@ -14,23 +13,24 @@ function sexit()
     exit $1
 }
 [ "$1" = '-d' ] && { set -x; shift }
-[ $# -lt 1 ] && { print commands: home wallpaper focuswindow focusactivity uninstall install; sexit 1 }
+[ $# -lt 1 ] && { usage ; sexit 1 }
+
+function usage()
+{
+	echo 'focuswindow|focus focusactivity home en|enable|dis|disable install|inst list poweroff stop|restart uninstallall|removeall|delall|deleteall uninstall|remove|rm|del(ete)? wallpaper|anim|animation hidekeyb|hidekeyboard start immersive'
+}
 
 function findApk()
 {
 	#@TODO find most recent apk in case more than one returns
     local result=("${(@f)$(run adb shell pm list packages -3 $1 | cut -f2 -d: | tr -d '\r')}")
-    echo $result[1]
+    echo "$result[1]"
 }
 function listPkg()
 {
-    local ret flags pkgs sorted sortedPkgs pkg tmp n=1 date
-    if [ "$1" = "-a" ]; then
-        shift
-        flags=""
-    else
-		flags="-3"
-    fi
+    local ret flags pkgs all sorted sortedPkgs pkg tmp n=1 dt date
+	zparseopts -D -M - a=all d=date
+    [[ -n $all ]] || flags="-3"
 	sorted=() ; sortedPkgs=()
 	pkgs=$(run adb shell pm list packages $flags "$@")
 	ret=$?
@@ -38,19 +38,21 @@ function listPkg()
 	pkgs=(${(@f)$(echo $pkgs | cut -f2 -d: | tr -d '\r')})
 	for pkg in $pkgs; do
 		date=$(
-			adb shell dumpsys package $pkg | awk -F'=' '/lastUpdateTime/{print $2}' | tr -d '\r\n'
+			adb shell dumpsys package $pkg | awk -F'=' '/lastUpdateTime/{print $2}' | head -n1 | tr -d '\r\n'
 		)
-		sorted+=("${(f)date}¬$n")
+		sorted+=("${(f)date} $n")
 		((n++))
 	done
 	sorted=("${(@O)sorted}")
 	for tmp in $sorted; do
-		#@@s=$(
-		explode "$tmp" '¬' >/dev/null
-		#s=("${(@)s}")
-		#timestamps+=("${s[1]}")
-		n=${s[2]}
-		sortedPkgs+=("${pkgs[$n]}")
+		tmp=($(explode "$tmp" '_'))
+		n=$tmp[2]
+		if [[ -n $date ]]; then
+			dt=$tmp[1]
+			sortedPkgs+=("${pkgs[$n]}_$dt")
+		else
+			sortedPkgs+=("${pkgs[$n]}")
+		fi
 	done
 	echo "${sortedPkgs[@]}"
 }
@@ -76,9 +78,9 @@ function startApk()
 	local act
 
 	if [[ "$1" =~ "/" ]]; then
-		act=$1
+		act="$1"
    elif [ -n "$2" ]; then
-		act=$1/$2
+		act="$1"/"$2"
 	else
 		act=$(chooser $(listApkActivities $apk))
 	fi
@@ -92,7 +94,7 @@ function stopApk()
 }
 function enDisApk()
 {
-    local cmd=$1
+    local cmd="$1"
     [ $cmd = 'en' ] && cmd='enable'
     [ $cmd = 'dis' ] && cmd='disable'
     shift
@@ -124,17 +126,15 @@ function getPkgVersion()
 }
 function uninstallApk()
 {
-    if [ "$1"= "-a" ]; then
-		shift 
-		args=("${(@)$(listPkg $@)}")
-    elif [ -n "$1" ]; then
-        args="$@"
-    else
-		args=("$(chooser ${(@)$(listPkg)})")
-    fi
+    #if [[ "$1" = '-a' ]]; then
+	#	shift 
+	#	args=("${(@)$(listPkg -a $@)}")
+    #else
+		args=("${(@)$(chooser -s_ -f1 "${(@)$(listPkg -ad $@)}")}")
+	#fi
 
     for arg in $args; do
-        if [ "$(getext $arg)" = 'apk' ]; then
+        if [[ "$(getext $arg)" = 'apk' ]]; then
             uninstallPkg "$(getPkg $arg)"
         else
             uninstallPkg "$arg"
@@ -150,11 +150,8 @@ function uninstallPkg()
 {
     local pkgs p
 
-    if [ -n "$1" ]; then
-		pkgs=("$@")
-    else
-		pkgs=("${(@)$(listPkg)}")
-    fi
+    [[ -n "$1" ]] || return 1
+	pkgs=("$@")
 
     #@TODO -k: keep the data and cache directories around after package removal.
     for p in $pkgs; do
@@ -162,7 +159,7 @@ function uninstallPkg()
     done
 }
 
-cmd=$1
+cmd="$1"
 shift
 case "$cmd" in
 	(focuswindow|focus)
@@ -187,30 +184,25 @@ case "$cmd" in
 
         installApk $1
 	;;
-	(list) listPkg "$@" | tr ' ' '\n'
+	(list) print -l ${$(listPkg "$@")//_/ }
 	;;
 	(poweroff)
         run adb shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
    ;;
-	(ps) lnecho $(listRunningApk ${1:-inbramed}) 
+	(ps) print -l $(listRunningApk ${1}) 
 	;;
 	(stop|restart)
-		apk=$(listRunningApk ${1:-inbramed})
+		apk=$(listRunningApk ${1})
 		stopApk $apk
 		if [ "$cmd" = "restart" ]; then
 				startApk $apk
 		fi
 	;;
 	(uninstallall|removeall|delall|deleteall)
-        uninstallApk -a
+        uninstallApk -a "$@"
 	;;
 	(uninstall|remove|rm|del(ete)?)
-        if [ "$1" = "-a" ]; then
-            shift
-            uninstallApk -a
-        else
-            uninstallApk "$@"
-        fi
+		uninstallApk "$@"
 	;;
 	(wallpaper|anim|animation) #@TODO use rsync or md5
         ro=$(run adb shell mount | awk '/^\/dev\/block\/mmcblk0p2/{print $4}') || abort
@@ -223,16 +215,23 @@ case "$cmd" in
 		techo -c head Transfering boot animation
 		run adb push $HOME/PeD/android/bootanimation.zip /system/media || abort
 	;;
-	(hidekeyb|hidekeyboard)
+	(hidekeyb|hidekeyboard|keyb)
 		adb shell input keyevent 111
 	;;
-	(start|*)
+	(immersive)
+		run adb shell settings get global policy_control
+		# immersive.status=\* immersive.navigation=\*
+		run adb shell settings put global policy_control immersive.full=\*
+	;;
+	(start)
 		#apk=${1:-$(findApk "inbramed.")}
 		#search=${1:-"inbramed."}
-      apks=$(listPkg $1)
-      apk=$(chooser ${=apks})
+		apks=$(listPkg -d $1)
+		apk=$(chooser -s_ -f1 ${=apks})
 		#activity=${2:-$(getMainActivity $apk)}
 		startApk $apk
+	;;
+	(*)
 	;;
 esac
 

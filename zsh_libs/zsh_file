@@ -13,7 +13,7 @@ function getfullpath()
 	zparseopts -D - r:=relative
 	[[ $# -ge 1 ]] || return 1
 	[[ -n $relative ]] && type realpath >/dev/null &&
-		realpath --relative-base=${relative[2]#=} $1 2>/dev/null || echo "${1:P}"
+		realpath --relative-base=${relative[2]#=} $1 2>/dev/null || echo "${(z)1:P}"
 }
 function getpath()
 {
@@ -160,7 +160,7 @@ function syncDirs()
 	done
 	targets=${src: -1}
 	src[$#src]=()
-	targets=($(explode $targets ','))
+	#targets=($(explode $targets ','))
 
 	if [[ -n $reverse ]]; then
 		files=($targets)

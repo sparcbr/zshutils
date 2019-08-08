@@ -17,7 +17,7 @@ function findDev()
 function lspart()
 {
 	awk "! /SWAP|(\/snap\/)|(system reserved)/" \
-		<(sudo lsblk -o NAME,LABEL,SIZE,FSTYPE,MOUNTPOINT,SERIAL "$@")
+		<(sudo lsblk -o NAME,LABEL,SIZE,FSTYPE,UUID,MOUNTPOINT,SERIAL "$@")
 
 	grep -v '/snapd/' <(losetup --noheadings -l -O NAME,BACK-FILE) | sort
 }
@@ -43,7 +43,7 @@ function labelof()
 function deviceMount()
 {
 	local integer ret err=0 i
-	local var dev devs mnt baseMnt remount
+	local var dev devs mnt baseMnt remount tmp
 	zparseopts -D -M - m:=baseMnt r=remount
 	[[ -n "$1" ]] || return 1
 	[[ -n $baseMnt ]] && baseMnt=$baseMnt[2] || baseMnt=/m
@@ -52,9 +52,20 @@ function deviceMount()
 	for dev; do
 		var=$(isDevice $dev)
 		if [[ $? -eq 0 ]]; then
-			devs+=($var)
+			tmp=$(udisksctl info -b $var | awk "match(\$0, /'dir': <b'([^']+)'/, a) {print a[1]}")
+			if [[ -n $tmp ]]; then
+				sudo udisksctl mount -b $var
+			else
+				devs+=($var)
+			fi
 		elif isDir $dev; then
-			mnt=$var
+			dev=$(awk -v needle="$var" '$2==needle {print $1}' /etc/fstab 2>/dev/null)
+			if [[ -n $dev ]]; then
+				[[ -b $dev ]] || dev=$(blkid --uuid $dev) || return 1
+				sudo udisksctl mount -b $dev
+			else
+				mnt=$var
+			fi
 		elif confirm "Create dir $var"; then
 			run -S mkdir $var || return
 			mnt=$var
@@ -364,8 +375,9 @@ function findSD()
 }
 function isLoop()
 {
-	local loop dev
-	if [[ $1 = (#b)(/dev/(mapper/)#)#loop([0-9]##)(p[0-9]##)# ]]; then
+	local loop dev=$1
+	[[ $dev = [0-9]## ]] && dev=/dev/loop$dev
+	if [[ $dev = (#b)(/dev/(mapper/)#)#loop([0-9]##)(p[0-9]##)# ]]; then
 		loop=$match[3]
 		[[ -n $match[4] ]] && dev=/dev/mapper/loop$loop$match[4] || dev=/dev/loop$loop
 		echo $dev
@@ -432,10 +444,14 @@ function isDeviceMounted()
 
 function deviceof()
 {
-	if [[  -d $1 ]]; then
-		awk -v needle="$(getfullpath "$1")" '$2==needle {print $1}' /proc/mounts 2>/dev/null
-	elif [[ -f $1 ]]; then
-		loopof $1
+	local arg=${(z)1}
+	if [[ "${arg:0:1}" != / && ! -f $arg ]]; then
+		arg="/m/$arg"
+	fi
+	if [[ -d $arg ]]; then
+		awk -v needle="$(getfullpath "$arg")" '$2==needle {print $1}' /proc/mounts 2>/dev/null
+	elif [[ -f $arg ]]; then
+		loopof $arg
 	fi
 }
 
@@ -471,8 +487,8 @@ function imageof()
 	losetup $loopdev -O BACK-FILE --noheadings
 }
 
-comp+=(image='imageMount')
 alias image='imageMount'
+#comp+=(image='')
 function imageMount()
 {
 	local img dir var dev
@@ -522,8 +538,8 @@ function unloop()
     local loopNum devLoop devList img
 	zparseopts -D -E -M -- i:=img -img:=i
 	if devLoop=$(isLoop $1) && [[ -z $img ]]; then
-		loopNum=${1}
-		isDevice $1 && devLoop=$loopNum || devLoop=/dev/loop$loopNum
+		loopNum=${devLoop#/dev/loop}
+		[[ $loopNum = [0-9]## ]] || loopNum=${devLoop#/dev/mapper/loop}
 	else
 		[[ -n $img ]] && img=$img[2] || img=$1
 		[[ -b $devLoop ]] && loopNum=${devLoop#/dev/loop}
@@ -556,10 +572,10 @@ function ptablecp()
 function sdd()
 {
     local devin devout bs quiet status ioffset ooffset offset args dryrun
-    zparseopts -M -D -K -E -A arr -- -dry=dryrun q=quiet -quiet=q -bs:=bs \
+    zparseopts -M -D - -dry=dryrun q=quiet -quiet=q -bs:=bs \
         -ioffset:=ioffset -ooffset:=ooffset -offset:=offset
-
     [[ $# -ge 2 ]] || return 1
+	include file
     devin=$1
     devout=$2
     if [[ ${devin:0:2} == 'f:' ]]; then
@@ -589,10 +605,10 @@ function sdd()
     if [[ -z $quiet ]]; then
         args+=('status=progress')
     fi
-    args+=('conv=notrunc' 'conv=fdatasync')
-	bs=${bs[2]:-512}
-	run $quiet -s dd "if=$devin" "of=$devout" "bs=$bs" "${args[@]}"
-    sync
+    args+=('conv=notrunc,fdatasync')
+	bs=${bs[2]:-64M}
+	sudo dd "if=$devin" "of=$devout" "bs=$bs" "${args[@]}"
+    _sync
 }
 
 # Added 2019-06-03 09:00

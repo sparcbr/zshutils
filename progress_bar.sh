@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 
 # Usage:
 # Source this script
@@ -22,160 +22,129 @@ RESTORE_FG="\e[39m"
 RESTORE_BG="\e[49m"
 
 function init_vars() {
-	# Variables
 	PROGRESS_BLOCKED="false"
-	TRAPPING_ENABLED="false"
+	TRAPPING_ENABLED="true"
 	TRAP_SET="false"
-	PBAR_CHAR=""
+	PBAR_CHAR="X"
 }
 
 function setup_scroll_area() {
 	init_vars
 	#[[ -n "$1" ]] && PBAR_CHAR=${1[1]}
-    # If trapping is enabled, we will want to activate it whenever we setup the scroll area and remove it when we break the scroll area
-    if [ "$TRAPPING_ENABLED" = "true" ]; then
-        trap_on_interrupt
-    fi
+	# If trapping is enabled, we will want to activate it
+	# whenever we setup the scroll area and remove it when we break the scroll area
+	[[ "$TRAPPING_ENABLED" = "true" ]] && trap_on_interrupt
 
-    lines=$(tput lines)
-    let lines=$lines-1
-    # Scroll down a bit to avoid visual glitch when the screen area shrinks by one row
-    echo -en "\n"
-
-    # Save cursor
-    echo -en "$CODE_SAVE_CURSOR"
-    # Set scroll region (this will place the cursor in the top left)
-    echo -en "\033[0;${lines}r"
-
-    # Restore cursor but ensure its inside the scrolling area
-    echo -en "$CODE_RESTORE_CURSOR"
-    echo -en "$CODE_CURSOR_IN_SCROLL_AREA"
-
-    # Start empty progress bar
-    draw_progress_bar 0
+	lines=$(tput lines)
+	((lines--))
+	# Scroll down a bit to avoid visual glitch when the screen area shrinks by one row
+	echo -en "\n"
+	echo -en "$CODE_SAVE_CURSOR" # Save cursor
+	echo -en "\033[0;${lines}r"  # Set scroll region (this will place the cursor in the top left)
+	# Restore cursor but ensure its inside the scrolling area
+	echo -en "$CODE_RESTORE_CURSOR"
+	echo -en "$CODE_CURSOR_IN_SCROLL_AREA"
+	# Start empty progress bar
+	draw_progress_bar 0
 }
 
 function destroy_scroll_area() {
-    lines=$(tput lines)
-    # Save cursor
-    echo -en "$CODE_SAVE_CURSOR"
-    # Set scroll region (this will place the cursor in the top left)
-    echo -en "\033[0;${lines}r"
+	lines=$(tput lines)
+	# Save cursor
+	echo -en "$CODE_SAVE_CURSOR"
+	# Set scroll region (this will place the cursor in the top left)
+	echo -en "\033[0;${lines}r"
 
-    # Restore cursor but ensure its inside the scrolling area
-    echo -en "$CODE_RESTORE_CURSOR"
-    echo -en "$CODE_CURSOR_IN_SCROLL_AREA"
+	# Restore cursor but ensure its inside the scrolling area
+	echo -en "$CODE_RESTORE_CURSOR"
+	echo -en "$CODE_CURSOR_IN_SCROLL_AREA"
 
-    # We are done so clear the scroll bar
-    clear_progress_bar
+	# We are done so clear the scroll bar
+	clear_progress_bar
 
-    # Scroll down a bit to avoid visual glitch when the screen area grows by one row
-    echo -en "\n\n"
-    
-    # Once the scroll area is cleared, we want to remove any trap previously set. Otherwise, ctrl+c will exit our shell
-    if [ "$TRAP_SET" = "true" ]; then
-        trap - INT
-    fi
+	# Scroll down a bit to avoid visual glitch when the screen area grows by one row
+	echo -en "\n\n"
+
+	# Once the scroll area is cleared, we want to remove any trap previously set.
+	# Otherwise, ctrl+c will exit our shell
+	[[ "$TRAP_SET" = "true" ]] && trap - INT
 }
 
 function draw_progress_bar() {
-    percentage=$1
-    lines=$(tput lines)
-    let lines=$lines
-    # Save cursor
-    echo -en "$CODE_SAVE_CURSOR"
-
-    # Move cursor position to last row
-    echo -en "\033[${lines};0f"
-
-    # Clear progress bar
-    tput el
-
-    # Draw progress bar
-    PROGRESS_BLOCKED="false"
-    print_bar_text $percentage
-
-    # Restore cursor position
-    echo -en "$CODE_RESTORE_CURSOR"
+	percentage=$1
+	lines=$(tput lines)
+	echo -en "$CODE_SAVE_CURSOR"	# Save cursor
+	echo -en "\033[${lines};0f"		# Move cursor to last row
+	tput el							# Clear progress bar
+	print_bar_text $percentage $2	# Draw progress bar
+	echo -en "$CODE_RESTORE_CURSOR" # Restore cursor position
 }
 
 function block_progress_bar() {
-    percentage=$1
-    lines=$(tput lines)
-    let lines=$lines
-    # Save cursor
-    echo -en "$CODE_SAVE_CURSOR"
-
-    # Move cursor position to last row
-    echo -en "\033[${lines};0f"
-
-    # Clear progress bar
-    tput el
-
-    # Draw progress bar
-    PROGRESS_BLOCKED="true"
-    print_bar_text $percentage
-
-    # Restore cursor position
-    echo -en "$CODE_RESTORE_CURSOR"
+	draw_progress_bar $1 block
 }
 
 function clear_progress_bar() {
-    lines=$(tput lines)
-    let lines=$lines
-    # Save cursor
-    echo -en "$CODE_SAVE_CURSOR"
+	lines=$(tput lines)
+	let lines=$lines
+	# Save cursor
+	echo -en "$CODE_SAVE_CURSOR"
 
-    # Move cursor position to last row
-    echo -en "\033[${lines};0f"
+	# Move cursor position to last row
+	echo -en "\033[${lines};0f"
 
-    # clear progress bar
-    tput el
+	# clear progress bar
+	tput el
 
-    # Restore cursor position
-    echo -en "$CODE_RESTORE_CURSOR"
+	# Restore cursor position
+	echo -en "$CODE_RESTORE_CURSOR"
 }
 
 function print_bar_text() {
-    local percentage=$1
-    local cols=$(tput cols)
-    let bar_size=$cols-17
+	local percentage=$1 color cols
+	cols=$(tput cols)
+	bar_size=$(($cols-17))
 
-    local color="${COLOR_FG}${COLOR_BG}"
-    if [ "$PROGRESS_BLOCKED" = "true" ]; then
-        color="${COLOR_FG}${COLOR_BG_BLOCKED}"
-    fi
+	if [[ -n "$2" ]]; then
+		color="${COLOR_FG}${COLOR_BG_BLOCKED}"
+	else
+		color="${COLOR_FG}${COLOR_BG}"
+	fi
 
-    # Prepare progress bar
-    let complete_size=($bar_size*$percentage)/100
-    let remainder_size=$bar_size-$complete_size
-    progress_bar=$(echo -ne "["; echo -en "${color}"; printf_new "$PBAR_CHAR" $complete_size; echo -en "${RESTORE_FG}${RESTORE_BG}"; printf_new "." $remainder_size; echo -ne "]");
+	# Prepare progress bar
+	((complete_size=(bar_size*percentage)/100))
+	((remainder_size=bar_size-complete_size))
+	progress_bar=$(
+	echo -ne "[${color}"; printf_new $PBAR_CHAR $complete_size; \
+		echo -en "${RESTORE_FG}${RESTORE_BG}" \
+		printf_new "." $remainder_size \
+		echo -ne "]"
+	)
 
-    # Print progress bar
-    echo -ne " Progress ${percentage}% ${progress_bar}"
+	# Print progress bar
+	echo -ne " Progress ${percentage}% ${progress_bar}"
 }
 
 function disable_trapping() {
-    TRAPPING_ENABLED="false"
+	TRAPPING_ENABLED="false"
 }
 function enable_trapping() {
-    TRAPPING_ENABLED="true"
+	TRAPPING_ENABLED="true"
 }
 
 function trap_on_interrupt() {
-    # If this function is called, we setup an interrupt handler to cleanup the progress bar
-    TRAP_SET="true"
-    trap cleanup_on_interrupt INT
+	# If this function is called, we setup an interrupt handler to cleanup the progress bar
+	TRAP_SET="true"
+	trap cleanup_on_interrupt INT
 }
 
 function cleanup_on_interrupt() {
-    destroy_scroll_area
-    exit
+	destroy_scroll_area
+	exit
 }
 
 function printf_new() {
-    str=$1
-    num=$2
-    v=$(printf "%-${num}s" "$str")
-    echo -ne "${v// /$str}"
+	local v str=$1 num=$2
+	v=$(printf "%-${num}s" "$str")
+	echo -ne "${v// /$str}"
 }
