@@ -84,17 +84,13 @@ function backup()
 function rename()
 {
 	local name dir fullpath
+	(( $# > 0 )) || usage $0
 	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
 	name="$(getfilename "$1")"
 	dir="$(getpath $(getfullpath $1))"
 	fullpath="$dir/$name"
-	#usr/lib/arm-linux-gnueabihf/libXpm.so.4.11.0
-	#usr/lib/arm-linux-gnueabihf/libXtst.so.6.1.0
-	[[ -f "$1" || -d "$1" ]] || { abort 127 "$1 doesn't exist or no file permission"; return }
-	#file=$(dialog --title "Rename" --yes-label Rename --output-fd 1 --inputbox "Rename $1 to: " 10 120 "$name")
-	#file="$(input -p "Remame \"${C[warn]}$1${C[head]}\" to" $name)" || return $?
-	# calling input in subshell doesn't work, vared complains
-	if input -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -s name && [[ -n $name ]]; then
+	[[ -f "$1" || -d "$1" ]] || abort 127 "$1 doesn't exist or no file permission"
+	if input -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -v name && [[ -n $name ]]; then
 		run $sudo mv "$fullpath" "$dir/$name"
 	fi
 }
@@ -107,11 +103,11 @@ function ddiff()
 		[[ -n $1 ]] && isDir $1 && { dir1=${1%/} ; shift }
 		[[ -n $1 ]] && isDir $1 && { dir2=${1%/} ; shift }
 		if [[ -z $dir1 ]]; then
-			input -p "Dir 1" -s var || return
+			input -p "Dir 1" -v var || return
 			isDir -m $var && dir1=$var || return
 		fi
 		if [[ -z $dir2 ]]; then
-			input -p "Dir 2" -s var || return
+			input -p "Dir 2" -v var || return
 			isDir -m $var && dir2=$var || return
 		fi
 		d1=$dir1 d2=$dir2
@@ -155,27 +151,25 @@ function syncDirs()
 		if [[ ${arg:0:1} = - ]]; then # option parameter
 			extraArgs+=($arg)
 		else # sources
-			src+=($arg)
+			src+=("$arg[@]")
 		fi
 	done
-	targets=${src: -1}
-	src[$#src]=()
-	#targets=($(explode $targets ','))
+	if [[ $#src -ge 2 ]]; then
+		explode -v targets $src[-1] ','
+		src[$#src]=()
+	fi
+	#if [[ $#src -eq 0 ]]; then
+	#	src=($(box get backupconfig))
+	#fi
+	if [[ -z "$targets" ]]; then
+		input "Enter target directory" -v targets || cancel
+	fi
 
 	if [[ -n $reverse ]]; then
 		files=($targets)
 		targets=($src)
 		src=($files)
 	fi
-#	if [[ -n "$1" ]]; then
-#		targets="${@: -1}"
-#		src=("${@:1:-1}")
-#	else
-#		src=($(box get backupdirs))
-#	fi
-#	if [[ -z "$targets" ]]; then
-#		targets="$(input "Enter target directory")" || abort $?
-#	fi
 
 
 	# # # # # # # # # #	   -t, --times           preserve modification times
@@ -203,11 +197,12 @@ function syncDirs()
 		fi
 	done
 	
-	techo -c lcyan "Sources: ${src[@]}"
-	techo -c lcyan "Targets: ${targets[@]}"
-
+	techo -c lcyan "Sources: ${(@qq)src}"
+	techo -c lcyan "Targets: ${(@qq)targets}"
 	# rsync arguments from command line
-	rsArgs+=("${extraArgs[@]}")
+	rsArgs+=($extraArgs)
+	techo -c lcyan "rsync args: ${(@qq)rsArgs}"
+
 	# # # # # #
 	# Targets #
 	# # # # # #
@@ -215,12 +210,12 @@ function syncDirs()
 	for dir in $targets; do
 		if isDir -m "$dir"; then
 			[[ "$(fstypeof $dir)" != "vfat" ]] && permFlags='-pog'
-			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" "$dir")"
-			if [ -n "$data" ]; then
+			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
+			if [[ $#data -gt 0 ]]; then
 				nothing=0
 				echo $data
 				confirm "Do it" && # run --confirm "Do it"
-					run $sudo rsync --info=PROGRESS2 "$rsArgs[@]" $permFlags "$src[@]" "$dir" || abort
+					run $sudo rsync --info=PROGRESS2 $rsArgs $permFlags $src $dir || abort
 				_sync
 			fi
 
@@ -242,7 +237,7 @@ function syncDirs()
 				confirm -c warn "Delete these $n files" || continue
 				#@TODO rm $(chooser "$files[@]")
 				run $sudo rsync --delete --existing --ignore-existing \
-					--info=PROGRESS2 "$rsArgs[@]" "$src[@]" "$dir" || abort
+					--info=PROGRESS2 $rsArgs $src $dir || abort
 				_sync
 			fi
 		fi
@@ -264,10 +259,14 @@ function syncIhm()
 }
 
 # Added 2019-02-20 09:23:39 @TODO
-function boxStart()
+function box()
 {
-	include boxes
-	box start
+	#local search=$1
+	#zparseopts -D -M - S:=search
+	#include boxes
+	#box start
+	cd $HOME/repos
+	cd $(chooser ${=1:+-S "$1"} $(fordir echo))
 }
 
 
@@ -305,4 +304,49 @@ function _sync() {
 	run -w "isDirty" -p "Flushing caches to disk. Please wait." sync
 	
 	#watch -n 1 -c -t  "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
+}
+
+# Added 2019-08-21 00:27
+function fordir() #TODO
+{
+	local d cmd args dirs i=1 verbose
+	zparseopts -D -M - v:=verbose
+	[[ $# -gt 0 ]] || usage
+	if ((! $+verbose[2])); then
+		verbose=(-v 0)
+	fi
+	for d; do
+		if [[ -d "$d" ]]; then
+			dirs+=("$d")
+		elif type "$d" 2>&1 >/dev/null; then
+			cmd="$d"
+			shift
+			break
+		fi
+		shift
+	done
+	[[ -n $cmd ]] || usage 'Missing command'
+	args=("$@")
+	[[ -n "$dirs" ]] || dirs=(*(-/))
+	for d in $dirs; do
+		run $verbose "$cmd" $args "$d"
+	done
+}
+
+# Added 2019-06-07 17:27
+function fordo() #TODO
+{
+	e FIXME
+	local v cmd
+	cmd=$1; shift
+	for v; do
+		run "$cmd" "$v"
+	done
+}
+
+function show() #TODO
+{
+	local cmd
+	type bat 2>&1 >/dev/null && cmd='bat' || cmd='cat'
+	$cmd "$@"
 }

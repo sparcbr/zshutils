@@ -1,16 +1,17 @@
-VERSION=1.0.5
+VERSION=1.0.7
 [[ "$SUDO_USER" != "" ]] && export HOME=~$SUDO_USER
 export PATH=$PATH:$HOME/bin
 export NOSND=1
 [[ -z "$ZSH_LIBS" ]] && export ZSH_LIBS=${$(realpath $0):h}
+[[ -v comp ]] || typeset -g -a comp
 
 function techo() {
 	local c args nonl
-    zparseopts -M -D - c:=c n=nonl
+	zparseopts -M -D - c:=c n=nonl
 	[[ -n "$nonl" ]] && args=('-n')
-	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null  # stdout
+	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
 	if [[ -n "$c" ]]; then
-		c="$c[2]"
+		c="${c[2]}"
 		[ -z "${C[$c]}" ] && type colorSet >/dev/null && colorSet $c
 		while [[ ${1[1]} = '-' ]]; do
 			args+=("$1")
@@ -29,6 +30,7 @@ function abort() {
 	zparseopts -D - E=skipErrors e=noexception v:=verbose
 	verbose=${verbose[2]:-2}
 	[[ $# -ge 1 ]] && shift
+	yelp 1
 	[[ $# -ge 1 && $verbose -gt 0 ]] && techo -c lred "$@"
 	[[ -n $nostop ]] && return $cod
 	[[ "$ABORT" -gt 0 ]] && $ABORT $cod "$@" 
@@ -39,39 +41,69 @@ function abort() {
 
 function _test()
 {
-	local f="$1", test_f
+	local f="$1" test_f l
+	[[ $# -eq 0 ]] && abort 1 "Missing argument"
 	test_f="_test_$f"
+	type $test_f || abort 127 "Function \"$test_f\" not found"
 	$test_f && techo "$f $OK" || {
-		techo "$f $FAIL"
-		yelp
+		techo "$f $FAIL $?"
+		#yelp 3
 	}
 }
 
 function _test_explode()
 {
-	local f='explode', a=()
-	a=($($f 'a;b' ';'))
-	[[ -n $a && $a[1] = 'a' && $a[2] = 'b' ]] || return false
+	local f='explode' a=()
+	$f 'a;b' ';'
+	[[ ${a[1]} = 'a' && ${a[2]} = 'b' ]] || return $LINENO
 	a=($($f 'a  b ;; b' ';'))
-	[[ -n $a && $a[1] = 'a  b ' && -z $a[2] && $a[3] = ' b' ]] || return false
+	[[ ${a[1]} = 'a  b ' && -z ${a[2]} && ${a[3]} = ' b' ]] || return $LINENO
 	a=($($f 'a  b ;; b' ' '))
-	[[ -n $a && $a[1] = 'a' && $a[2] = 'b' && $a[3] = ';;' && $a[4] = 'b' ]] || return false
+	[[ -n $a && ${a[1]} = 'a' && ${a[2]} = 'b' && ${a[3]} = ';;' && ${a[4]} = 'b' ]] || return $LINENO
 	return true
 }
 function explode()
 {
-	local _sep=${2:-${sep:- }} str=${1//[[:space:]]/¬}
-	s=(${(ps/$_sep/)str})
-	[ -n "$3" ] && echo "${s[$3]//¬/ }" || echo "${(@)s//¬/\\\x20}"
+	local _var str _sep uniq
+	zparseopts -D -M - v:=_var u=uniq
+	_sep=${2:- }
+	if [[ "$_sep" != ' ' ]]; then
+		str=${(q)1}
+	else
+		str=$1
+	fi
+	str=(${(@zps/$_sep/)str})
+	if [[ -n $uniq ]]; then
+		str=("${(@uz)str}")
+	fi
+	[[ -n "${_var[2]}" ]] && _var=${_var[2]}
+	if [[ -n "$3" ]]; then
+		[[ "$3" = [0-9]## ]] || abort 1 "\$3=$3: not a number"
+		if [[ -n "$_var" ]]; then
+			[[ -v "$_var" ]] || typeset -g $_var
+			eval $_var="'${(Q)str[$3]}'"
+		else
+			echo "${(Q)str[$3]}"
+		fi
+	else
+		[[ -v "$_var" ]] || echo "${str}"
+		_var=${_var:-reply}
+		typeset -ga $_var
+		set -A $_var ${(Q)str}
+	fi
 }
 
 function debug()
 {
-	local cmd=$1
-	shift
-    set -x
-    $cmd "$@" >$TTY
-    set +x
+	local _cmd _data _type keep
+	zparseopts -D -M - k=keep
+	_cmd="$1" ; shift
+	_type="$(typeOf "$_cmd")"
+	[[ "$_type" == 'function' ]] && typeset -tf $_cmd #|| set -x
+	#_data=$($_cmd "$@" 2>&1 | egrep "^\+$_cmd:|[^+]")
+	_data=$($_cmd "$@" 2>&1)
+	[[ -z $keep && "$_type" == 'function' ]] && typeset +tf $_cmd #|| set +x
+	[[ $#_data -gt 0 ]] && colorify -d $_cmd <<<$_data
 }
 
 function vartype() {
@@ -81,17 +113,9 @@ function vartype() {
 # Set info for a lib
 function lib_set_info()
 {
-    local fname=${(U)1}
-	typeset -g ZSH_${fname}_VER=$2
-	typeset -Ag ZSH_${fname}_INFO
-	shift 2
-	#@TODO clone_assoc_array ZSH_${fname}_INFO _temp_aarray
-	set -A ZSH_${fname}_INFO ${(kv)_temp_aarray}
-	#for key val in ${(kv)_temp_aarray}; do
-	#	echo "$key -> $val"
-	#	ZSH_${fname}_INFO[$key]=$val
-	#done
-	unset _temp_aarray
+	local name=${(U)1} info
+	typeset -Ag ZSH_${name}_INFO
+	set -A ZSH_${name}_INFO ver $2 path "$3" required $4 mtime "$5"
 }
 
 function getmime()
@@ -107,18 +131,65 @@ function isScript()
 	}
 }
 
+function typeOf()
+{
+	local name ret tpath
+	name="$1"
+	if [[ ! -f "$name" ]]; then
+		ret=($(which -w $name))
+		type="${ret[2]}"
+		if [[ "$type" != "none" ]]; then
+			if [[ "$type" == "command" ]]; then
+				tpath=$(which $name)
+				if isScript $tpath; then
+					type="script"
+				fi
+			fi
+			echo $type $tpath
+			return 0
+		fi
+		echo "none"
+		return 1
+	fi
+	
+	tpath=$name
+	
+	if isScript $tpath; then
+		type="script"
+	elif [[ -x "$tpath" ]]; then
+		type="command"
+	else
+		echo "none"
+		return 1
+	fi
+	
+	echo $type $tpath
+	return 0
+}
+
+function zindent()
+{
+	echo -n "$@" | sed -E 's/^([^{}])/\t\1/g'
+}
+
 # Include a zsh lib
 function include()
 {
-	local name ver lpath lazyload prefix required force str
-	zparseopts -D -M - l=lazyload p:=lpath -path:=l r=required -required=r f=force
+	local name lpath lazyload required force str mtime info
+	zparseopts -D -M - l=lazyload p:=lpath -path:=lpath r=required -required=r f=force
 
-	name="$1"
-	if [[ -n "$lpath" ]]; then
-		lpath="${lpath[2]}"
-	else
-		lpath="$ZSH_LIBS/zsh_$name"
-	fi
+	[[ $# -eq 0 ]] && return 1
+	[[ "$1" = */* ]] && {
+		lpath="$(getfullpath $1)"
+		name="${$(getfilename $1)#zsh_*}"
+	} || {
+		name="${1#zsh_*}"
+		if [[ -n "$lpath" ]]; then
+			lpath="${lpath[2]}"
+		else
+			lpath="$ZSH_LIBS/zsh_$name"
+		fi
+	}
 		
 	[[ -n $required ]] && required=1 || required=0
 
@@ -131,9 +202,9 @@ function include()
 		return 127
 	fi
 
-	prefix="ZSH_${(U)name}"
-    ver="${prefix}_VER"
-    if [[ -z ${(P)ver} ]] || [[ -n "$force" ]]; then
+	mtime=$(stat -L --printf='%Y' "$lpath") || abort $? 'stat error'
+	info="ZSH_${(U)name}_INFO"
+	if [[ -z ${(P)info} || -n "$force" || "${${(P)info}[mtime]}" -lt "$mtime" ]]; then
 		if ! isScript $lpath; then 
 			techo "\e[91m$lpath is not a script\e[0m"
 			if [[ $required -eq 1 ]]; then
@@ -146,15 +217,12 @@ function include()
 			return 0
 		else
 			#[[ -o interactive ]] && 
-			techo -n "Including $name ($lpath)"
+			techo -n "Including $name (${lpath/$ZSH_LIBS/\$ZSH_LIBS})"
 			source "$lpath"
 			ret=$?
 			if [ $ret -eq 0 ]; then
 				typeset -Ag _temp_aarray
-				_temp_aarray[ver]="$VERSION"
-				_temp_aarray[path]="$lpath"
-				_temp_aarray[required]=${required:-0}
-				lib_set_info $name $VERSION
+				lib_set_info $name $VERSION "$lpath" ${required:-0} "$mtime"
 				#[[ -o interactive ]] &&
 				techo " [\e[92m$VERSION\e[0m]"
 			else
@@ -168,7 +236,72 @@ function include()
 				return $ret
 			fi
 		fi
-    fi
+	fi
 }
 
-lib_set_info main $VERSION # "include" itself
+comp+=("inst=apt")
+function inst()
+{
+	local machine pkgs
+	zparseopts -D -E -M - m:=machine
+	if [[ -z "$machine" ]]; then
+		if [[ ${#@} -ge 1 ]]; then
+			pkgs=("$@")
+		else
+			pkgs=${$(fc -ln -1)[1]}
+		fi
+		sudo apt-get install $pkgs
+	else
+		echo "$@" >> "$CFG/${machine[2]}.pkgs.txt"
+	fi
+}
+
+# Added 2019-09-05 00:57
+# check if any item of array equals value
+# in_array array_name value
+function in_array()
+{
+	local name=$1 val="$2"
+	[[ ${${(P)name}[(i)$val]} -le ${(P)#name} ]]
+}
+
+function ltrim() {
+	echo "${*##[[:blank:]]##}"
+}
+function rtrim() {
+	echo "${*%%[[:blank:]]##}"
+}
+function trim()
+{
+	echo "$(rtrim "$(ltrim "$*")")"
+}
+#@TODO_in_array() { }
+
+comp+=("aptinst=apt")
+function aptinst()
+{
+	sudo apt-get install -y $@
+}
+
+# Added 2019-09-03 19:29
+function libmonitor()
+{
+	local name evt
+	while read -r evt name; do
+		[[ $evt == 'exit' ]] && break
+		techo -c warn "$evt $name"
+	done < <(inotifywait -m -q -e modify -r --format '%e %f' $ZSH_LIBS || echo "exit $?")
+	return $name
+}
+
+# "include" itself
+lib_set_info main $VERSION "$0" 1 "$(stat -L --printf='%Y' "$0")"
+
+if [[ -o interactive ]] && { [[ -z $LIBMON_PID ]] || ! kill -0 $LIBMON_PID 2>/dev/null }; then
+	while ! type inotifywait 2>&1 >/dev/null; do
+		aptinst inotify-tools || {
+			ret=$?
+			[[ $ret -eq 130 || $ret -eq 1 ]] && break
+		}
+	done && { libmonitor & export LIBMON_PID=$! }
+fi

@@ -109,9 +109,11 @@ function copy_from_dir()
 	from_dir=$1 ; sd_part=$2
 	sdmnt='mnt/sdpart'
 	{
+set -x
 		deviceMount $sd_part $sdmnt || throw $?
 		syncDirs -s $dryrun "$from_dir" "$sdmnt" || throw $?
 	} always {
+	set -x
 		#DEBUG=1 run -p "Umounting $sd_part" deviceUnmount $sd_part
 		echo "return=$?"
 		if catch '*'; then
@@ -136,7 +138,9 @@ function copy_from_image()
 		syncDirs -s "$imgmnt" "$sdmnt" || throw $?
 	} always {
 		local ret cmd print
+		set -x
 		unloop --img $from_img
+		set +x
 		deviceUnmount $sddev
 		if catch '*'; then
 			CAUGHT=($=CAUGHT)
@@ -266,6 +270,7 @@ fi
 # Boot #
 ########
 name="boot" ; part=$BOOT_PART
+set -x
 if [ -z "${skipPart[1]}" ]; then
 	techo -c warn "\nFormatting $name ($part) SD partition (FAT)"
 	run -s mkfs.vfat -F 16 -n $name $part || abort
@@ -276,6 +281,7 @@ fi
 dir=${IMAGES_DIR}/$name
 techo -c warn "Copying $name data to SD ($dir => $part)"
 copy_from_dir $dir $part || abort
+set +x
 #run -s mkimage -A arm -O linux -T ramdisk -d ${IMAGES_DIR}/ramdisk.img uRamdisk
 
 ##########

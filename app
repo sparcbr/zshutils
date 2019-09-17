@@ -1,10 +1,12 @@
 #!/bin/zsh
 cd $(dirname "$0")
-if [ -z "$ZSH_MAIN_VERSION" ] || [ -z "$ZSH_LIBS" ]; then
+if [ -z "$ZSH_MAIN_INFO" ] || [ -z "$ZSH_LIBS" ]; then
 	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS="$PWD"
 	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; exit 127 }
 fi
 include -r functions
+include -r file
+include -r android
 
 ABORT='sexit'
 function sexit()
@@ -20,15 +22,9 @@ function usage()
 	echo 'focuswindow|focus focusactivity home en|enable|dis|disable install|inst list poweroff stop|restart uninstallall|removeall|delall|deleteall uninstall|remove|rm|del(ete)? wallpaper|anim|animation hidekeyb|hidekeyboard start immersive'
 }
 
-function findApk()
-{
-	#@TODO find most recent apk in case more than one returns
-    local result=("${(@f)$(run adb shell pm list packages -3 $1 | cut -f2 -d: | tr -d '\r')}")
-    echo "$result[1]"
-}
 function listPkg()
 {
-    local ret flags pkgs all sorted sortedPkgs pkg tmp n=1 dt date
+    local ret flags pkgs all sorted sortedPkgs pkg tmp n=1 date
 	zparseopts -D -M - a=all d=date
     [[ -n $all ]] || flags="-3"
 	sorted=() ; sortedPkgs=()
@@ -37,19 +33,20 @@ function listPkg()
 	[ -n "$pkgs" ] || return 1
 	pkgs=(${(@f)$(echo $pkgs | cut -f2 -d: | tr -d '\r')})
 	for pkg in $pkgs; do
-		date=$(
+		local _date=$(
 			adb shell dumpsys package $pkg | awk -F'=' '/lastUpdateTime/{print $2}' | head -n1 | tr -d '\r\n'
 		)
-		sorted+=("${(f)date} $n")
+		sorted+=("${(f)_date} $n")
 		((n++))
 	done
+
 	sorted=("${(@O)sorted}")
+
 	for tmp in $sorted; do
-		tmp=($(explode "$tmp" '_'))
-		n=$tmp[2]
+		explode -v tmp "$tmp" ' '
+		n=$tmp[3]
 		if [[ -n $date ]]; then
-			dt=$tmp[1]
-			sortedPkgs+=("${pkgs[$n]}_$dt")
+			sortedPkgs+=("${pkgs[$n]}_${tmp[1,2]}")
 		else
 			sortedPkgs+=("${pkgs[$n]}")
 		fi
@@ -107,18 +104,12 @@ function installApk()
     run adb push $1 /data/local/tmp/$1
     run adb shell pm install -t -r /data/local/tmp/$1
 }
-# Get package name from apk file
-function getPkg()
-{
-    chkCmdInst aapt
-    aapt dump badging $1 | grep package:\ name  | cut -f2 -d\'
-}
 
 #@TODO
 function getLocalApkVersion()
 {
-    chkCmdInst aapt
-    aapt dump badging $1 | grep package:\ name  | cut -f4,6 -d\'
+    #chkCmdInst aapt
+    aapt dump badging $1 | grep package:\ name | cut -f4,6 -d\'
 }
 function getPkgVersion()
 {
@@ -177,7 +168,7 @@ case "$cmd" in
         enDisApk $cmd $@
 	;;
 	(install|inst)
-        if [ $(getext "$1") != "apk" ]; then
+        if [[ $(getext "$1") != "apk" ]]; then
             echo needs a APK
             sexit 1
         fi
@@ -188,8 +179,8 @@ case "$cmd" in
 	;;
 	(poweroff)
         run adb shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
-   ;;
-	(ps) print -l $(listRunningApk ${1}) 
+	;;
+	(ps) run adb shell ps $@ #print -l $(listRunningApk ${1}) 
 	;;
 	(stop|restart)
 		apk=$(listRunningApk ${1})
@@ -224,8 +215,6 @@ case "$cmd" in
 		run adb shell settings put global policy_control immersive.full=\*
 	;;
 	(start)
-		#apk=${1:-$(findApk "inbramed.")}
-		#search=${1:-"inbramed."}
 		apks=$(listPkg -d $1)
 		apk=$(chooser -s_ -f1 ${=apks})
 		#activity=${2:-$(getMainActivity $apk)}

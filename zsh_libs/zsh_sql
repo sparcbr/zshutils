@@ -13,20 +13,6 @@ function dbtstamp()
 		awk '{print $6,$7,$8}' | sort --numeric-sort
 }
 
-# Receive a list and the default selected item.
-# Put the default item on the first position.
-# @param string selected
-# @param string[] list
-function mklist()
-{
-	local list first
-	first=$1
-	list=($1)
-	shift
-	for i; do [[ "$i" != "$first" ]] && list+=($i) ; done
-	echo "${list[@]}"
-}
-
 alias sql="noglob sql"
 alias sqlmaq="noglob sql --ssh maquina"
 # execute mysql command
@@ -46,11 +32,11 @@ function sql()
 	fi
 
 	if [[ -n $host ]]; then
-		noglob ssh $host[2] "noglob sql $sql"
+		ssh $host[2] "noglob sql $sql"
 	else
 		[[ -n $nodb ]] || usedb $name[2]
 		pass="${pass[2]:-$sqlPass}"
-		noglob mysql $silent -u root -p$pass -e "$sql" $db
+		mysql $silent -u root -p$pass -e "$sql" $db
 	fi
 }
 

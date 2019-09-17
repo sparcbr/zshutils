@@ -77,20 +77,85 @@ function croot()
 }
 
 # Added 2019-01-25 11:17:01
+# https://github.com/search?q=
+alias gh='github'
+[[ ! -v comp ]] && typeset -g -a comp
+comp+=('github=cd' 'gh=cd')
 function github()
 {
-    set -x
-    [[ -n "$1" && ! -d "$1" ]] && open https://github.com/$1 || github $(gitgetrepo ${1:-.})
-    set +x
-
+	local url repo search echo
+	zparseopts -D -M - r=repo s=search e=echo
+	if [[ $# -eq 0 ]]; then
+		open "https://github.com/"
+	elif [[ -n $search ]]; then
+		open "https://github.com/search?q=$(omz_urlencode $*)"
+	elif [[ -n $repo ]]; then
+		url="https://github.com/$*"
+		[[ -n $echo ]] && echo $url || open $url
+	elif url=$(gitgetrepo "$*"); then
+		[[ -n $echo ]] && echo $url || open $url
+	else
+		githubAPI $echo "$@"
+	fi
 }
+
+#
+function githubAPI()
+{
+	local limit=20 endpoint='https://api.github.com/graphql' request response fields
+	local echo
+	zparseopts -D -M - e=echo
+
+	request=$(cat) <<-GQL
+	{ 
+		"query":"query(\$search:String!,\$limit:Int!){
+			search(query:\$search, first: \$limit, type: REPOSITORY){
+				nodes {
+				... on Repository {
+					nameWithOwner, description, stargazers { totalCount }, createdAt, updatedAt
+				}
+				}
+			}
+		}",
+		"variables":{ "search":"$(omz_urlencode "$*")","limit":$limit }
+	}
+	GQL
+	fields='.data.search.nodes[] | .nameWithOwner,.description,.stargazers.totalCount,.createdAt,.updatedAt'
+
+	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d "${request//$'\n'/}" $endpoint)
+	if [[ $? -eq 0 ]]; then
+		local field
+		typeset -a repos tmp
+
+		while read -r field; do
+			tmp+=("$(trim "$field")")
+			if (($#tmp == 5)); then
+				repos+=("$tmp")
+				tmp=
+			fi
+		done < <(jq -cr "$fields" <<<$response)
+		
+		if [[ $#repos -eq 0 ]]; then
+			techo "No repositories found"
+		elif [[ $#repos -eq 1 ]]; then
+			github -r $echo $(explode "$repos" ' ' 1)
+		else
+			name=$(chooser -s' ' -f1 "$repos" "Open this search in github") || cancel
+			[[ "$name" == 'Open' ]] && github -s "$*" || github -r $echo $name
+		fi
+	fi
+}
+
 function gitgetrepo()
 {
-    local repo
-    ( 
-        [[ -n "$1" && "$1" != "." && -d "$1" ]] && cd $1
-        repo=$(git remote show origin | awk -F: '/Fetch URL/{print $3}')
-        echo "${repo%.*}"
+    local repo d q
+	zparseopts -D -M - d:=d
+    (
+        [[ -n "$d" ]] && d=$d[2] || d="$*"
+		[[ -d "$d" ]] && cd $1 || { techo -c err "Directory not found: $1"; return 1 }
+		repo=$(git remote show origin 2>/dev/null) || return 1
+        repo=$(echo $repo | awk '/Fetch URL/{print $3}')
+        [[ -n $repo ]] && echo "$repo"
     )
 }
 
@@ -139,4 +204,23 @@ function gremote()
 	#zparseopts c=current
 	
 	remote=($(git remote))
+}
+
+function url() {
+	local schemes=(http https ftp scp git)
+	[[ "$1" = 'getscheme' ]] && {
+		[[ $2 =~ (${(j.|.)schemes})"://"* ]] && echo $match[1]
+	}
+}
+
+# Added 2019-09-03 19:04
+function gclone()
+{
+	local repo
+	cd $HOME/repos
+	for repo; do
+		if [[ -n "$(url getscheme $repo)" ]] || repo="$(github -e $repo)"; then
+			git clone "$repo" #&& cd TODO
+		fi
+	done
 }

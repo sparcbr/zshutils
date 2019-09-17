@@ -2,7 +2,6 @@
 
 import sys, os, re, string, struct, unicodedata
 from optparse import OptionParser
-from pprint import pprint
 
 from math import log
 
@@ -60,7 +59,7 @@ def get_terminal_width_termios():
     try:
         lines, cols, xpixels, ypixels = \
             struct.unpack(
-                "HHHH", 
+                "HHHH",
                 fcntl.ioctl(sys.stdout.fileno(),
                 termios.TIOCGWINSZ, s)
                 )
@@ -105,9 +104,8 @@ def find_mountpoint(path):
     return path
 
 
-
 #some default definitions
-colours = {    
+colours = {
             'none'       :    "",
             'default'    :    "\033[0m",
             'bold'       :    "\033[1m",
@@ -164,12 +162,12 @@ FILL_THRESH = 95.0
 FULL_THRESH = 99.0
 
 
-formatcols = [    
-            ('fs', 10, "l"), ('fstype', 10, "l"),
-            ('size', 5, "r"), ('used', 5, "r"),
-            ('avail', 5, "r"), ('perc', 8, "r"),
-            ('bar', 0.1, "l"), ('on', 11, "l")
-]
+format = [    
+        ('fs', 10, "l"), ('fstype', 10, "l"),
+        ('size', 5, "r"), ('used', 5, "r"),
+        ('avail', 5, "r"), ('perc', 4, "r"),
+        ('bar', 0.1, "l"), ('on', 11, "l")
+        ]
 
 
 barchar = '#'
@@ -177,6 +175,7 @@ bar_fillchar = '.'
 
 mountfile = ['/etc/mtab', '/etc/mnttab', '/proc/mounts']
 
+statvfs_block = 'auto'
 
 #end of default definitions
 
@@ -186,16 +185,16 @@ for conffile in ["/etc/pydfrc", os.environ['HOME']+"/.pydfrc"]:
         exec(compile(open(conffile).read(), conffile, 'exec'))
 
 
-header =    {
-            'fs'     :    "Filesystem",
-            'size'   :    "Size",
-            'used'   :    "Used",
-            'avail'  :    "Avail",
-            'on'     :    "Mounted on",
-            'fstype' :    "Type",
-            'perc'   :    "Use%",
-            'bar'    :    Bar(header=True),
-            }
+header = {
+          'fs'     : "Filesystem",
+          'size'   : "Size",
+          'used'   : "Used",
+          'avail'  : "Avail",
+          'on'     : "Mounted on",
+          'fstype' : "Type",
+          'perc'   : "Use%",
+          'bar'    :  Bar(header=True),
+         }
 
 def sanitize_output(s):
     "sanitize nonprintable characters for printing"
@@ -224,7 +223,7 @@ def out(s):
 
 class DumbStatus:
     "emulates statvfs results with only zero values"
-    f_bsize = f_frsize = f_blocks = f_bfree = f_bavail = f_files = f_ffree = f_favail = f_flag = f_namemax =0
+    f_bsize = f_frsize = f_blocks = f_bfree = f_bavail = f_files = f_ffree = f_favail = f_flag = f_namemax = 0
 
 def hfnum(size, base):
     "human readable number"
@@ -248,7 +247,6 @@ def hfnum(size, base):
         nsize = int(round(1.*size/(base**power)))
     r = str(nsize) + units[power]
     return r
-
 
 def myformat(number, sizeformat, fs_blocksize):
     "format number as file size. fs_blocksize here is a filesysem blocksize"
@@ -278,7 +276,6 @@ def myformat(number, sizeformat, fs_blocksize):
     else: # this should not happen
         raise ValueError("Impossible error, contact the author, sizeformat="+repr(sizeformat))
 
-
 def manglestring(s, l, pos, fillchar=' '):
     "cut string to fit exactly into l chars"
     if pos == "r":
@@ -305,7 +302,7 @@ def makecolour(clist):
     return s
 
 def version():
-    return '12'
+    return '14'
 
 def get_all_mountpoints():
     "return all mountpoints in fs"
@@ -350,8 +347,7 @@ def get_all_mountpoints():
     # in python3 forcing us to use string, not bytes as filename for os.statvfs
     if sys.version_info[0]>=3:
         errhandler = 'surrogateescape'
-        # surrogateescape works in statvfs only since python3.3
-        if sys.version_info[1]<3:
+        if sys.version_info[1]<1:
             errhandler = 'replace'
         mountlines = [x.decode(sys.stdin.encoding, errhandler) for x in mountlines]
     r = {}
@@ -391,16 +387,25 @@ def get_row_mp(mp):
             status = os.statvfs(mp)
         except (OSError, IOError):
             status = DumbStatus()
-        fs_blocksize = status.f_bsize
-        if fs_blocksize == 0:
-            fs_blocksize = status.f_frsize
+        if statvfs_block == 'bsize':
+            fs_blocksize = status.f_bsize or status.f_frsize
+        elif statvfs_block == 'frsize':
+            fs_blocksize = status.f_frsize or status.f_bsize
+        elif statvfs_block == 'auto':
+            if sys.platform == 'linux2':
+                fs_blocksize = status.f_bsize or status.f_frsize
+            else:
+                fs_blocksize = status.f_frsize or status.f_bsize
+        else:
+            # bad value in configuration
+            raise ValueError('bad configuration: statvfs_block')
         free = status.f_bfree
         size = status.f_blocks
         avail = status.f_bavail
         inodes_free = status.f_ffree
         inodes_size = status.f_files
         inodes_avail = status.f_favail
-        if (size==0 or is_special_fs(fstype)) and not allfss:
+        if (size==0 or is_special_fs(fstype) or is_snap_mnt(mp)) and not allfss:
             return
         if bind and hidebinds:
             return
@@ -429,14 +434,14 @@ def get_row_mp(mp):
                 perc_f = '-'
 
         info = {
-            'fs'     :    device,
-            'size'   :    size_f,
-            'used'   :    used_f,
-            'avail'  :    avail_f,
-            'on'     :    mp,
-            'fstype' :    fstype,
-            'perc'   :    perc_f,
-            'bar'    :    None,
+            'fs'     : device,
+            'size'   : size_f,
+            'used'   : used_f,
+            'avail'  : avail_f,
+            'on'     : mp,
+            'fstype' : fstype,
+            'perc'   : perc_f,
+            'bar'    : None,
                 }
         current_colour = local_fs_colour
         if is_remote_fs(fstype):
@@ -448,7 +453,8 @@ def get_row_mp(mp):
 
     row = []
 
-    for j in formatcols:
+    for j in format:
+
         if j[0]=='bar':
             width = j[1]
             if 0<width<1: # i.e. percentage
@@ -462,7 +468,6 @@ def get_row_mp(mp):
                     current_colour = full_fs_colour
                 elif perc > FILL_THRESH:
                     current_colour = filled_fs_colour
-
             if j[0]=='bar':
                 info['bar'] = Bar(perc/100., width)
 
@@ -501,6 +506,10 @@ def is_special_fs(fs):
     fs = fs.lower()
     return fs in [ "tmpfs", "devpts", "devtmpfs", "proc", "sysfs", "usbfs", "devfs", "fdescfs", "linprocfs" ]
 
+def is_snap_mnt(mnt):
+    "mnt is snap mounting point"
+    return mnt[:6] == '/snap/'
+
 def get_table(mps):
     "table is a list of rows"
     "row is a list of columns"
@@ -521,7 +530,7 @@ def squeeze_table(table, desired_width):
 
     # build a row of minimal (possible, from format) cell sizes
     minrow = []
-    for j in formatcols:
+    for j in format:
         width = j[1]
         if 0 < width < 1: # i.e. percentage
             width = int(width*terminal_width)-1
@@ -575,9 +584,9 @@ def squeeze_table(table, desired_width):
             cell_content = row[col][1]
             if isinstance(cell_content, Bar):
                 cell_content.width += to_stretch
-                formatted_cell_content = cell_content.format(formatcols[col][2])
+                formatted_cell_content = cell_content.format(format[col][2])
             else:
-                formatted_cell_content = manglestring(cell_content, new_maxrow[col], formatcols[col][2])
+                formatted_cell_content = manglestring(cell_content, new_maxrow[col], format[col][2])
             row[col][1] = formatted_cell_content
 
 
@@ -676,7 +685,7 @@ if options.sizeformat:
 #    do_total_sum = True
 
 if options.b_w:
-    normal_colour = header_colour = local_fs_colour = remote_fs_colour = special_fs_colour = filled_fs_colour = full_fs_colour = fat_fs_colour = ext_fs_colour = 'none'
+    normal_colour = header_colour = local_fs_colour = remote_fs_colour = readonly_fs_colour = special_fs_colour = filled_fs_colour = full_fs_colour = fat_fs_colour = ext_fs_colour = 'none'
 if options.mounts_file:
     mountfile = options.mounts_file
 
@@ -695,5 +704,4 @@ else:
 
 table = get_table(mp_to_display)
 display_table(table, terminal_width)
-
 

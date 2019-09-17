@@ -1,5 +1,5 @@
 VERSION=1.0.5
-typeset -g -a comp
+[[ -v comp ]] || typeset -g -a comp
 alias e=echo
 alias op="xdg-open"
 alias open="xdg-open"
@@ -14,6 +14,9 @@ alias mk="make"
 alias apt="sudo apt"
 alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ignore-trailing-space --ignore-blank-lines"
 alias sys="sudo systemctl"
+#alias jtags="ctags -R . && sed -i -E '/^(if|switch|function|module\.exports|it|describe).+language:js$/d' tags"
+alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags2'
+
 
 function hg()
 {
@@ -25,123 +28,72 @@ function hg()
 	fc -li ${=fopt} | grep ${=gopt}
 }
 
-comp+=("inst=apt")
-function inst()
-{
-	local machine pkgs
-	zparseopts -D -E -M - m:=machine
-	if [[ -z "$machine" ]]; then
-		if [[ ${#@} -ge 1 ]]; then
-			pkgs=("${@}")
-		else
-			pkgs=${$(fc -ln -1)[1]}
-		fi
-		sudo apt-get install ${pkgs[@]}
-	else
-		echo "$@" >> "$CFG/${machine[2]}.pkgs.txt"
-	fi
-}
-comp+=("aptinst=apt")
-function aptinst()
-{
-	sudo apt-get install -y $@
-}
-
 # Added 2019-04-12 11:45
 function aptlist()
 {
 	zgrep 'install ' /var/log/dpkg.log* | sort | cut -f1,2,4,6 -d' ' | less
 }
 
-function typeOf()
-{
-	local name ret fpath
-	name="$1"
-	if [[ ! -f "$name" ]]; then
-		ret=($(which -w $name))
-		type="${ret[2]}"
-		if [[ "$type" != "none" ]]; then
-			if [[ "$type" == "command" ]]; then
-				fpath=$(which $name)
-				if isScript $fpath; then
-					type="script"
-				fi
-			fi
-			echo $type $fpath
-			return 0
-		fi
-		echo "none"
-		return 1
-	fi
-	
-	fpath=$name
-	
-	if isScript $fpath; then
-		type="script"
-	elif [[ -x "$fpath" ]]; then
-		type="command"
-	else
-		echo "none"
-		return 1
-	fi
-	
-	echo $type $fpath
-	return 0
-}
-
-function zindent()
-{
-	echo -n "$@" | sed -E 's/^([^{}])/\t\1/g'
-}
-
 function mkscript()
 {
-	local shell func name data edit err_exists file isLib
+	local shell func name data data2 edit err_exists file isLib help
 	err_exists="exists but isn't a shell script."
-	zparseopts -D -K s:=shell f:=func n:=name e=edit
-
-    if [ $# -lt 1 ]; then
-        echo s:=shell f:=func n:=name e=edit
-        return
-    fi
-	if [[ -n "$func" ]]; then
+	zparseopts -D -K s:=shell f:=func n:=name e=edit || abort
+	
+	data2="$@"
+	if [[ -n "$func[2]" ]]; then
 		func=$func[2]
-		#@TODO function already exists? (c)ancel, (a)ppend, overwrite
+		if [[ "$(typeOf $func)" == 'func' ]]; then
+			techo -c warn "$func() already exists"
+			vw $func
+			return
+		fi
+		#@TODO function already exists? (c)ancel, (e)dit, (o)verwrite
 	fi
+	input -p "Function name" -v func
 	isLib=false
 	if [[ -n "$name" ]]; then
 		name=$name[2]
 		file=$(getpath $name)
         if [[ "$file" != "." ]]; then # full path given
-			if [[ -f "$file" ]] && ! isScript $file; then
-				echo "$file $err_exists"
+			if [[ -d "$name" ]]; then
+				echo "$name is a directory"
+				return 1
+			elif [[ -f "$name" ]] && ! isScript $name; then
+				echo "$name $err_exists"
 				return 1
 			fi
+			file=$name
 		else
 			cmdtype=($(typeOf $name))
 			type=${cmdtype[1]}
 			file=${cmdtype[2]}
-			if [[ "$type" != "none" ]]; then
-				if [[ "$type" != "script" ]]; then
-					if [[ -f "$ZSH_LIBS/zsh_$name" ]]; then # is it a lib?
-						file="$ZSH_LIBS/zsh_$name"
-						isLib=true
-					else
-						echo "$file $err_exists"
-						return 1
-					fi
-				fi
-				#@TODO zconfirm "append to $xpath ?"
-			else
+			if [[ "$type" != "script" ]]; then
 				if [[ -f "$ZSH_LIBS/zsh_$name" ]]; then # is it a lib?
 					file="$ZSH_LIBS/zsh_$name"
 					isLib=true
+				elif [[ "$type" != 'none' ]]; then
+					echo "$file $err_exists"
+					return 1
 				fi
 			fi
 		fi
 	else
-		file="$ZSH_LIBS/zsh_aliases"
 		isLib=true
+		#file="$(chooser $ZSH_LIBS/zsh_* "New zsh library" "Browse full path")"
+		file="New zsh library"
+		if [[ "$file" == "New zsh library" ]]; then
+			file=$(input -p "Enter new library name") || cancel
+			if [[ $file == */* ]]; then
+				file=$(getpath $file)
+				name=$(getfilename $file)
+				name=zsh_${name#zsh_*}
+			else
+				file=$ZSH_LIBS/zsh_${file#zsh_*}
+			fi
+		elif [[ "$file" == "Browse full path" ]]; then
+			file=$(chooser -p "Choose path of zsh library" --dir) || cancel
+		fi
 	fi
 
 	if [[ ! -f "$file" ]]; then
@@ -153,9 +105,9 @@ function mkscript()
 	# TODO: append to function in case of existing function
 	data+="\n# Added "$(date "+%F %R")"\n"
     if [[ -n "$func" ]]; then
-		data+=$(zindent "function ${func}()\n{\n$@\n}")
+		data+=$(zindent "function ${func}()\n{\n$data2\n}")
 	else
-		data+=$(zindent "$@")
+		data+=$(zindent "$data2")
 	fi
 
 	echo ${data}$'\n' >> $file
@@ -165,8 +117,8 @@ function mkscript()
 	[[ -x "$file" || $isLib ]] || chmod +x $file
 
 	# edit
-	if [[ -n "$edit" ]]; then
-		[[ -n "$func" ]] && edfunc $func || gvim -f $file
+	if [[ -n "$edit" || -z "$data2" ]] || confirm "Edit file"; then
+		[[ -n "$func" ]] && $isLib && edfunc $func || gvim -f $file
 	fi
 }
 #function _stack()
@@ -200,50 +152,98 @@ function add_key()
 }
 function edalias()
 {
-	local lin n aliasf=${3:-~/.zsh_aliases}
-    set -x
-	if [[ -n "$1" ]]; then
-		n=${2:-0}
-		lin=$(( `egrep -n "^$1" $aliasf | cut -d: -f1` + $n ))
-		[ $? -ne 0 ] && lin=1
+	local line pat file var is
+	zparseopts -D -M l:=line
+	[[ -n "$1" ]] || return 1
+	if [[ "$1" == '-f' ]]; then
+		shift
+		pat="(function )?$1\(\)"
+		line=${line[2]:-2}
+	else
+		pat="alias $1="
+		line=0
 	fi
-    set +x
-	gvim -f $aliasf +$lin
-	echo "Sourcing $aliasf"
-	source $aliasf
+	file=${2:-~/.zsh_aliases}
+	var="$(egrep -n "^[[:space:]]*$pat" "$file")" || var="2:$file"
+	if [[ $? -eq 0 ]]; then
+		((line+=$(explode "$var" ':' 1)))
+		gvim -f $file +$line
+		echo "PPID=$PPID"
+		include $file
+	else
+		techo -c err "Could not find \"$1\""
+	fi
 }
 
 function edfunc()
 {
-	local arg
-	arg=($(type $1))
-	[[ $? -ne 0 ]] && { echo $arg; return 1; }
-	[[ "${arg[5]}" != "function" ]] && { echo "$1 is not a function:\n\t$arg"; return 2; }
-	edalias "function $1\(\)" 2 ${arg[-1]}
+	local arg file
+	arg=($(type "$1"))
+	[[ $? -ne 0 ]] && return 1
+	if [[ "${arg[4]}" == 'autoload' ]]; then
+		techo "autoload function todo: find not loaded autoload functions in fpath"
+		file="${arg[-1]}"
+		[[ -f "$file" ]] || {
+			typeset -a files=($(f -b "${j.,.)fpath}" "$1"))
+			file=$(chooser -p "Choose file" $files) || cancel
+		}
+	elif [[ "${arg[5]}" != 'function' ]]; then
+		abort 2 "$1 is not a function:\n\t$arg"
+	else
+		file="${arg[-1]}"
+	fi
+	edalias ${2:+-l $2} -f "$1" "$file" 
 }
 comp+=("vw=exec")
 function vw()
 {
-	local ret buffer mime fpath
-	fpath="$*"
-	ret=`which $fpath`
-	if [ -f "$ret" ]; then
-		mime=$(getmime $fpath)
-		[[ "$mime" == "application/x-sharedlib" ]] && { echo "$fpath is binary executable" ; return 1; }
-		gvim $ret
-	else
-		ret=`which -w $@`
-		buffer=(${=ret})
-		case "${buffer[2]}" in
-			function)
-				edfunc $1
-				;;
-			alias)
-				edalias "alias $1=" 0
-				;;
-		esac
-	fi
+	local array mime cpath name line
+	array=($(explode "$1" ':')) ; name=$array[1]; line=$array[2]
+	array=($(type -w "$name"))
+	case "${array[2]}" in
+		function) edfunc $name $line
+			;;
+		alias) edalias $name $line
+			;;
+		command)
+			cpath=$(which "$name")
+			if [[ -f "$cpath" ]]; then
+				mime=$(getmime $cpath)
+				if [[ "$mime" == "application/x-sharedlib" ]]; then
+					echo "$tpath is binary executable"
+					return 1
+				fi
+				gvim $cpath ${line:++$line}
+			else
+				echo Invalid path \"$cpath\"
+			fi
+			;;
+	esac
 }
+# call vim to each file:line argument
+# file1:l4 file2:l66 
+function v()
+{
+	local opt sudo
+	if [ "${1:0:1}" = "-" ]; then
+		if [[ $1 = -s ]]; then
+			sudo='sudo'
+		else
+			opt=$1
+		fi
+		shift
+	fi
+	for arg; do
+		if [[ "$arg" =~ ":" ]]; then
+			line=+$(echo $arg | cut -d: -f2)
+			file=$(echo $arg | cut -d: -f1)
+			$sudo gvim $opt $line $file
+		else
+			$sudo gvim $opt $arg
+		fi
+	done
+}
+
 function finderror()
 {
 	errline=`tail /var/log/apache2/error.log |  grep -e "PHP \(Parse\|Fatal\|Notice\)" | tail -n1`
@@ -281,40 +281,41 @@ function vimcmd()
 }
 function forvim()
 {
+	local _v _cmd
 	if [ "$1" = "cmd" ]; then
-		cmd="--remote-send"
+		_cmd="--remote-send"
 		shift
 	else
-		cmd="--remote-expr"
+		_cmd="--remote-expr"
 	fi
-	for v in `vim --serverlist`; do
-		vim --servername $v $cmd $@
+	for _v in `vim --serverlist`; do
+		vim --servername $_v $_cmd $@
 	done
 }
 function f()
 {
-	local d i s p g dir
-	zparseopts -D - d:=d i=i s=s p=p g:=g
-	#if [ "${1:0:2}" = "-d" ]; then
-	#	d=${1:2}
-	#echo "d[]=>$d[1] $d[2] $d[3]"
+	local d i s p g base args name n=1
+	zparseopts -D - d:=d i=i s=s p=p g:=g b:=base
 	[[ -n $s ]] && s="sudo"
 	[[ -n $d ]] && d[1]='-maxdepth'
-	[[ -n $i ]] && name="-iname" || name="-name"
-	dir=()
-	while [[ -d $1 ]]; do
-		dir+=($1)
-		shift
-	done
-	if [[ -z $dir ]]; then
-		dir+=(.)
-	fi
+	[[ -n "$base" ]] && explode -v base "$base[2]" ',' || base=(.)
 	#[[ $1 = - ]] && shift
 	#$s find ${=d} \( -path ./bckup_extensions -or -path ./extensions \) -prune -or $name $@ -print
-	
+	local found arg
+	until (( found )) || [[ -z ${arg::=${@:$n:1}} ]]; do
+		[[ $arg[1] == '-' ]] && ((found=n))
+		((n++))
+	done
+
+	if ((found==0 || found>1)); then
+		((found==0)) && args=("$@") || args=(${@:1:$found-1})
+		[[ -n $i ]] && name="-iname" || name="-name"
+		name=($name' '${^args})
+		shift $#args
+	fi
 	[[ -n $g ]] && {
-		$s find $dir ${=d} $name $@ $p | group $g
-	} || $s find $dir ${=d} $name $@ $p
+		$s find -L $base ${=d} ${=name} $@ $p | group $g
+	} || $s find -L $base ${=d} ${=name} $@ $p
 }
 function aldd() {
 	local R=$USER_HOME/clp
@@ -349,8 +350,8 @@ function sge()
 }
 function ge()
 {
-	local sudo icase args in_exts ex_exts
-	zparseopts -D -E - i=icase s=sudo --exclude:=ex_exts
+	local sudo icase args in_exts ex_exts width
+	zparseopts -D -E - i=icase s=sudo --exclude:=ex_exts w::=width
 	[[ -n $icase ]] && args+=('-i')
 	[[ -n $sudo ]] && sudo=sudo
 	IFS=',;:' read -rA in_exts <<<"$1"
@@ -358,37 +359,23 @@ function ge()
 	#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
 	[ "$#ex_exts" -gt 0 ] && args+=('--exclude=*.'${^ex_exts[@]})
 	args+=('--include=*.'${^in_exts[@]})
-	$sudo grep --color -rn $args $@
+	if (( $#width )); then
+		[[ $width = -w[0-9]## ]] && width=${width[1]:2} || width=0
+		if [[ $width -eq 0 ]]; then
+			$sudo grep --color -rn $args $@
+			return
+		fi
+	else
+		#width=$(( $(tput cols) - 50 ))
+		width=300
+	fi
+	$sudo grep --color -rn $args $@ | cut -c1-$width
 }
 function duh()
 {
 	local sudo
 	[[ "$1" == '-s' ]] && { shift; sudo='sudo'; }
 	$sudo du -csh "$@" | sort -h
-}
-
-# call vim to each file:line argument
-# file1:l4 file2:l66 
-function v()
-{
-	local opt sudo
-	if [ "${1:0:1}" = "-" ]; then
-		if [[ $1 = -s ]]; then
-			sudo='sudo'
-		else
-			opt=$1
-		fi
-		shift
-	fi
-	for arg; do
-		if [[ "$arg" =~ ":" ]]; then
-			line=+$(echo $arg | cut -d: -f2)
-			file=$(echo $arg | cut -d: -f1)
-			$sudo gvim $opt $line $file
-		else
-			$sudo gvim $opt $arg
-		fi
-	done
 }
 
 # Added 2019-01-10 11:26:22
@@ -486,7 +473,7 @@ function compress_cpio_image()
 	imgName=u${(C)$(getfilenoext $targetImg)}
 	compalg=${3:-mzip}
 	if [[ -n $ignore ]]; then
-		ignore=($(explode $ignore[2]))
+		explode -v ignore $ignore[2] ':'
 		ignore=('-path ./'${^ignore})
 		ignore="( ${(j. -o .)ignore} ) -prune -o -print"
 	fi
@@ -514,27 +501,10 @@ function shpydf()
 # create progress bar
 function pbar()
 {
-	type setup_scroll_area >/dev/null || source $HOME/bin/progress_bar.sh || return 1
-	if [[ "$1" == "start" ]]; then  # setup
-		setup_scroll_area $2
-		enable_trapping		# optional to clean up properly if user presses ctrl-c
-	elif [[ "$1" == "set" ]]; then # advance progress bar
-		draw_progress_bar $2
-	elif [[ "$1" == "block" ]]; then # turns the progress bar yellow to
-		block_progress_bar $2        # indicate some action is requested from the user
-	elif [[ "$1" == "end" ]]; then # finish
-		destroy_scroll_area 
-	else
-		return 1
-	fi
+	include -r progress_bar || return 1
+	pbar "$@"
 }
 
-# Added 2019-02-20 09:23:39 @TODO
-function boxStart()
-{
-    include boxes
-    box start
-}
 # Added 2019-02-20 15:38:03
 function hidrivemount()
 {
@@ -587,35 +557,8 @@ function ipfind()
 	done
 }
 
-# Added 2019-04-04 15:20
-function procmon()
-{
-	local prog=$1 timeout=5
-	while true; do
-		pid=$(pidof $prog)
-		[[ -z "$pid" ]] && continue || e $pid
-		sleep $timeout
-		pid2=$(pidof $prog)
-		[[ -z "$pid2" ]] && continue || e $pid2
-		[[ $pid -eq $pid2 ]] && kill $pid
-		sleep 1
-	done
-}
-
 # Added 2019-04-11 01:43
 function logs()
 {
 	tail {.,$(git root)}/logs/{api,debug}.txt -f &
 }
-
-# Added 2019-06-07 17:27
-function fordo()
-{
-	e FIXME
-	local v
-	cmd=$1 ; shift
-	for v; do
-		run $cmd $v
-	done
-}
-

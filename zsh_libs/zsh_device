@@ -3,14 +3,11 @@ setopt extendedglob
 
 function findDev()
 {
-    local devin="$1"
-    if [[ ! -b "$devin" ]]; then
-        if [[ ! -f "$devin" ]]; then
-            devin="/dev/$devin"
-            [[ -b "$devin" ]] ||  { abort $? "Device not found: '$1'" ; return 1 }
-        fi
-    fi
-    echo "$devin"
+	local devin="$1"
+	if [[ ! -b "$devin" ]]; then
+		devin=$(isDevice $devin) && [[ -b "$devin" ]] || return 1
+	fi
+	echo "$devin"
 }
 
 #@bug: shows partition as not mounted while it was really mounted
@@ -61,8 +58,9 @@ function deviceMount()
 		elif isDir $dev; then
 			dev=$(awk -v needle="$var" '$2==needle {print $1}' /etc/fstab 2>/dev/null)
 			if [[ -n $dev ]]; then
-				[[ -b $dev ]] || dev=$(blkid --uuid $dev) || return 1
-				sudo udisksctl mount -b $dev
+				[[ -b $dev ]] || dev=$(blkid --uuid $(explode $dev '=' 2)) || return 1
+				tmp=$(run udisksctl mount -b $dev 2>&1)
+				[[ $? -ne 0 && "$tmp" != *already\ mounted* ]] && ((err++))
 			else
 				mnt=$var
 			fi
@@ -90,7 +88,8 @@ function deviceMount()
 			deviceUnmount $var || abortDevError MNTBUSY "$mnt ($var)"
 		}
 		run -s -p "mount $dev" mount $dev $mnt
-	else
+
+	elif [[ $#devs -ge 1 ]]; then
 		local parts line TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT pids
 		parts=("${(f)$(deviceInfo -t part --short $devs)}")
 		for line in $parts; do
@@ -106,10 +105,9 @@ function deviceMount()
 				((err++))
 				continue
 			fi
-			deviceMount $NAME "$baseMnt/$LABEL"
+			deviceMount $NAME "$baseMnt/$LABEL" || ((err++))
 		done
-		((err+=$?))
-		[[ $err -eq 0 ]] && techo $OK || techo -c warn $err errors
+		((err==0)) && techo $OK || techo -c warn $err errors
 		return $err
 	fi
 }
@@ -255,7 +253,7 @@ function deviceInfo()
 		s=short -short=s t:=type -type:=t o:=columns u=mounted
 
 	if [[ -n $columns ]]; then
-		columns=(TYPE $(explode $columns[2] ','))
+		explode -u -v columns "TYPE,$columns[2]" ','
 	else
 		columns=(TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT)
 		if [[ -z "$short" ]]; then
@@ -431,7 +429,7 @@ function mntof()
 {
 	local dev loop
 	dev=$(isDevice $1) || dev=$(loopof $dev) || return
-    awk -v needle="$dev" '$1==needle {print $2}' /proc/mounts 2>/dev/null
+	awk -v needle="$dev" '$1==needle {print $2}' /proc/mounts 2>/dev/null
 }
 function isDeviceMounted()
 {
@@ -535,7 +533,7 @@ function loop()
 # Added 2019-03-01 15:48
 function unloop()
 {
-    local loopNum devLoop devList img
+	local loopNum devLoop devList img
 	zparseopts -D -E -M -- i:=img -img:=i
 	if devLoop=$(isLoop $1) && [[ -z $img ]]; then
 		loopNum=${devLoop#/dev/loop}
@@ -547,8 +545,8 @@ function unloop()
 		[[ "$devLoop" =~ "loop([0-9]*)" ]] || return 1
 		loopNum=$match[1]
 	fi
-    devList=(${devLoop} /dev/mapper/loop${loopNum}p*(N) ${devLoop}p*(N))
-    run deviceUnmount $devList || return
+	devList=(${devLoop} /dev/mapper/loop${loopNum}p*(N) ${devLoop}p*(N))
+	run deviceUnmount $devList || return
 	sudo kpartx -d $devLoop
 	[[ -b $devLoop ]] && sudo losetup -d $devLoop
 	return 0
@@ -557,58 +555,67 @@ function unloop()
 # Added 2019-02-26 14:17
 function ptablecp()
 {
-    local tblbkp src dest
-    src=$1
-    dest=$2
-    shift 2
-    [[ -n $src && -n $dest ]] || { echo "need at least 2 arguments" ; return 1 }
-    #tblbkp="$(getfilename $dest).bkup"
-   # sudo sfdisk -d $dest | tee $dest.ptbl
-    sudo sfdisk -d $src | sudo sfdisk $dest
+	local tblbkp src dest
+	src=$1
+	dest=$2
+	shift 2
+	[[ -n $src && -n $dest ]] || { echo "need at least 2 arguments" ; return 1 }
+	#tblbkp="$(getfilename $dest).bkup"
+	# sudo sfdisk -d $dest | tee $dest.ptbl
+	sudo sfdisk -d $src | sudo sfdisk $dest
 }
 
 # Added 2019-02-14 09:24
 # Updated 2019-02-25 14:47
 function sdd()
 {
-    local devin devout bs quiet status ioffset ooffset offset args dryrun
-    zparseopts -M -D - -dry=dryrun q=quiet -quiet=q -bs:=bs \
-        -ioffset:=ioffset -ooffset:=ooffset -offset:=offset
-    [[ $# -ge 2 ]] || return 1
-	include file
-    devin=$1
-    devout=$2
-    if [[ ${devin:0:2} == 'f:' ]]; then
-        devin=${devin:2}
-    else
-        devin=$(findDev $devin)
-    fi
-    if [[ ${devout:0:2} == 'f:' ]]; then
-        devout=${devout:2}
-    else
-        devout=$(findDev $devout)
-    fi
+	local devin devout bs quiet status ioffset ooffset offset args dryrun
+	zparseopts -M -D - -dry=dryrun q=quiet -quiet=q -bs:=bs \
+		-ioffset:=ioffset -ooffset:=ooffset -offset:=offset
+
+	[[ $# -ge 2 ]] || return 1
+
+	include -r file || abort 1 
+	devin=$1
+	devout=$2
+	if [[ ${devin:0:2} == 'f:' ]]; then
+		devin=${devin:2}
+		[[ -f $devin ]] || abort 127 "$devin: file not found"
+	elif [[ ! -f $devin ]]; then
+		devin=$(findDev $devin) || abort 127 "$devin: device not found"
+	fi
+
+	if [[ ${devout:0:2} == 'f:' ]]; then
+		devout=${devout:2}
+	elif devout=$(isDevice $devout); then
+		[[ -b $devout ]] || abort 127 "$devout: device not found"
+	fi
+
+	if [[ -f $devout ]]; then
+		confirm "Output file $C[warn]\"$devout\"$_C exists.\n$C[warn]Overwrite" || cancel
+	fi
+	
 	shift 2
 
-    args=("$@")
-    if [[ -n $offset ]]; then
-        args+=("skip=$offset[2]")
-        args+=("seek=$offset[2]")
-    else
-        [[ -n $ioffset ]] && args+=("skip=$ioffset[2]")
-        [[ -n $ooffset ]] && args+=("seek=$ooffset[2]")
-    fi
+	args=("$@")
+	if [[ -n $offset ]]; then
+		args+=("skip=$offset[2]")
+		args+=("seek=$offset[2]")
+	else
+		[[ -n $ioffset ]] && args+=("skip=$ioffset[2]")
+		[[ -n $ooffset ]] && args+=("seek=$ooffset[2]")
+	fi
 
-    echo "${C[b]}in=$devin => out=$devout$C_"
+	techo "${C[b]}in=$devin => out=$devout$C_"
 	#@TODO techo watch -n5 'killall -USR1 dd'
-    ##oflag=dsync 
-    if [[ -z $quiet ]]; then
-        args+=('status=progress')
-    fi
-    args+=('conv=notrunc,fdatasync')
+	##oflag=dsync 
+	if [[ -z $quiet ]]; then
+		args+=('status=progress')
+	fi
+	args+=('conv=notrunc,fdatasync')
 	bs=${bs[2]:-64M}
-	sudo dd "if=$devin" "of=$devout" "bs=$bs" "${args[@]}"
-    _sync
+	run $quiet -s dd "if=$devin" "of=$devout" "bs=$bs" "${args[@]}"
+	_sync
 }
 
 # Added 2019-06-03 09:00

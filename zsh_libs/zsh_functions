@@ -40,26 +40,32 @@ OK=" [${C[ok]}OK$C_]"
 
 function input()
 {
-	local var ret p gui z colors args tit
-	zparseopts -M -D - p:=p s:=set g=gui z=z t:=tit
-	colors=(-fg $C[head] -bg black)
-	p=${p[2]:-Edit text}
-	tit=${tit[2]:-Edit text}
-	var=${(P)set[2]:-"$@"}
-	techo -c head $p
+	local var str p gui z colors args title
+	zparseopts -M -D - p:=p v:=var g=gui z=z t:=title
+	colors=(-fg white -bg black)
+	p=${p[2]:-Input text}
+	title=${title[2]:-Input text}
+	if [[ -n "${var[2]}" ]]; then
+		var="${var[2]}"
+		[[ -v $var ]] || typeset -g $var
+	fi
+	str=${@:-${(P)var}}
+	techo -n -c head "$p: "
 	if [[ -n $z ]] && type zenity>/dev/null; then
-		var=$(zenity -title "$title" --entry --text="$p" --entry-text="$var") || return
+		str=$(zenity -title "$title" --entry --text="$p" --entry-text="$str") || cancel
+		techo -c warn $str
 	elif type gxmessage >/dev/null; then
 		args=($colors -center -ontop -wrap -buttons Cancel:1,Ok:0)
-		var=$(gxmessage $args -title "$title" -entrytext "$var" "$p") || return
+		str=$(gxmessage $args -title "$title" -entrytext "$str" "$p") || cancel
+		techo -c warn $str
 	else
-		vared var || read -r var || return
+		vared str || read -r str || cancel
 	fi
 
-	if [[ -n $set[2] ]]; then
-		${(P)set[2]::=$var}
+	if [[ -n $var ]]; then
+		${(P)var::=$str}
 	else
-		echo $var
+		echo $str
 	fi
 	return 0
 }
@@ -85,29 +91,50 @@ function confirm()
 	return $ret
 }
 
+# Receive a list and the default selected item.
+# Put the default item on the first position.
+# @param string selected
+# @param string[] list
+function mklist()
+{
+	local list first i
+	first=$1
+	list=($1)
+	shift
+	for i; do [[ "$i" != "$first" ]] && list+=($i) ; done
+	echo "${list[@]}"
+}
+
 function chooser()
 {
-	local noSelect chosen ret sep
-	zparseopts -M -D - c=color p:=print n:=noSelect R:=regex s:=sep
+	local noSelect chosen ret sep field search default
+	zparseopts -M -D - c=color p:=print n:=noSelect R:=regex s:=sep f:=field \
+		S:=search D:=default
 
-	#args=("${(@f)@}")
 	if [ $# -gt 1 ]; then
-		#if ! zmodload zsh/curses; then
-		#	return 1
-		#fi
-		chosen="$(ZSHSELECT_NONSELECTABLE="$noSelect[2]" ZSHSELECT_START_IN_SEARCH_MODE=0 zsh-select "$@")"
+		local args
+		chosen=$(
+			NLIST_SET_SEARCH_TO=$search[2]
+			ZSHSELECT_START_IN_SEARCH_MODE=$+search
+			ZSHSELECT_NONSELECTABLE=$noSelect[2]
+			zsh-select $default $@
+		)
+		#(($#search[2])) && args+=(NLIST_SET_SEARCH_TO=$search[2])
+		#(($#noSelect[2])) && args+=(ZSHSELECT_NONSELECTABLE=$noSelect[2])
+		#(($#search[2])) && args+=(NLIST_SET_SEARCH_TO=$search[2])
+		#chosen=$($args ZSHSELECT_START_IN_SEARCH_MODE=$+search zsh-select $@)
+		ret=$?
 	else
 		chosen="$1"
 	fi
-	ret=$?
-	[[ -z "$chosen" ]] && return 1
+	[[ $#chosen -gt 0 ]] || return $ret
 	if [[ -n $regex ]]; then
 		if [[ $chosen =~ $regex[2] ]]; then
 			echo "$match[@]"
 			return 0
 		fi
 	elif [[ -n $sep ]]; then
-		echo $(explode "$chosen" $sep)
+		echo $(explode "$chosen" $sep[2] $field[2])
 		return 0
 	else
 		echo "$chosen"
@@ -169,28 +196,34 @@ function yelp()
 	else  # zsh
 		emulate -L zsh  # because we may be sourced by zsh `emulate bash -c`
 		# $funcfiletrace has format:  file:line
-		local file=${funcfiletrace[1]%:*} line=${funcfiletrace[1]##*:}
-		local func=${funcstack[2]}
-		[[ "$func" =~ '/' ]] && func=source  # $func may be filename. Use bash behaviour
+		#local file=${funcfiletrace[1]%:*} line=${funcfiletrace[1]##*:}
+		#local func=${funcstack[2]}
+		#[[ "$func" =~ '/' ]] && func=source  # $func may be filename. Use bash behaviour
+		# techo "${file##*/}:$func:$line $*"
+		#print -l -- funcfiletrace $funcfiletrace - funcsourcetrace $funcsourcetrace - funcstack $funcstack - functrace $functrace
+		local integer n=$#functrace i=${1:-0}
+		[[ $functrace[$n] = $SHELL:* ]] && ((n--))
+		for ((i++; i<=n; i++)); do
+			techo -c warn $functrace[$i] $_C in $C[lgray]$funcfiletrace[$i]
+		done
 	fi
-	techo "${file##*/}:$func:$line $*"
 }
 [ -z "$BASH" ] || return
 function array_dump()
 {
 	local key val
 	if [[ $(vartype "$1") = association* ]]; then
-		echo "dump of \"$1\":"
-		for key val in ${(Pkv)1}; do
-			echo "${(q)key} -> ${(q)val}"
+		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
+		for key in ${(Pk)1}; do
+			techo "${(qq)key} -> ${(qqq)${(P)1}[$key]}"
 		done
 	elif [[ $(vartype "$1") = array* ]]; then
-		echo "dump of \"$1\":"
-		for key in ${(k)1}; do
-			echo "${(qqqP)1[$key]}"
+		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
+		for val in "${(P@)1}"; do
+			techo "${(qqq)val}"
 		done
 	else
-		echo "Not an array."
+		techo -c err "\"$1\": not an array."
 	fi
 }
 function _push()
@@ -244,12 +277,12 @@ function run()
 {
 	local ret cmd fullcmd logfile watch
 	local sudo trysudo dryrun verbose color alert print
-	local cmdinst workdir skipErrors
+	local cmdinst workdir skipErrors okcodes
 
 	if [[ "${1:0:1}" == - ]]; then
 		zparseopts -M -D - v:=verbose c:=color a=alert p:=print \
 			s=sudo S=trysudo n=dryrun I:=cmdinst -cd:=workdir E=skipErrors \
-			l:=logfile w:=watch
+			l:=logfile w:=watch N:=okcodes -ok-exit-codes:=N
 
 		[[ "$1" == - ]] && shift
 		[[ ${1:0:1} == - ]] && { abort 1 "Invalid command: $1"; return }
@@ -291,6 +324,12 @@ function run()
 			fi
 			cd "$workdir" || throw $?
 		fi
+		if [[ -z $okcodes ]]; then
+			okcodes=(0)
+		else
+			explode -v okcodes "$okcodes[2]" ','
+			in_array okcodes 0 || okcodes+=(0)  # add 0 to successful exit codes
+		fi
 
 		# # # # # # # # # #
 		# Execute command #
@@ -311,7 +350,9 @@ function run()
 		fi
 		ret=$?
 
-		[[ -n $DEBUG ]] && set -x
+		if [[ -n $DEBUG ]]; then
+			typeset -tf $cmd || set -x
+		fi
 		[[ $ret -eq 130 ]] && throw $ret
 		if [[ $ret -eq 127 ]]; then
 			chkCmdInstall $cmd $cmdinst[2]
@@ -325,15 +366,18 @@ function run()
 				ret=$?
 			fi
 		fi
-		[[ -n $DEBUG ]] && { set +x ; return $ret }
+		if [[ -n $DEBUG ]]; then
+			typeset +tf $cmd || set +x
+			return $ret
+		fi
 
-		if [[ $ret -ne 0 ]]; then
+		if ! in_array okcodes $ret; then #TODO
 			if [[ -n "$trysudo" ]]; then
 				techo "Trying with sudo"
 				color sudo $fullcmd
 				ret=$?
 			fi
-			[[ $ret -ne 0 ]] && throw $ret
+			in_array okcodes $ret || throw $ret
 		fi
 	} always {
 		if catch '*'; then
@@ -424,6 +468,8 @@ function color()
 
 function colorify()
 {
+	local line data debug
+	zparseopts -D -M - d:=debug
 	#@broken: [ ! -p /dev/stdin ] && exit 0
 	if [ "$1" = '-all' ] || [ "$1" = '-c' ]; then
 		if [ "$1" = '-all' ]; then
@@ -433,23 +479,58 @@ function colorify()
 			shift
 		fi
 		shift
-		while read line; do
-			echo "${C[$c]}$line$C_"
-		done
+		if [[ -n $1 ]]; then
+			data=("${(@f)@}")
+			for line in $data; do
+				echo "${C[$c]}$line$C_"
+			done
+		else
+			while read line; do
+				echo "${C[$c]}$line$C_"
+			done
+		fi
 	else
-		awk '
-		BEGIN{IGNORECASE=1}
-		function color(c,s) {
-			printf("\033[%dm%s\033[0m\n",90+c,s)
-		}
-		/\.php/ {color(2,$0);next}
-		/error/ {color(1,$0);next}
-		/success/ {color(2,$0);next}
-		/warning/ {color(3,$0);next}
-		/INFO/ {color(4,$0);next}
-		/DBG/ {color(5,$0);next}
-		{print}
-		' $1
+		local a cmd
+		if [[ -n $debug ]]; then
+			cmd=$debug[2]
+			while read line; do
+				if [[ $line =~ ^\\+$cmd:([0-9]+)\>\ (.*) ]]; then
+					techo -c lcyan $cmd:$match[1] ${_C}$match[2]
+				elif [[ $line =~ ^\\+([[:alnum:]]+):([0-9]+)\>\ (.*) ]]; then
+					techo -c blue $match[1]:$match[2] ${_C}$match[3]
+				else
+					techo $line
+				fi
+			done
+		else
+			while read line; do
+				techo $line
+			done
+		fi
+#			debug=$(cat)<<-END
+#				function dbg(c,name,line,str) {
+#					printf("\033[%dm%s\033[1m%s\033[0m> %s\n",90+c,name,line,str)
+#				}
+#				/^\+${debug[2]}:([0-9]+)> (.*)/ {dbg(5,"${debug[2]}",\$1,\$2);next}
+#				/^\+([[:alnum:]]+):([0-9]+)> (.*)\\n/ {dbg(6,\$1,\$2,\$3);next}
+#			END
+#		fi
+#		a=$(cat)<<-END
+#		BEGIN{IGNORECASE=1}
+#		function color(c,s) {
+#			printf("\033[%dm%s\033[0m\\n",90+c,s)
+#		}
+#		$debug
+#		/\.php/ {color(2,\$0);next}
+#		/error/ {color(1,\$0);next}
+#		/success/ {color(2,\$0);next}
+#		/warning/ {color(3,\$0);next}
+#		/INFO/ {color(4,\$0);next}
+#		/DBG/ {color(5,\$0);next}
+#		{print}
+#		END
+#		echo "a=${(qqq)a}"
+#		awk -D -f <(<<< ${(q)a}) </dev/stdin
 	fi
 }
 
@@ -469,10 +550,10 @@ alias q=queue
 # Added 2019-06-04 17:47
 function queue()
 {
-	local qid qidFilter place cmd queue
+	local qid qidFilter place cmd queue queues
 	zparseopts -D - p:=place
 	if [[ $# -eq 0 ]]; then
-		cmd=show
+		cmd='show'
 		qidFilter='*'
 	else
 		cmd=$1 ; shift
@@ -484,20 +565,32 @@ function queue()
 	place=${place[2]:-all}
 
 	case $cmd in
-	add)
-		for queue in $CFG/queue.$place.$~qidFilter; do
-			echo "$@" >> $queue
-		done
-	;;
-	show|*)
-		include file
-		[[ $cmd != show && -z $qidFilter ]] && qidFilter=$cmd
-		for queue in $CFG/queue.$place.$~qidFilter; do
-			qid=$(getext $queue)
-			run -p "Queue: $qid ($place)" more $queue 
-		done
-	;;
+		add)
+			queues=($CFG/queue.$place.$~qidFilter)
+			queue=$(chooser $queues:t "New queue" "Browse full path") || cancel
+			if [[ "$queue" == "New zsh library" ]]; then
+				queue=$(input -p "Enter queue id") || cancel
+				is_full_path || queue=$CFG/$queue
+			elif [[ "$queue" == "Browse full path" ]]; then
+				queue=$(chooser -p "Choose path of queue" --dir) || cancel
+			fi
+
+			input -p "Add to queue $queue" "$@" >> $queue || cancel
+			;;
+		show)
+			include file
+			[[ $cmd != 'show' && -z $qidFilter ]] && qidFilter=$cmd
+			for queue in $CFG/queue.$place.$~qidFilter; do
+				qid=$(getext $queue)
+				run -p "Queue: $qid ($place)" show $queue 
+			done
+			;;
+		*)
+			techo -c err "$cmd: invalid command"
+			usage
 	esac
 
+	function usage() {
+		techo -c warn "$0 [-p place] command [id_filter]\ncommands: add, show"
+	}
 }
-

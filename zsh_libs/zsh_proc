@@ -1,4 +1,4 @@
-VERSION=1.0.1
+VERSION=1.0.2
 
 # Process handling. Stuff like pid, kill, lsof, etc...
 
@@ -7,6 +7,54 @@ function cwdof()
 	for p in $(pidof $1); do
 		ls -ld /proc/$p/cwd 2>/dev/null
 	done | awk -F'-> ' '{print $2}' | uniq
+}
+
+function ps()
+{
+	local kern select search user pid ppid tty cmd
+	local cols args
+
+	[[ -o interactive ]] || { command ps "$@" ; return }
+	zparseopts -D - c:=cmd k=kern u::=user p:=pid P:=ppid t:=tty o:=cols
+	
+	# # # # # # #
+	# selection #
+	# # # # # # #
+	if [[ -n $user ]]; then
+		[[ -n $user[2] ]] || user[2]=(${UID:-$USER})
+	fi
+	if [[ -z "$pid" && $1 = [0-9]## ]]; then
+		pid=(-p $1)
+		shift
+	elif ((! $#cmd )) && [[ ${1:0:1} = [[:alnum:]_]## ]]; then
+		cmd=(-C "$1")
+		shift
+	fi
+	(( $#cmd )) && cmd[2]=("$(getfilename "$cmd[2]")")
+	#if in_array args '-C'; then
+	#fi
+	select=($user $pid $ppid $tty $cmd)
+	# hide kernel threads by default, if no other select options are given
+	if (( ! $#kern && ! $#select )); then
+		args+=(--ppid 2 -p 2 --deselect)
+	else
+		args+=($select)
+	fi
+
+	args+=("$@")
+
+	##  ##  ##
+	# output #
+	##  ##  ##
+	if [[ -n "$o" ]]; then
+		cols=($(explode "$o[2]" ','))
+		#elif in_array args --any '-o,-O'; then
+	else
+		cols=(pid ppid %cpu stat cmd) # euid if not -u or -u $x with $x != $UID
+	fi
+	args+=(-o "${(j.,.)cols}")
+
+	run command ps $args
 }
 
 function waitOnPids()
@@ -85,3 +133,19 @@ function k()
 		sudo killall "$@"
 	fi
 }
+
+# Added 2019-04-04 15:20
+function procmon()
+{
+	local prog=$1 timeout=5
+	while true; do
+		pid=$(pidof $prog)
+		[[ -z "$pid" ]] && continue || e $pid
+		sleep $timeout
+		pid2=$(pidof $prog)
+		[[ -z "$pid2" ]] && continue || e $pid2
+		[[ $pid -eq $pid2 ]] && kill $pid
+		sleep 1
+	done
+}
+

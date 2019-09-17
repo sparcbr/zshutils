@@ -1,33 +1,55 @@
-VERSION=1.0.2
-export ANDROID_HOME="$HOME/androidSDK/tools" # "$HOME/androidSDK" ???
-export ANDROID_PLATFORM_TOOLS="$HOME/androidSDK/platform-tools"
-export ANDROID_SDK_ROOT="$HOME/androidSDK"
+VERSION=1.0.3
+type getfullpath 2>&1 >/dev/null || include file
+export ANDROID_SDK_ROOT=$(getfullpath "$HOME/androidSDK")
+export ANDROID_HOME=$ANDROID_SDK_ROOT
+export ANDROID_PLATFORM_TOOLS="$ANDROID_SDK_ROOT/platform-tools"
 export PATH="$PATH:$ANDROID_HOME:$ANDROID_PLATFORM_TOOLS"
 
-APPS="${ANDROID_APPS:-$HOME/PeD/android}"
-[ -d "$APPS" ] || APPS="$HOME/apps"
-ANDROID_APPS="$APPS"
+if ! type aapt 2>&1 >/dev/null; then
+	() {
+		local aapt=($ANDROID_HOME/build-tools/*/aapt(*On))
+		if [[ $#aapt -gt 0 ]]; then
+			ln -s $aapt[1] $HOME/bin/aapt
+			return
+		else
+			include package
+			aptinst aapt
+		fi
+	}
+fi
+
+# Get package name from apk file
+function getPkg()
+{
+    #chkCmdInst aapt
+    aapt dump badging $1 | grep package:\ name | cut -f2 -d\'
+}
+return
+
+#APPS="${ANDROID_APPS:-$HOME/PeD/android}"
+#[ -d "$APPS" ] || APPS="$HOME/apps"
+#ANDROID_APPS="$APPS"
 SEAGATE_INBRAMED=/seagate
 SEAGATE_APPS=$SEAGATE_INBRAMED/android
 CLOUD_INBRAMED=$CLOUD/data/Inbramed
 CLOUD_APPS=$CLOUD_INBRAMED/android
 export ANDROID_APPS APPS CLOUD_APPS CLOUD_INBRAMED
 
-export TREADMILL=$APPS/Treadmill
-export TREADMILL_RES=$TREADMILL/app/src/main/res
-export TREADMILL_IMG=$TREADMILL_RES/drawable
-export TREADMILL_LAYOUT=$TREADMILL_RES/layout
-export TREADMILL_JAVA="$(echo $TREADMILL/app/src/main/java/**/treadmill)"
-
-export CICLOERGOMETER=$APPS/Cicloergometer
-export CICLOERGOMETER_RES=$CICLOERGOMETER/app/src/main/res
-export CICLOERGOMETER_IMG=$CICLOERGOMETER_RES/drawable
-export CICLOERGOMETER_LAYOUT=$CICLOERGOMETER_RES/layout
-export CICLOERGOMETER_JAVA="$(echo $CICLOERGOMETER/app/src/main/java/**/cicloergometer)"
-export CHIPSEE_JB=$HOME/images/Chipsee-BBB-JB-42-Source-20140413/device/ti/beagleboneblack
+#export TREADMILL=$APPS/Treadmill
+#export TREADMILL_RES=$TREADMILL/app/src/main/res
+#export TREADMILL_IMG=$TREADMILL_RES/drawable
+#export TREADMILL_LAYOUT=$TREADMILL_RES/layout
+#export TREADMILL_JAVA="$(echo $TREADMILL/app/src/main/java/**/treadmill)"
+#
+#export CICLOERGOMETER=$APPS/Cicloergometer
+#export CICLOERGOMETER_RES=$CICLOERGOMETER/app/src/main/res
+#export CICLOERGOMETER_IMG=$CICLOERGOMETER_RES/drawable
+#export CICLOERGOMETER_LAYOUT=$CICLOERGOMETER_RES/layout
+#export CICLOERGOMETER_JAVA="$(echo $CICLOERGOMETER/app/src/main/java/**/cicloergometer)"
+#export CHIPSEE_JB=$HOME/images/Chipsee-BBB-JB-42-Source-20140413/device/ti/beagleboneblack
 
 # Added 2019-06-10 17:59
-	function checkdbs()
+function checkdbs()
 {
 	for db in $(s find $1 -name \*.db); do
 		run -Esp "check DB $db" sqlite3 $db 'pragma integrity_check'
