@@ -108,8 +108,10 @@ function installApk()
 #@TODO
 function getLocalApkVersion()
 {
+	local v
     #chkCmdInst aapt
-    aapt dump badging $1 | grep package:\ name | cut -f4,6 -d\'
+	v=$(aapt dump badging $1 | grep package:\ name | cut -f4,6 -d\')
+	[[ -n $v ]] && explode $v "'"
 }
 function getPkgVersion()
 {
