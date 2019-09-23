@@ -1,0 +1,7 @@
+#!/bin/zsh
+
+# Added 2019-09-16 14:25
+function vnc()
+{
+	run x0vncserver -rfbport 5555
+}

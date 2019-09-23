@@ -79,17 +79,20 @@ function explode()
 	[[ -n "${_var[2]}" ]] && _var=${_var[2]}
 	if [[ -n "$3" ]]; then
 		[[ "$3" = [0-9]## ]] || abort 1 "\$3=$3: not a number"
-		if [[ -n "$_var" ]]; then
-			[[ -v "$_var" ]] || typeset -g $_var
+		if [[ -n $_var ]]; then
+			[[ -v $_var ]] || typeset -g $_var
 			eval $_var="'${(Q)str[$3]}'"
 		else
 			echo "${(Q)str[$3]}"
 		fi
 	else
-		[[ -v "$_var" ]] || echo "${str}"
-		_var=${_var:-reply}
-		typeset -ga $_var
-		set -A $_var ${(Q)str}
+		if [[ -n $_var ]]; then
+			_var=${_var:-reply}
+			[[ -v $_var ]] || typeset -ga $_var
+			set -A $_var ${(Q)str}
+		else
+			echo $str
+		fi
 	fi
 }
 
@@ -169,7 +172,14 @@ function typeOf()
 
 function zindent()
 {
-	echo -n "$@" | sed -E 's/^([^{}])/\t\1/g'
+	local f
+	[[ $# -gt 1 ]] && {
+		f=1
+		echo "function $1()\n{"
+		shift
+	}
+	echo "$@" | sed -E 's/^([^{}])/\t\1/g'
+	[[ -n $f ]] && echo "}"
 }
 
 # Include a zsh lib

@@ -53,6 +53,9 @@ function isEmptyDir()
 	[[ -z $glob ]]
 }
 
+# @description: remove extension
+# @arg2: optional extension. If given remove only if extension = this
+# @returns: full path (or filename if no path given) without extension
 function noext()
 {
 	if [[ -n $2 ]]; then
@@ -261,12 +264,20 @@ function syncIhm()
 # Added 2019-02-20 09:23:39 @TODO
 function box()
 {
-	#local search=$1
+	local box search=$1
 	#zparseopts -D -M - S:=search
 	#include boxes
 	#box start
 	cd $HOME/repos
-	cd $(chooser ${=1:+-S "$1"} $(fordir echo))
+	if [[ -d $search ]]; then
+		box=$search
+	else
+		#@
+		box=$(chooser ${=1:+-S "$1"} *(-/om)) || cancel
+		[[ -d $box ]] || abort 127
+	fi
+	cd $box
+	queue -d .
 }
 
 

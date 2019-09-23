@@ -143,8 +143,8 @@ function deviceUnmount()
 			#@bug || { ((err++)); techo -c warn $dev is not a device; continue }
 		mnt=$(isDeviceMounted $dev) || continue
 		var=$(run -s -p "Unmounting $dev ($mnt)" udisksctl unmount -b $dev 2>&1) && continue
-		var=$(run -s umount $dev)
-		if [[ "$var" = *busy* ]]; then
+		var=$(run -s umount $dev 2>&1)
+		if [[ $var = *busy* ]]; then
 			var=$(egrep -v '^(lsof|sudo|grep) ' <(sudo lsof $mnt))
 			echo $var
 			egrep '^adb ' <<< $var && {
@@ -152,7 +152,7 @@ function deviceUnmount()
 				isDeviceMounted $dev || continue
 			}
 			i=0
-			while ! var=$(run -s umount $dev) && [[ $i -lt 4 ]]; do
+			while ! var=$(run -s umount $dev 2>&1) && [[ $i -lt 4 ]]; do
 				isDeviceMounted $dev || continue
 				if [[ "$var" = *busy* ]]; then
 					techo -c warn "$mnt is busy"

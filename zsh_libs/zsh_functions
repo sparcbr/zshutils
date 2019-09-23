@@ -114,9 +114,9 @@ function chooser()
 	if [ $# -gt 1 ]; then
 		local args
 		chosen=$(
-			NLIST_SET_SEARCH_TO=$search[2]
-			ZSHSELECT_START_IN_SEARCH_MODE=$+search
-			ZSHSELECT_NONSELECTABLE=$noSelect[2]
+			NLIST_SET_SEARCH_TO=$search[2] \
+			ZSHSELECT_START_IN_SEARCH_MODE=$+search \
+			ZSHSELECT_NONSELECTABLE=$noSelect[2] \
 			zsh-select $default $@
 		)
 		#(($#search[2])) && args+=(NLIST_SET_SEARCH_TO=$search[2])
@@ -149,7 +149,7 @@ function chkCmdInstall()
 		# techo -c err "$cmd command not found"
 	if ! command -v $1 >/dev/null; then
 		[ -n "$2" ] && deb=$2 || deb=$1
-		techo "Installing $deb (provides $cmd)" 
+		techo "Installing $deb (provides $cmd)"
 		sudo apt install $deb
 		ret=$?
 		[ $ret -ne 0 ] && techo -c err "Error installing $deb"
@@ -164,11 +164,11 @@ function alert()
 		icon="error"
 		title="Error"
 		shift
-		[ -z "$NOSND" ] && sndplay error || vflash 
+		[ -z "$NOSND" ] && sndplay error || vflash
 	else
 		icon="trophy-gold"
 		title="Success"
-		[ -z "$NOSND" ] && sndplay success || vflash 
+		[ -z "$NOSND" ] && sndplay success || vflash
 	fi
 	notify-send --icon=$icon "$title" "$*"
 }
@@ -550,39 +550,47 @@ alias q=queue
 # Added 2019-06-04 17:47
 function queue()
 {
-	local qid qidFilter place cmd queue queues
-	zparseopts -D - p:=place
+	local qid qFilter cmd queue queues dir baseDir=$CFG e="q"
+	zparseopts -D -M - d:=dir -dir:=d
 	if [[ $# -eq 0 ]]; then
 		cmd='show'
-		qidFilter='*'
 	else
-		cmd=$1 ; shift
+		cmd=$1; shift
 		if [[ -n $1 ]]; then
-			qidFilter=$1
+			qFilter=$1
 			shift
 		fi
 	fi
-	place=${place[2]:-all}
+	if [[ $#dir[2] -ne 0 ]]; then
+		dir=$dir[2]
+	else
+		dir=$baseDir
+	fi
+	[[ -d $dir ]] || abort 127 "\"$dir\": directory not found"
+	[[ -z $qFilter ]] && qFilter="*.$e"
 
+	include file
 	case $cmd in
 		add)
-			queues=($CFG/queue.$place.$~qidFilter)
-			queue=$(chooser $queues:t "New queue" "Browse full path") || cancel
-			if [[ "$queue" == "New zsh library" ]]; then
+			#queues=($dir/$~qFilter(-N))
+			queues=($dir/*(-N))
+			queue=$(chooser -S $qFilter $queues:t "New queue" "Browse full path") || cancel
+			if [[ "$queue" == "New queue" ]]; then
 				queue=$(input -p "Enter queue id") || cancel
-				is_full_path || queue=$CFG/$queue
+				[[ ${queue:0:1} != / ]] && queue=$dir/$queue
+				[[ ${queue: -2} != ".$e" ]] && queue=$queue.$e
 			elif [[ "$queue" == "Browse full path" ]]; then
-				queue=$(chooser -p "Choose path of queue" --dir) || cancel
+				queue=$(chooser --file -p "Choose path of queue") || cancel
+				[[ ${queue:0:1} != / ]] && queue=$dir/$queue
+				#dir=$(getfilename $queue)
 			fi
-
-			input -p "Add to queue $queue" "$@" >> $queue || cancel
+			qid=$(noext $(getfilename $queue) $e)
+			input -p "Adding to $qid" "$@" >> $queue || cancel
 			;;
 		show)
-			include file
-			[[ $cmd != 'show' && -z $qidFilter ]] && qidFilter=$cmd
-			for queue in $CFG/queue.$place.$~qidFilter; do
-				qid=$(getext $queue)
-				run -p "Queue: $qid ($place)" show $queue 
+			for queue in $dir/$~qFilter(-N); do
+				qid=$(noext $(getfilename $queue) $e)
+				run -p "Queue: $qid" show $queue
 			done
 			;;
 		*)
@@ -591,6 +599,23 @@ function queue()
 	esac
 
 	function usage() {
-		techo -c warn "$0 [-p place] command [id_filter]\ncommands: add, show"
+		techo -c warn "$0 [--dir/-d path] <add|show> [searchFilter]\n\
+			default filter: *.q\n\
+			default dir: $baseDir"
 	}
 }
+
+# Added 2019-09-20 15:55
+function pizza()
+{
+	local integer mins=13
+	local msg
+
+	{ while (( mins )); do
+		msg="$mins minutes left to pizza time"
+		techo $msg
+		sleep 60
+		((mins--))
+	done ; alert "pizza time" } &
+}
+

@@ -80,32 +80,38 @@ function mkscript()
 		fi
 	else
 		isLib=true
-		#file="$(chooser $ZSH_LIBS/zsh_* "New zsh library" "Browse full path")"
-		file="New zsh library"
+		file="$(chooser $ZSH_LIBS/zsh_*(-N) "New zsh library" "Browse full path")"
 		if [[ "$file" == "New zsh library" ]]; then
-			file=$(input -p "Enter new library name") || cancel
-			if [[ $file == */* ]]; then
-				file=$(getpath $file)
-				name=$(getfilename $file)
-				name=zsh_${name#zsh_*}
-			else
-				file=$ZSH_LIBS/zsh_${file#zsh_*}
-			fi
+			file=$(input -p "Enter new library name" 'zsh_') || cancel
 		elif [[ "$file" == "Browse full path" ]]; then
 			file=$(chooser -p "Choose path of zsh library" --dir) || cancel
+		fi
+
+		name=$(getfilename $file)
+		name='zsh_'${name#zsh_*}
+		if [[ $file == */* ]]; then
+			file=$(getpath $file)/$name
+		else
+			file=$ZSH_LIBS/$name
 		fi
 	fi
 
 	if [[ ! -f "$file" ]]; then
-		[[ -n "$shell" ]] && shell="/bin/"$shell[2] || shell=$SHELL
-		data="#!${shell}\n"
+		# Create library
+		if isLib; then
+			data="VERSION=1.0.0\n[[ -v comp ]] || typeset -g -a comp"
+		else
+			# Create script
+			[[ -n "$shell" ]] && shell="/bin/"$shell[2] || shell=$SHELL
+			data="#!${shell}\n"
+		fi
 	fi
 
 	# add data
 	# TODO: append to function in case of existing function
 	data+="\n# Added "$(date "+%F %R")"\n"
     if [[ -n "$func" ]]; then
-		data+=$(zindent "function ${func}()\n{\n$data2\n}")
+		data+=$(zindent $func "$data2")
 	else
 		data+=$(zindent "$data2")
 	fi

@@ -1,4 +1,4 @@
-VERSION=1.0.1
+VERSION=1.0.2
 
 export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
@@ -24,7 +24,7 @@ function gfollow()
 	zparseopts -M -D - d=diff -diff=d
 	log=$(egrep '^commit' <(git log --follow "$@") | awk '{print $2}')
 	for hash in $log; do
-		gdiff  $hash -- "$@" | more
+		gdiff $hash -- "$@" | more
 	done
 }
 
@@ -39,24 +39,24 @@ function gtag()
 }
 function gmerge()
 {
-    local branch=${1:-$(chooser $(git branch))}
-    [[ -n $branch ]] && run git merge $branch --no-ff --no-commit
+	local branch=${1:-$(chooser $(git branch))}
+	[[ -n $branch ]] && run git merge $branch --no-ff --no-commit
 }
 
 function ggrep()
 {
-    local files pattern
-    pattern=$(echo "$@" | awk -F' - ' '// {print $1}')
-    files=$(echo "$@" | awk -F' - ' '// {print $2}')
-    #pattern="${@%%_*}"
-    #files="${@#*_}"
-    #while arg in "$@"; do
-    #    [[ "$arg" != "--" ]]
-    #    [[ ]] && files+=" $arg"
-    #done
-    set -x
-    git grep "$pattern" $(git rev-list --all -- ${=files}) -- ${=files}
-    set +x
+	local files pattern
+	pattern=$(echo "$@" | awk -F' - ' '// {print $1}')
+	files=$(echo "$@" | awk -F' - ' '// {print $2}')
+	#pattern="${@%%_*}"
+	#files="${@#*_}"
+	#while arg in "$@"; do
+	#    [[ "$arg" != "--" ]]
+	#    [[ ]] && files+=" $arg"
+	#done
+	set -x
+	git grep "$pattern" $(git rev-list --all -- ${=files}) -- ${=files}
+	set +x
 }
 function commit()
 {
@@ -102,9 +102,9 @@ function github()
 #
 function githubAPI()
 {
-	local limit=20 endpoint='https://api.github.com/graphql' request response fields
-	local echo
-	zparseopts -D -M - e=echo
+	local limit=20 endpoint='https://api.github.com/graphql' #request response fields
+	local echo verbose ret
+	zparseopts -D -M - e=echo v=verbose
 
 	request=$(cat) <<-GQL
 	{ 
@@ -112,21 +112,26 @@ function githubAPI()
 			search(query:\$search, first: \$limit, type: REPOSITORY){
 				nodes {
 				... on Repository {
-					nameWithOwner, description, stargazers { totalCount }, createdAt, updatedAt
+					nameWithOwner, createdAt, updatedAt, stargazers { totalCount }, description
 				}
 				}
 			}
 		}",
-		"variables":{ "search":"$(omz_urlencode "$*")","limit":$limit }
+		"variables":{ "search":"fork:true $*","limit":$limit }
 	}
 	GQL
-	fields='.data.search.nodes[] | .nameWithOwner,.description,.stargazers.totalCount,.createdAt,.updatedAt'
-
-	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d "${request//$'\n'/}" $endpoint)
-	if [[ $? -eq 0 ]]; then
+	#	"variables":{ "search":"fork:true $(omz_urlencode "$*")","limit":$limit }
+	fields='.data.search.nodes[] | .nameWithOwner,.createdAt[0:10],.updatedAt,.stargazers.totalCount,.description'
+	request=${request//$'\n'/}
+	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d $request $endpoint)
+	ret=$?
+	(( $#verbose )) && {
+		jq -r >$TTY <<<$request
+		jq -r >$TTY <<<$response
+	}
+	if (( ret == 0 )); then
 		local field
 		typeset -a repos tmp
-
 		while read -r field; do
 			tmp+=("$(trim "$field")")
 			if (($#tmp == 5)); then
@@ -140,7 +145,7 @@ function githubAPI()
 		elif [[ $#repos -eq 1 ]]; then
 			github -r $echo $(explode "$repos" ' ' 1)
 		else
-			name=$(chooser -s' ' -f1 "$repos" "Open this search in github") || cancel
+			name=$(chooser -s' ' -f1 $repos "Open this search in github") || cancel
 			[[ "$name" == 'Open' ]] && github -s "$*" || github -r $echo $name
 		fi
 	fi
@@ -148,26 +153,26 @@ function githubAPI()
 
 function gitgetrepo()
 {
-    local repo d q
+	local repo d q
 	zparseopts -D -M - d:=d
-    (
-        [[ -n "$d" ]] && d=$d[2] || d="$*"
+	(
+	[[ -n "$d" ]] && d=$d[2] || d="$*"
 		[[ -d "$d" ]] && cd $1 || { techo -c err "Directory not found: $1"; return 1 }
 		repo=$(git remote show origin 2>/dev/null) || return 1
-        repo=$(echo $repo | awk '/Fetch URL/{print $3}')
-        [[ -n $repo ]] && echo "$repo"
-    )
+		repo=$(echo $repo | awk '/Fetch URL/{print $3}')
+		[[ -n $repo ]] && echo "$repo"
+	)
 }
 
 function gselect()
 {
-    local i n var line lines noSelect nlimit='-500'
+	local i n var line lines noSelect nlimit='-500'
 	
 	setopt extendedglob
 	
 	lines=("${(@f)$(git log --graph --oneline --all $nlimit $@)}")
 
-    # mark lines without content as non-selectable
+	# mark lines without content as non-selectable
 	n=$#lines
 	for ((i=1; i<=$n; i++)); do
 		if [[ ! "${lines[$i]}" =~ [a-f0-9] ]]; then
@@ -175,7 +180,7 @@ function gselect()
 		fi
 	done
 	chooser -n "$noSelect" -R '([a-f0-9]{5,40} .*)' "$lines[@]"
-    #line=(${=line##[^a-f0-9]#})
+	#line=(${=line##[^a-f0-9]#})
 }
 
 function gpush()
@@ -207,10 +212,21 @@ function gremote()
 }
 
 function url() {
-	local schemes=(http https ftp scp git)
-	[[ "$1" = 'getscheme' ]] && {
-		[[ $2 =~ (${(j.|.)schemes})"://"* ]] && echo $match[1]
-	}
+	local schemes=(ssh git http https ftp ftps)
+	local getscheme gethost getuser userhostpat='(([-[:alnum:]]+)@)?([-.[:alnum:]]+)'
+	zparseopts -D -M - -s=getscheme h=gethost u=getuser
+	if (( $#getscheme )); then
+		if [[ $2 =~ (${(j.|.)schemes})'://'$~userhostpat ]]; then
+			echo $match[1]
+			return
+		fi
+	fi
+
+	if [[ $2 =~ $~userhostpat ]]; then
+		(( $#getscheme )) && echo 'git'
+		(( $#getuser )) && echo $match[2]
+		(( $#gethost )) && echo $match[3]
+	fi
 }
 
 # Added 2019-09-03 19:04
