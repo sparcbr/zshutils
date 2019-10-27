@@ -1,4 +1,4 @@
-VERSION=1.0.5
+VERSION=1.0.7
 
 setopt nomultios
 
@@ -11,7 +11,7 @@ function getfullpath()
 {
 	local relative
 	zparseopts -D - r:=relative
-	[[ $# -ge 1 ]] || return 1
+	(( $# )) || return 1
 	[[ -n $relative ]] && type realpath >/dev/null &&
 		realpath --relative-base=${relative[2]#=} $1 2>/dev/null || echo "${(z)1:P}"
 }
@@ -86,25 +86,43 @@ function backup()
 #@TODO
 function rename()
 {
-	local name dir fullpath
-	(( $# > 0 )) || usage $0
+	local orig name dir fullpath
+	(( $# )) || usage $0
 	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
-	name="$(getfilename "$1")"
+	orig="$(getfilename "$1")"
 	dir="$(getpath $(getfullpath $1))"
-	fullpath="$dir/$name"
+	fullpath="$dir/$orig"
 	[[ -f "$1" || -d "$1" ]] || abort 127 "$1 doesn't exist or no file permission"
-	if input -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -v name && [[ -n $name ]]; then
+	name=${2:-$orig}
+	if input -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -v name && \
+		[[ -n $name && $name != $orig ]]
+	then
 		run $sudo mv "$fullpath" "$dir/$name"
 	fi
 }
 
 function ddiff()
 {
-	local list cmd file sudo config var
-	zparseopts -D - c=config l=list s=sudo i:=ignore #@TODO ignore
+	local list cmd file sudo config var dargs r u q
+	zparseopts -D -M - c=config -set=c l=list s=sudo i:=ignore q=q
+
+	echo "dir1=$dir1\ndir2=$dir2"
+	[[ -n $list ]] && return 0
+	
+	dargs=(-u -r)
+	[[ -n $q ]] && dargs+=($q)
+
 	if [[ -n $config || -z $dir1 || -z $dir2 ]]; then
-		[[ -n $1 ]] && isDir $1 && { dir1=${1%/} ; shift }
-		[[ -n $1 ]] && isDir $1 && { dir2=${1%/} ; shift }
+		if [[ -n $config ]]; then
+			if [[ -n $1 ]]; then
+				isDir $1 && dir1=${1%/} || return
+				shift
+			fi
+			if [[ -n $1 ]]; then
+				isDir $1 && dir2=${1%/} || return
+				shift
+			fi
+		fi
 		if [[ -z $dir1 ]]; then
 			input -p "Dir 1" -v var || return
 			isDir -m $var && dir1=$var || return
@@ -113,13 +131,8 @@ function ddiff()
 			input -p "Dir 2" -v var || return
 			isDir -m $var && dir2=$var || return
 		fi
-		d1=$dir1 d2=$dir2
-		list=1
-	fi
-
-	if [[ -n $list ]]; then
-		echo "dir1=$dir1 dir2=$dir2"
-		return 0
+		d1=$dir1; d2=$dir2
+		echo "dir1=$dir1\ndir2=$dir2"
 	fi
 
 	if [[ -d $dir1 && -d $dir2 ]]; then 
@@ -128,14 +141,15 @@ function ddiff()
 			shift
 		fi
 		if [[ -z $cmd ]]; then
-			[[ -n $1 ]] && run $sudo -p "diff -ur \$d1/$1 \$d2/$1" diff -ur $dir1/$1 $dir2/$1 ||
-				run $sudo -p "diff -ur \$dir1 \$dir2" diff -ur $dir1 $dir2
+			[[ -n $1 ]] && run $sudo -p "diff -ur \$d1/$1 \$d2/$1" diff $dargs $dir1/$1 $dir2/$1 ||
+				run $sudo -p "diff -ur \$dir1 \$dir2" diff $dargs $dir1 $dir2
 		else
 			[[ -n $1 ]] && run $sudo -p "${=cmd} \$dir1/$1 \$dir2/$1" $=cmd $dir1/$1 $dir2/$1 ||
 				run $sudo -p "${=cmd} \$dir1 \$dir2" $=cmd $dir1 $dir2
 		fi
 	fi
 }
+
 # Added 2019-05-03 16:50
 function syncDirs()
 {
@@ -264,20 +278,19 @@ function syncIhm()
 # Added 2019-02-20 09:23:39 @TODO
 function box()
 {
-	local box search=$1
+	local box base=$HOME/repos search=$1
 	#zparseopts -D -M - S:=search
 	#include boxes
 	#box start
-	cd $HOME/repos
-	if [[ -d $search ]]; then
+	if [[ -n $search && -d $base/$search ]]; then
 		box=$search
 	else
-		#@
-		box=$(chooser ${=1:+-S "$1"} *(-/om)) || cancel
-		[[ -d $box ]] || abort 127
+		local list=($base/*(-/om))
+		box=$(chooser ${=1:+-S $1} $list:t) || cancel
+		[[ -d $base/$box ]] || abort 127
 	fi
-	cd $box
-	queue -d .
+	cd $base/$box
+	todo -d . #@TODO mv to cd hook
 }
 
 

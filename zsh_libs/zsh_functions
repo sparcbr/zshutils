@@ -1,4 +1,5 @@
-VERSION=1.0.5
+VERSION=1.0.7
+#lazyload=run,input,chooser,confirm,todo 
 
 #@TODO check i it's the top shell, and i it is, don't exit, just return: [[ $- =~ m ]] || EXIT=1
 #		echo $ZSH_EVAL_CONTEXT
@@ -40,30 +41,56 @@ OK=" [${C[ok]}OK$C_]"
 
 function input()
 {
-	local var str p gui z colors args title
-	zparseopts -M -D - p:=p v:=var g=gui z=z t:=title
+	local _var str p gui z c colors args title raw _buttons
+	zparseopts -M -D - c:=c p:=p v:=_var g=gui z=z t:=title r=raw \
+		b:=_buttons -buttons:=b
+
+	typeset -A buttons=(Cancel 1 Ok 0)
+	if (($#_buttons)); then
+		explode -A':' -v _buttons $_buttons[2] ','
+		buttons+=(${(kv)_buttons})
+	fi
+
 	colors=(-fg white -bg black)
 	p=${p[2]:-Input text}
 	title=${title[2]:-Input text}
-	if [[ -n "${var[2]}" ]]; then
-		var="${var[2]}"
-		[[ -v $var ]] || typeset -g $var
-	fi
-	str=${@:-${(P)var}}
-	techo -n -c head "$p: "
-	if [[ -n $z ]] && type zenity>/dev/null; then
-		str=$(zenity -title "$title" --entry --text="$p" --entry-text="$str") || cancel
-		techo -c warn $str
-	elif type gxmessage >/dev/null; then
-		args=($colors -center -ontop -wrap -buttons Cancel:1,Ok:0)
-		str=$(gxmessage $args -title "$title" -entrytext "$str" "$p") || cancel
-		techo -c warn $str
+	if [[ -n $_var[2] ]]; then
+		_var=$_var[2]
+		typeset -g $_var
+		str=${@:-${(P)_var}}
 	else
-		vared str || read -r str || cancel
+		str="$@"
 	fi
 
-	if [[ -n $var ]]; then
-		${(P)var::=$str}
+	[[ ${p: -1} != ' ' ]] && techo -n -c ${c[2]:-head} "$p$C_: " || techo -n $c $p 
+
+	if [[ -n $z ]] && type zenity>/dev/null; then
+		str=$(zenity -title "$title" --entry --text="$p" --entry-text="$str") || cancel
+		(($#str)) && techo -c warn $str
+	elif type gxmessage >/dev/null && [[ -z $raw ]]; then
+		args=($colors -center -ontop -wrap -buttons "$(implode -A':' buttons ',')")
+		str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")
+		ret=$?
+		in_array $ret buttons || cancel
+		str=$buttons[(ie)$ret] #@TODO
+		(($#str)) && techo -c warn $str
+	else
+		if [[ -o zle ]]; then
+			techo # newline, because vared clears the line
+			vared -e str
+		else
+			read -r str
+		fi
+		ret=$?
+		if ((ret)); then
+			((ret == 130)) && cancel || return 1
+		fi
+	fi
+	
+	(($#str)) || return 10
+	
+	if [[ -n $_var ]]; then
+		typeset -g "$_var=$str"
 	else
 		echo $str
 	fi
@@ -91,69 +118,98 @@ function confirm()
 	return $ret
 }
 
-# Receive a list and the default selected item.
-# Put the default item on the first position.
-# @param string selected
-# @param string[] list
-function mklist()
-{
-	local list first i
-	first=$1
-	list=($1)
-	shift
-	for i; do [[ "$i" != "$first" ]] && list+=($i) ; done
-	echo "${list[@]}"
-}
-
 function chooser()
 {
-	local noSelect chosen ret sep field search default
-	zparseopts -M -D - c=color p:=print n:=noSelect R:=regex s:=sep f:=field \
-		S:=search D:=default
+	local noSelect sep field bytes search default
+	local list ifs var chosen chosenList selectors events
 
-	if [ $# -gt 1 ]; then
-		local args
-		chosen=$(
-			NLIST_SET_SEARCH_TO=$search[2] \
-			ZSHSELECT_START_IN_SEARCH_MODE=$+search \
-			ZSHSELECT_NONSELECTABLE=$noSelect[2] \
-			zsh-select $default $@
-		)
-		#(($#search[2])) && args+=(NLIST_SET_SEARCH_TO=$search[2])
-		#(($#noSelect[2])) && args+=(ZSHSELECT_NONSELECTABLE=$noSelect[2])
-		#(($#search[2])) && args+=(NLIST_SET_SEARCH_TO=$search[2])
-		#chosen=$($args ZSHSELECT_START_IN_SEARCH_MODE=$+search zsh-select $@)
-		ret=$?
-	else
-		chosen="$1"
+	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
+
+	zparseopts -D -M - c=color p:=print n:=noSelect R:=regex S:=search \
+		 v:=var d:=default s:=sep f:=field -ifs:=ifs b:=bytes E:=events
+
+	if (($#sep || $#field)); then
+		(($#sep && $#field)) && unset 'selectors[(I)[sf]]'
+		field=${field[2]:-1}
+		sep=${sep[2]:- }
 	fi
-	[[ $#chosen -gt 0 ]] || return $ret
-	if [[ -n $regex ]]; then
-		if [[ $chosen =~ $regex[2] ]]; then
-			echo "$match[@]"
-			return 0
-		fi
-	elif [[ -n $sep ]]; then
-		echo $(explode "$chosen" $sep[2] $field[2])
-		return 0
+
+	if [[ -n $ifs ]]; then
+		explode -v list "$*" $ifs[2]
 	else
-		echo "$chosen"
-		return 0
+		list=("$@")
 	fi
-	return 1
+
+	if (($#list > 1)); then
+		{
+			[[ -n $default[2] ]] && default=($default[2])
+			explode -v chosenList "$(
+				NLIST_SET_SEARCH_TO=$search[2] \
+				ZSHSELECT_START_IN_SEARCH_MODE=$+search[2] \
+				ZSHSELECT_NONSELECTABLE=$noSelect[2] \
+				ZSHSELECT_ENABLE_EVENTS=$events[2] \
+				zsh-select $default "${(@)list:|default}" || throw $?
+			)" $'\n'
+		} always {
+			if catch '*'; then
+				return $CAUGHT
+			fi
+		}
+	else
+		chosenList=($list)
+	fi
+
+	(($#chosenList)) || return 10
+
+	list=()
+	for chosen in $chosenList; do
+		local opt
+
+		for opt in $selectors; do
+			case $opt in
+			R)
+				if [[ $chosen =~ $regex[2] ]]; then
+					chosen=$match
+				else
+					continue
+				fi
+			;;
+			b)
+				#chosen=$(echo - $chosen | cut $bytes)
+				typeset -l "chosen=${chosen:bytes[1,]}"
+			;;
+			s|f)
+				explode -v chosen $chosen $sep $field
+			;;
+			esac
+		done
+		list+=($chosen)
+	done
+
+	if (($#var)); then
+		set -A "$var[2]" $list
+	else
+		print -r $list
+	fi
+
+	#[[ ! -t 1 || -z $var ]] && print -r $list
+	return 0
 }
 
 function chkCmdInstall()
 {
-	local deb ret
-		# techo -c err "$cmd command not found"
 	if ! command -v $1 >/dev/null; then
-		[ -n "$2" ] && deb=$2 || deb=$1
-		techo "Installing $deb (provides $cmd)"
-		sudo apt install $deb
-		ret=$?
-		[ $ret -ne 0 ] && techo -c err "Error installing $deb"
-		return $ret
+		local deb ret tmp
+		techo -c lred "$1$C_: command not found. $C[warn]Searching for package to install."
+		[[ -n $2 ]] && deb=$2 || {
+			chooser -v deb -s':' -f1 --ifs=$'\n' "$(dpkg -S '*/'$1)" || return 127
+		}
+		techo "Installing $C[lcyan]$deb (provides $C[lcyan]$1)"
+		sudo apt install $deb || {
+			ret=$?
+			techo -c err "Error installing $deb"
+			return $ret
+		}
 	fi
 }
 
@@ -164,12 +220,13 @@ function alert()
 		icon="error"
 		title="Error"
 		shift
-		[ -z "$NOSND" ] && sndplay error || vflash
+		((!NOSND)) && sndplay error
 	else
 		icon="trophy-gold"
 		title="Success"
-		[ -z "$NOSND" ] && sndplay success || vflash
+		((!NOSND)) && sndplay success
 	fi
+	vflash
 	notify-send --icon=$icon "$title" "$*"
 }
 
@@ -185,29 +242,6 @@ function sndplay()
 	run -I libsox-fmt-mp3 - shuf -ezn 1 $dir/* | xargs -0 -n1 play
 }
 
-# Say the file, line number and optional message for debugging
-# Inspired by bash's `caller` builtin
-# Thanks to https://unix.stackexchange.com/a/453153/143394
-function yelp()
-{
-	# shellcheck disable=SC2154  # undeclared zsh variables in bash
-	if [ -n "$BASH_VERSION" ]; then
-		local file=${BASH_SOURCE[1]} func=${FUNCNAME[1]} line=${BASH_LINENO[0]}
-	else  # zsh
-		emulate -L zsh  # because we may be sourced by zsh `emulate bash -c`
-		# $funcfiletrace has format:  file:line
-		#local file=${funcfiletrace[1]%:*} line=${funcfiletrace[1]##*:}
-		#local func=${funcstack[2]}
-		#[[ "$func" =~ '/' ]] && func=source  # $func may be filename. Use bash behaviour
-		# techo "${file##*/}:$func:$line $*"
-		#print -l -- funcfiletrace $funcfiletrace - funcsourcetrace $funcsourcetrace - funcstack $funcstack - functrace $functrace
-		local integer n=$#functrace i=${1:-0}
-		[[ $functrace[$n] = $SHELL:* ]] && ((n--))
-		for ((i++; i<=n; i++)); do
-			techo -c warn $functrace[$i] $_C in $C[lgray]$funcfiletrace[$i]
-		done
-	fi
-}
 [ -z "$BASH" ] || return
 function array_dump()
 {
@@ -219,7 +253,7 @@ function array_dump()
 		done
 	elif [[ $(vartype "$1") = array* ]]; then
 		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
-		for val in "${(P@)1}"; do
+		for val in "${(qP@)1}"; do
 			techo "${(qqq)val}"
 		done
 	else
@@ -273,139 +307,130 @@ function run_end()
 # 4: Above, plus finishing message
 # 5: Above, plus associated command
 # 6: Above, plus full command with arguments
+comp+=('run=which')
 function run()
 {
-	local ret cmd fullcmd logfile watch
+	local ret cmd fullcmd logfile watch cmdPrefix
 	local sudo trysudo dryrun verbose color alert print
-	local cmdinst workdir skipErrors okcodes
+	local cmdinst workdir skipErrors okcodes debug
 
-	if [[ "${1:0:1}" == - ]]; then
+	if [[ ${1:0:1} == - ]]; then
 		zparseopts -M -D - v:=verbose c:=color a=alert p:=print \
 			s=sudo S=trysudo n=dryrun I:=cmdinst -cd:=workdir E=skipErrors \
-			l:=logfile w:=watch N:=okcodes -ok-exit-codes:=N
+			l:=logfile w:=watch N:=okcodes -ok-exit-codes:=N D:=debug
 
-		[[ "$1" == - ]] && shift
-		[[ ${1:0:1} == - ]] && { abort 1 "Invalid command: $1"; return }
+		[[ $1 == - ]] && shift
+		[[ ${1:0:1} == - ]] && { abort 2 "Invalid command: $1"; return }
 	fi
 	verbose=${verbose[2]:-6}
 
 	cmd=$1
-	if [[ -n "$sudo" ]]; then
+	if [[ -n $sudo ]]; then
 		fullcmd=(sudo "$@")
 		trysudo=
 	else
 		fullcmd=("$@")
 	fi
 
-	if [[ -z "$color" ]]; then
+	if [[ -z $color ]]; then
 		color=(-c head)
-	elif [[ "$color" = 'none' ]]; then
+	elif [[ $color == 'none' ]]; then
 		color=''
 	fi
 	[[ -n $print ]] && print=$print[2]
-	if [[ $verbose -ge 3 ]] || [[ $verbose -ge 2 && -n $print ]] ; then
-		if [[ $verbose -ge 6 ]]; then
+	if ((verbose>=3)) || [[ $verbose -ge 2 && -n $print ]] ; then
+		if ((verbose>=6)); then
 			[[ -n $print ]] && techo $color $print
 			techo $color $fullcmd
 		elif [[ -n $print ]]; then
-			[[ $verbose -ge 5 ]] && techo $color "$print ($cmd)" || techo $color $print
+			((verbose>=5)) && techo $color "$print ($cmd)" || techo $color $print
 		else
 			techo $color $cmd
 		fi
 	fi
-	[[ -n "$print" ]] && print="$print : $cmd" || print=$cmd
+
+	[[ -n $print ]] && print="$print : $cmd" || print=$cmd
+
 	{
 		[[ -n $dryrun ]] && return 0
 
 		if [[ -n $workdir ]]; then
 			workdir=$workdir[2]
 			if [[ ! -d $workdir ]]; then
-				confirm "$workdir does not exist. Create" && mkdir "$workdir" || throw $?
+				confirm "$workdir does not exist. Create" && mkdir $workdir || throw $?
 			fi
-			cd "$workdir" || throw $?
+			cd $workdir || throw $?
 		fi
+
 		if [[ -z $okcodes ]]; then
 			okcodes=(0)
 		else
-			explode -v okcodes "$okcodes[2]" ','
+			explode -v okcodes $okcodes[2] ','
 			in_array okcodes 0 || okcodes+=(0)  # add 0 to successful exit codes
 		fi
 
+		(($#debug)) && DEBUG=$debug[2]
+		if ((DEBUG)); then
+			(($#watch)) && _dbg_funcOnOff $watch[2]
+			cmdPrefix='debug'
+		elif (($#color)); then
+			cmdPrefix='color'
+		fi
 		# # # # # # # # # #
 		# Execute command #
 		# # # # # # # # # #
-		if [[ -n "$color" ]]; then
+		#waitPid -c "dirtyMem -P" color $fullcmd
+		while ((1)); do
 			if [[ -n $watch ]]; then
-				waitPid -c "dirtyMem -P" color $fullcmd
-				color $fullcmd
+				$cmdPrefix $fullcmd & waitPid -c $watch[2] $!
 			else
-				color $fullcmd
+				$cmdPrefix $fullcmd
 			fi
-		else
-			if [[ -n $watch ]]; then
-				waitPid -c "dirtyMem -P" $fullcmd
-			else
-				$fullcmd
-			fi
-		fi
-		ret=$?
-
-		if [[ -n $DEBUG ]]; then
-			typeset -tf $cmd || set -x
-		fi
-		[[ $ret -eq 130 ]] && throw $ret
-		if [[ $ret -eq 127 ]]; then
-			chkCmdInstall $cmd $cmdinst[2]
 			ret=$?
-			if [[ $ret -eq 0 ]]; then
-				if [[ -n "$color" ]]; then
-					color $fullcmd
-				else
-					$fullcmd
-				fi
-				ret=$?
-			fi
-		fi
-		if [[ -n $DEBUG ]]; then
-			typeset +tf $cmd || set +x
-			return $ret
-		fi
 
-		if ! in_array okcodes $ret; then #TODO
-			if [[ -n "$trysudo" ]]; then
+			((ret==130)) && throw $ret
+			if ((ret==127)); then
+				chkCmdInstall $cmd $cmdinst[2] && continue || throw 127
+			fi
+
+			break
+		done
+
+		if ! in_array okcodes $ret; then
+			if [[ -n $trysudo ]]; then
 				techo "Trying with sudo"
-				color sudo $fullcmd
+				sudo $fullcmd
 				ret=$?
 			fi
 			in_array okcodes $ret || throw $ret
 		fi
 	} always {
+		if ((DEBUG)); then
+			(($#watch)) && _dbg_funcOnOff $watch[2] 0
+			#{ typeset +Ttf $cmd || set +x }
+		fi
 		if catch '*'; then
 			local data=(${=CAUGHT})
 			ret=$data[1]
-			if [[ $ret -eq 130 ]]; then
+			if ((ret==130)); then
 				cancel $verbose "$print $CANCEL"
 				return
 			fi
-			[[ $verbose -ge 1 ]] && techo "$print $FAIL ($data)"
-			[[ -n "$alert" ]] && error "$print error: $data"
+			((verbose)) && techo "$print $FAIL ($data)"
+			[[ -n $alert ]] && error "$print error: $data"
 			abort $skipErrors $ret
 			return
 		fi
 	}
 
-	case $ret in
-	0)
-		[[ $verbose -ge 4 ]] && techo "$cmd $OK"
-		[[ -n "$alert" ]] && success "$cmd finished successfully."
-	;;
-	*)
-		[[ $verbose -ge 1  ]] && techo "$print $FAIL"
-		[[ -n "$alert" ]] && error "$print error: ret=$ret"
+	if in_array okcodes $ret; then
+		((verbose>=4)) && techo "$cmd $OK"
+		[[ -n $alert ]] && success "$cmd finished successfully."
+	else
+		((verbose)) && techo "$print $FAIL"
+		[[ -n $alert ]] && error "$print error: ret=$ret"
 		abort $skipErrors $ret
-	;;
-	esac
-
+	fi
 	return $ret
 }
 
@@ -469,7 +494,7 @@ function color()
 function colorify()
 {
 	local line data debug
-	zparseopts -D -M - d:=debug
+	zparseopts -D -M - D:=debug
 	#@broken: [ ! -p /dev/stdin ] && exit 0
 	if [ "$1" = '-all' ] || [ "$1" = '-c' ]; then
 		if [ "$1" = '-all' ]; then
@@ -493,13 +518,14 @@ function colorify()
 		local a cmd
 		if [[ -n $debug ]]; then
 			cmd=$debug[2]
+			# @TODO dbg_ps
 			while read line; do
-				if [[ $line =~ ^\\+$cmd:([0-9]+)\>\ (.*) ]]; then
-					techo -c lcyan $cmd:$match[1] ${_C}$match[2]
-				elif [[ $line =~ ^\\+([[:alnum:]]+):([0-9]+)\>\ (.*) ]]; then
-					techo -c blue $match[1]:$match[2] ${_C}$match[3]
+				if [[ $line =~ ^\\+([0-9]?)\<?$cmd:([0-9]+)\>\ (.*) ]]; then
+					techo -c lcyan $cmd:$match[2] ${_C}$match[3]
+				elif [[ $line =~ ^\\+([0-9]?)\<?([[:alnum:]]+):([0-9]+)\>\ (.*) ]]; then
+					((DEBUG)) && techo -c blue $match[1]:$match[2] ${_C}$match[3]
 				else
-					techo $line
+					techo -c lred $line
 				fi
 			done
 		else
@@ -546,20 +572,18 @@ function refactor()
 	find $dir -type f -name '*.php' -print0 | xargs -0 sed -ised "s/$search/$replace/g"
 }
 
-alias q=queue
+alias q=todo
 # Added 2019-06-04 17:47
-function queue()
+function todo()
 {
-	local qid qFilter cmd queue queues dir baseDir=$CFG e="q"
-	zparseopts -D -M - d:=dir -dir:=d
-	if [[ $# -eq 0 ]]; then
+	local id filter cmd todo todos
+	local box dir glob data baseDir=$CFG e='todo'
+	zparseopts -D -M - d:=dir -dir:=d f:=filter
+	if (( ! $# )); then
 		cmd='show'
 	else
 		cmd=$1; shift
-		if [[ -n $1 ]]; then
-			qFilter=$1
-			shift
-		fi
+		data=$*
 	fi
 	if [[ $#dir[2] -ne 0 ]]; then
 		dir=$dir[2]
@@ -567,42 +591,60 @@ function queue()
 		dir=$baseDir
 	fi
 	[[ -d $dir ]] || abort 127 "\"$dir\": directory not found"
-	[[ -z $qFilter ]] && qFilter="*.$e"
+	[[ -z $filter ]] && filter='*'
 
 	include file
+	#glob=$dir/$filter.$e
+	glob="$dir/*.$e"
+	todos=($~glob(-N))
 	case $cmd in
-		add)
-			#queues=($dir/$~qFilter(-N))
-			queues=($dir/*(-N))
-			queue=$(chooser -S $qFilter $queues:t "New queue" "Browse full path") || cancel
-			if [[ "$queue" == "New queue" ]]; then
-				queue=$(input -p "Enter queue id") || cancel
-				[[ ${queue:0:1} != / ]] && queue=$dir/$queue
-				[[ ${queue: -2} != ".$e" ]] && queue=$queue.$e
-			elif [[ "$queue" == "Browse full path" ]]; then
-				queue=$(chooser --file -p "Choose path of queue") || cancel
-				[[ ${queue:0:1} != / ]] && queue=$dir/$queue
-				#dir=$(getfilename $queue)
-			fi
-			qid=$(noext $(getfilename $queue) $e)
-			input -p "Adding to $qid" "$@" >> $queue || cancel
-			;;
-		show)
-			for queue in $dir/$~qFilter(-N); do
-				qid=$(noext $(getfilename $queue) $e)
-				run -p "Queue: $qid" show $queue
-			done
-			;;
-		*)
-			techo -c err "$cmd: invalid command"
-			usage
+	add)
+		todo=$(chooser -S $filter $todos:t "New todo" "Browse full path") || cancel
+		if [[ "$todo" == "New todo" ]]; then
+			todo=$(input -p "Enter todo id") || cancel
+			[[ ${todo:0:1} != / ]] && todo=$dir/$todo
+			[[ $(getext $todo) == $e ]] || todo=$todo.$e
+		elif [[ "$todo" == "Browse full path" ]]; then
+			todo=$(chooser --file -p "Choose path of todo") || cancel
+			[[ ${todo:0:1} != / ]] && todo=$dir/$todo
+			# @todo
+			#dir=$(getfilename $todo)
+		fi
+		id=$(noext $(getfilename $todo) $e)
+		input -p "Adding to todo $id" "$data" || cancel
+		;;
+	show)
+		(($#todos)) || return 0
+		todo=$(chooser -S $filter $todos:t) || cancel
+		id=$(noext $(getfilename $todo) $e)
+		run -p "Todo: $id" show $todo
+		#for todo in $~glob(-N); do
+		#	id=$(noext $(getfilename $todo) $e)
+		#	run -p "Todo: $id" show $todo
+		#done
+		sqlite3 -batch test.db
+		;;
+	*)
+		techo -c err "$cmd: invalid command"
+		usage
 	esac
 
 	function usage() {
-		techo -c warn "$0 [--dir/-d path] <add|show> [searchFilter]\n\
-			default filter: *.q\n\
-			default dir: $baseDir"
+		local opts=(
+			dir	 d "path(default: $baseDir)" 'base directory'
+			help h ''						 'help'
+		)
+		techo "$0 [options] [add|show] [filter]"
+		opts $opts
 	}
+}
+
+function opts()
+{
+	local long opt desc arg 
+	for long opt arg desc; do
+		print -ca -C 4 -- --$long -$opt $arg $desc
+	done
 }
 
 # Added 2019-09-20 15:55
@@ -619,3 +661,8 @@ function pizza()
 	done ; alert "pizza time" } &
 }
 
+# Added 2019-10-23 21:53
+function kcmd()
+{
+	qdbus $KONSOLE_DBUS_SERVICE $KONSOLE_DBUS_SESSION "$@"
+}

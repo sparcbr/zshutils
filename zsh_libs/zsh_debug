@@ -1,0 +1,133 @@
+VERSION=1.0.1
+#lazyload=debug,fstack
+[[ -v comp ]] || typeset -ga comp
+[[ -v _dbg_flvl ]] || typeset -gA _dbg_flvl
+integer DEBUG=0
+#zmodload zsh/zprof && zprof
+
+_dbg_def_lvl=2
+
+function _dbg_PS()
+{
+	local lvl c
+	lvl=${1:-$_dbg_def_lvl}
+	export PS4="%(${lvl}e,%F{8},%F{2})+%e<%N:%i>%f "
+}
+
+_dbg_PS
+
+function _dbg_trap()
+{
+	#confirm || setopt errexit
+	(($2==0 && _dbg_flvl[$1] <= DEBUG)) && [[ -o xtrace ]] && {
+		set +x
+	}
+	#techo $PS4 $ZSH_DEBUG_CMD
+}
+#trap '_dbg_trap $0 $LINENO' DEBUG
+function _dbg_fcfg()
+{
+	#((_dbg_flvl[$1] <= DEBUG)) && {
+		set +x
+	#}
+}
+
+function _dbg_funcOnOff()
+{
+	[[ -v _dbg_flvl ]] || { techo -c err not defined: _dbg_flvl; return 1 }
+	if (($2)); then
+		_dbg_flvl[$1]=$2
+		(($2>DEBUG)) && typeset -tf $1 || typeset -Tf $1
+		return
+	else
+		unset "_dbg_flvl[$1]"
+	fi
+	typeset +Ttf $1
+}
+
+function _test()
+{
+	local f="$1" test_f l
+	[[ $# -eq 0 ]] && abort 1 "Missing argument"
+	test_f="_test_$f"
+	type $test_f || abort 127 "Function \"$test_f\" not found"
+	$test_f && techo "$f $OK" || {
+		techo "$f $FAIL $?"
+		#fstack 3
+	}
+}
+
+function _test_explode()
+{
+	local f='explode' a=()
+	$f 'a;b' ';'
+	[[ ${a[1]} = 'a' && ${a[2]} = 'b' ]] || return $LINENO
+	a=($($f 'a  b ;; b' ';'))
+	[[ ${a[1]} = 'a  b ' && -z ${a[2]} && ${a[3]} = ' b' ]] || return $LINENO
+	a=($($f 'a  b ;; b' ' '))
+	[[ -n $a && ${a[1]} = 'a' && ${a[2]} = 'b' && ${a[3]} = ';;' && ${a[4]} = 'b' ]] || return $LINENO
+	return true
+}
+
+function debug()
+{
+	local _cmd _data _type keep _func ret debug alias run
+	zparseopts -D -M - k=keep D:=debug -alias:=alias r=run
+	_cmd=$1 ; shift
+
+	#@TODO source /usr/local/share/zshdb/dbg-trace.sh
+	# _Dbg_debugger
+
+	_type=($(typeOf -a $_cmd))
+	case $_type[1] in
+		alias)
+			local tmp=$(inalias $_cmd) || return 1
+			_func=$tmp
+			;;
+		command)
+			;;
+		function)
+			if [[ -v functions[$_cmd] ]]; then
+				_func=$_cmd
+			fi
+			;;
+		*)
+			;;
+	esac
+
+	(($#_func)) && _dbg_funcOnOff $_func 9
+
+	if (($#run)); then
+		#_data=$($_cmd "$@" 2>&1 | egrep "^\+$_cmd:|[^+]")
+		#_data=$($_cmd "$@" 2>&1) ; ret=$?
+		$_cmd "$@" #|& colorify -D $_cmd
+		ret=$pipestatus[1]
+		(( ! keep && $#_func )) && _dbg_funcOnOff $_func
+		#(( $#_data )) && colorify -d $_cmd <<<$_data
+		return $ret
+	fi	
+}
+
+# Say the file, line number and optional message for debugging
+# Inspired by bash's `caller` builtin
+# Thanks to https://unix.stackexchange.com/a/453153/143394
+function fstack()
+{
+	# shellcheck disable=SC2154  # undeclared zsh variables in bash
+	if [ -n "$BASH_VERSION" ]; then
+		local file=${BASH_SOURCE[1]} func=${FUNCNAME[1]} line=${BASH_LINENO[0]}
+	else  # zsh
+		emulate -L zsh  # because we may be sourced by zsh `emulate bash -c`
+		# $funcfiletrace has format:  file:line
+		#local file=${funcfiletrace[1]%:*} line=${funcfiletrace[1]##*:}
+		#local func=${funcstack[2]}
+		#[[ "$func" =~ '/' ]] && func=source  # $func may be filename. Use bash behaviour
+		# techo "${file##*/}:$func:$line $*"
+		#print -l -- funcfiletrace $funcfiletrace - funcsourcetrace $funcsourcetrace - funcstack $funcstack - functrace $functrace
+		local integer n=$#functrace i=${1:-0}
+		[[ $functrace[$n] = $SHELL:* ]] && ((n--))
+		for ((i++; i<=n; i++)); do
+			techo -c warn $functrace[$i] $_C in $C[lgray]$funcfiletrace[$i]
+		done
+	fi
+}

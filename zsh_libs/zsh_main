@@ -1,112 +1,116 @@
-VERSION=1.0.7
-[[ "$SUDO_USER" != "" ]] && export HOME=~$SUDO_USER
-export PATH=$PATH:$HOME/bin
-export NOSND=1
-[[ -z "$ZSH_LIBS" ]] && export ZSH_LIBS=${$(realpath $0):h}
+VERSION=1.0.8
 [[ -v comp ]] || typeset -g -a comp
 
-function techo() {
-	local c args nonl
-	zparseopts -M -D - c:=c n=nonl
+function techo()
+{
+	local c args nonl print
+	zparseopts -M -D - c:=c n=nonl P=print
 	[[ -n "$nonl" ]] && args=('-n')
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
-	if [[ -n "$c" ]]; then
-		c="${c[2]}"
-		[ -z "${C[$c]}" ] && type colorSet >/dev/null && colorSet $c
-		while [[ ${1[1]} = '-' ]]; do
-			args+=("$1")
-			shift
-		done
-		echo -e $args "${C[$c]}${@}$C_" >$TTY
+	while [[ ${1[1]} = '-' ]]; do
+		args+=("$1")
+		shift
+	done
+	if [[ -n $c ]]; then
+		local msg
+		c=$c[2]
+		if [[ $c = [0-9]## ]]; then
+			msg="\e[38;5;${c}m$@$C_"
+		else
+			[[ -v C[$c] ]] && type colorSet >/dev/null && colorSet $c
+			msg="${C[$c]}${@}$C_"
+		fi
+		if [[ -n $print ]]; then
+			print -P $args $msg >$TTY
+		else
+			echo -e $args $msg >$TTY
+		fi
+	elif [[ -n "$print" ]]; then
+		print -P $args "$@" >$TTY
 	else
 		echo -e $args "$@" >$TTY
 	fi
 }
 
-function cancel() { abort 130 "Cancelled $@" }
+function cancel() {
+	local ret=$?
+	((ret != 130)) && throw $ret
+	abort 130 "$C[warn]Cancelled $@"
+}
 
-function abort() {
-	local cod=$1 skipErrors noexception verbose
-	zparseopts -D - E=skipErrors e=noexception v:=verbose
+# @TODO skipErrors 
+function abort()
+{
+	local skipErrors noexception verbose print
+	integer cod=$1
+	zparseopts -D - E=skipErrors e=noexception v:=verbose -P=print
 	verbose=${verbose[2]:-2}
-	[[ $# -ge 1 ]] && shift
-	yelp 1
-	[[ $# -ge 1 && $verbose -gt 0 ]] && techo -c lred "$@"
-	[[ -n $nostop ]] && return $cod
-	[[ "$ABORT" -gt 0 ]] && $ABORT $cod "$@" 
-	{ [ -z "$EXIT" ] || [ $EXIT -gt 0 ] } && [[ ! -o interactive ]] && exit $cod
+	(($#)) && shift
+	((verbose>2 || DEBUG)) && fstack 1
+	(($# && verbose)) && techo -c lred "$@"
+	[[ -n $ABORT ]] && $ABORT $cod "$@" 
+
+	#@TODO $ZSH_EVAL_CONTEXT =~ toplevel* , does not seem to work
+	((EXIT)) && [[ ! -o interactive ]] && exit $cod
+
 	[[ -z $noexception ]] && throw $cod
 	return $cod
 }
 
-function _test()
+function implode()
 {
-	local f="$1" test_f l
-	[[ $# -eq 0 ]] && abort 1 "Missing argument"
-	test_f="_test_$f"
-	type $test_f || abort 127 "Function \"$test_f\" not found"
-	$test_f && techo "$f $OK" || {
-		techo "$f $FAIL $?"
-		#yelp 3
-	}
+	local _var _str _sep uniq _list ifs _Asep
+	zparseopts -D -M - v:=_var u=uniq -ifs:=ifs A:=_Asep
+
+	[[ -n $2 ]] && _sep=$2 || _sep=' '
+	if [[ -n $_Asep ]]; then
+		_Asep=$_Asep[2]
+	else
+		[[ $_sep != ':' ]] && _Asep=':' || _Asep=';'
+	fi
+	_list=()
+	for key in ${(Pk)1}; do
+		_list+=($key$_Asep${${(P)1}[$key]})
+	done
+	echo -n ${(@pj/$_sep/)_list}
 }
 
-function _test_explode()
-{
-	local f='explode' a=()
-	$f 'a;b' ';'
-	[[ ${a[1]} = 'a' && ${a[2]} = 'b' ]] || return $LINENO
-	a=($($f 'a  b ;; b' ';'))
-	[[ ${a[1]} = 'a  b ' && -z ${a[2]} && ${a[3]} = ' b' ]] || return $LINENO
-	a=($($f 'a  b ;; b' ' '))
-	[[ -n $a && ${a[1]} = 'a' && ${a[2]} = 'b' && ${a[3]} = ';;' && ${a[4]} = 'b' ]] || return $LINENO
-	return true
-}
 function explode()
 {
-	local _var str _sep uniq
-	zparseopts -D -M - v:=_var u=uniq
+	local _var _str _sep uniq _list ifs _Asep
+	zparseopts -D -M - v:=_var u=uniq -ifs:=ifs A:=_Asep
 	_sep=${2:- }
-	if [[ "$_sep" != ' ' ]]; then
-		str=${(q)1}
-	else
-		str=$1
-	fi
-	str=(${(@zps/$_sep/)str})
-	if [[ -n $uniq ]]; then
-		str=("${(@uz)str}")
-	fi
-	[[ -n "${_var[2]}" ]] && _var=${_var[2]}
-	if [[ -n "$3" ]]; then
-		[[ "$3" = [0-9]## ]] || abort 1 "\$3=$3: not a number"
+	[ -t 0 ] && _str=$1 || read _str
+	#[[ $_sep != ' ' ]] && _str=${_str// /$'\\ '}          #_str=${_str// /$'\\ '}
+	_list=(${(@ps/$_sep/)_str})
+	[[ -n $uniq ]] && _list=(${(@u)_list})
+	[[ -n $_var[2] ]] && _var=$_var[2]
+	if [[ -n $3 ]]; then
+		[[ $3 == [0-9]## ]] || abort 1 "\$3=$3: not a number"
 		if [[ -n $_var ]]; then
-			[[ -v $_var ]] || typeset -g $_var
-			eval $_var="'${(Q)str[$3]}'"
+			typeset -g $_var
+			#eval $_var="'${(Q)_str[$3]}'"
+			eval $_var="'${_list[$3]}'"
+			#echo ${(Q)_str[$3]}
 		else
-			echo "${(Q)str[$3]}"
+			print -r $_list[$3]
 		fi
+		#[ ! -t 1 ] && echo $_str[$3]
 	else
 		if [[ -n $_var ]]; then
-			_var=${_var:-reply}
-			[[ -v $_var ]] || typeset -ga $_var
-			set -A $_var ${(Q)str}
+			if [[ -n $_Asep ]]; then
+				typeset -gA $_var
+				_Asep=$_Asep[2]
+				set -A $_var ${(@ps/$Asep/)_list}
+			else 
+				typeset -ga $_var
+				set -A $_var $_list
+			fi
 		else
-			echo $str
+			print -r $_list
 		fi
+		#[ ! -t 1 ] && echo $_list
 	fi
-}
-
-function debug()
-{
-	local _cmd _data _type keep
-	zparseopts -D -M - k=keep
-	_cmd="$1" ; shift
-	_type="$(typeOf "$_cmd")"
-	[[ "$_type" == 'function' ]] && typeset -tf $_cmd #|| set -x
-	#_data=$($_cmd "$@" 2>&1 | egrep "^\+$_cmd:|[^+]")
-	_data=$($_cmd "$@" 2>&1)
-	[[ -z $keep && "$_type" == 'function' ]] && typeset +tf $_cmd #|| set +x
-	[[ $#_data -gt 0 ]] && colorify -d $_cmd <<<$_data
 }
 
 function vartype() {
@@ -116,51 +120,93 @@ function vartype() {
 # Set info for a lib
 function lib_set_info()
 {
-	local name=${(U)1} info
+	local name info
+	integer ll=$6 err
+	if [[ $1 == '-E' ]]; then
+		err=1
+		shift
+	fi
+	name=${(U)1}
 	typeset -Ag ZSH_${name}_INFO
-	set -A ZSH_${name}_INFO ver $2 path "$3" required $4 mtime "$5"
+	set -A ZSH_${name}_INFO ver $2 path "$3" required $4 mtime "$5" lazyload $ll err $err
 }
 
 function getmime()
 {
 	file -bi $(realpath "$@") | awk -F';' '{print $1}'
+	((pipestatus[1])) && fstack
+}
+
+function zshLibReadHeader()
+{
+	local mime=$(getmime "$*") version header
+	typeset -gA HEADER=()
+	{ read version ; read header } < "$*" || return
+	if [[ $mime = 'text/plain' && $version =~ VERSION=([0-9\.]+) ]]; then
+		VERSION=$match[1]
+		if [[ $header =~ ^\#(([[:alnum:]]+)(=([^[:blank:]]+))?)([[:blank:]]+([[:alnum:]]+)(=([^[:blank:]]+))?)*$ ]]
+		then
+			local opt val nop
+			for nop opt nop val in $match; do
+				case $opt in
+					lazyload)
+						;;
+					*) techo -r opt $opt=$val; continue
+						;;
+				esac
+				HEADER[$opt]=$val 
+			done
+		fi
+	fi
+}
+
+function isZshLib()
+{
+	local mime=$(getmime "$*")
+	[[ $mime = 'text/plain' && $(read -e "$*") = VERSION=[0-9\.]## ]]
 }
 
 function isScript()
 {
-	local mime=$(getmime "$@")
-	[[ "$mime" = "text/x-shellscript" ]] || {
-		[[ "$mime" = "text/plain" ]] && head -n1 "$*" | grep -q '^VERSION'
-	}
+	local mime=$(getmime "$*")
+	[[ $mime = 'text/x-shellscript' || $mime = 'text/plain' && $(read -e "$*") = VERSION=[0-9\.]## ]]
 }
 
 function typeOf()
 {
-	local name ret tpath
-	name="$1"
-	if [[ ! -f "$name" ]]; then
-		ret=($(which -w $name))
-		type="${ret[2]}"
-		if [[ "$type" != "none" ]]; then
-			if [[ "$type" == "command" ]]; then
-				tpath=$(which $name)
-				if isScript $tpath; then
-					type="script"
-				fi
+	#[[ -o xtrace ]] && _dbg_fcfg $0
+	local name ret tpath all result
+	local integer i=2
+	zparseopts -D -M - a=all p=p
+	name=$1
+	if [[ ! -f '$name' ]]; then
+		ret=($(which -w $all $p $name))
+
+		for ((i=2 ; $+ret[i] ; i+=2)); do
+			type=$ret[i]
+
+			if [[ $type == 'none' ]]; then
+				echo 'none'
+				return 1
 			fi
-			echo $type $tpath
-			return 0
-		fi
-		echo "none"
-		return 1
+
+			if [[ $type == 'command' ]]; then
+				tpath=$(which $name)
+				isScript $tpath && type='script'
+			fi
+
+			result+=($type:$tpath)
+		done
+		echo ${(z)${(@u)result//:/ }}
+		return 0
 	fi
 	
 	tpath=$name
 	
 	if isScript $tpath; then
-		type="script"
+		type='script'
 	elif [[ -x "$tpath" ]]; then
-		type="command"
+		type='command'
 	else
 		echo "none"
 		return 1
@@ -182,87 +228,159 @@ function zindent()
 	[[ -n $f ]] && echo "}"
 }
 
+function parseErrors()
+{
+	local line
+	while read line; do
+		#echo line=${(q)line}
+		[[ $line == 'EOF' ]] && return
+		if [[ $line =~ $'^(.+):([0-9]+): (parse error near) `(.*)\'' ]]; then
+		elif [[ $line =~ $'^(.+):([0-9]+): (condition expected): "(.*)"' ]]; then
+		elif [[ $line =~ $'^(.+):([0-9]+): (not an identifier):(.*)' ]]; then
+
+		else
+			techo -Pr "%F{9}${line}%f"
+			continue
+		fi
+		
+		print -Pr ${(@q)match}
+	done
+}
+
 # Include a zsh lib
 function include()
 {
-	local name lpath lazyload required force str mtime info
-	zparseopts -D -M - l=lazyload p:=lpath -path:=lpath r=required -required=r f=force
+	local quiet verbose lpath lazyload required force
+	local mtime info name
+	zparseopts -D -M - l=lazyload p:=lpath -path:=lpath r=required -required=r \
+		f=force q=quiet v:=verbose
 
-	[[ $# -eq 0 ]] && return 1
-	[[ "$1" = */* ]] && {
+	(( !$# )) && return 1
+	verbose=${verbose[2]:-2}
+	[[ -n $quiet ]] && verbose=0
+	if [[ $1 = */* ]]; then
 		lpath="$(getfullpath $1)"
 		name="${$(getfilename $1)#zsh_*}"
-	} || {
+	else
 		name="${1#zsh_*}"
-		if [[ -n "$lpath" ]]; then
-			lpath="${lpath[2]}"
+		if [[ -n $lpath ]]; then
+			lpath=$lpath[2]
 		else
 			lpath="$ZSH_LIBS/zsh_$name"
 		fi
-	}
+	fi
 		
-	[[ -n $required ]] && required=1 || required=0
+	required=$#required
 
-	if [[ ! -f "$lpath" ]]; then
-		techo "[\e[1;101mFAIL\e[0m] \e[91m$lpath not found\e[0m"
-		if [[ $required -eq 1 ]]; then
-			techo "\e[1;91mRequired $name not loaded\e[0m"
+	if [[ ! -f $lpath ]]; then
+		techo -P "[%1K%F{15}FAIL%f%k] %F{11}$lpath %F{9}not found%f"
+		if ((required)); then
+			techo -P "%F{9}Required %F{11}$name %F{9}not loaded%f"
 			[[ ! -o interactive ]] && abort 127
 		fi
 		return 127
 	fi
 
-	mtime=$(stat -L --printf='%Y' "$lpath") || abort $? 'stat error'
+	mtime=$(stat -L --printf='%Y' $lpath) || techo -P "%F{9}stat error on %F{11}$lpath%f"
 	info="ZSH_${(U)name}_INFO"
-	if [[ -z ${(P)info} || -n "$force" || "${${(P)info}[mtime]}" -lt "$mtime" ]]; then
-		if ! isScript $lpath; then 
-			techo "\e[91m$lpath is not a script\e[0m"
-			if [[ $required -eq 1 ]]; then
-				[[ ! -o interactive ]] && abort 2
+
+	if [[ -z ${(P)info} ||  # not loaded
+		-n $force ||  # force load 
+		${${(P)info}[mtime]} -lt $mtime ]] || # file was modified
+		((${${(P)info}[lazyload]} && ! $#lazyload)) # was lazy loaded 
+	then 
+		if ! zshLibReadHeader $lpath; then
+			techo -P "%F{11}$lpath %F{9}is not a zsh library%f"
+			if ((required)); then
+				[[ -o interactive ]] || abort 2
 				return 2
 			fi
 			return 1
 		fi
-		if [ -n "$lazyload" ]; then # @TODO
-			return 0
-		else
-			#[[ -o interactive ]] && 
-			techo -n "Including $name (${lpath/$ZSH_LIBS/\$ZSH_LIBS})"
-			source "$lpath"
-			ret=$?
-			if [ $ret -eq 0 ]; then
-				typeset -Ag _temp_aarray
-				lib_set_info $name $VERSION "$lpath" ${required:-0} "$mtime"
-				#[[ -o interactive ]] &&
-				techo " [\e[92m$VERSION\e[0m]"
-			else
-				local line
-				techo " [\e[1;101mFAIL\e[0m]"
-				if [[ $required -eq 1 ]]; then
-					techo "\n\e[1;92mRequired $name not loaded\e[0m"
-					[[ ! -o interactive ]] && abort 2
-					return 2
-				fi
-				return $ret
+
+		if (($#lazyload)); then # @TODO
+			local llfuncs func
+			if [[ -n $HEADER[lazyload] ]]; then
+				explode -v llfuncs ${HEADER[lazyload]} ','
+				for func in $llfuncs; do
+					functions[$func]="include $name && $func \$@"
+				done
 			fi
+			lib_set_info $name $VERSION "$lpath" ${required:-0} "$mtime" 1
+			return 0
+		fi
+
+		#[[ -o interactive ]] && 
+		techo -P -r "Including %F{11}$name%f ("${lpath/$ZSH_LIBS/"\\$"ZSH_LIBS}") [%F{2}$VERSION%f]"
+		if source $lpath; then
+			lib_set_info $name $VERSION "$lpath" ${required:-0} "$mtime"
+			#[[ -o interactive ]] &&
+		else
+			local error error2 file line tmp split
+			lib_set_info -E $name $VERSION "$lpath" ${required:-0} "$mtime"
+			techo -P "%F{11}$name%f [%K{1}%F{15}FAIL%f%k]"
+			(
+				coproc parseErrors 
+				#@TODO sort errors by file before opening files
+				while read -pr tmp; do
+					split=(${(z)tmp})
+					file=$split[1]; line=$split[2]; error=$split[3]; error2=$split[4]
+					techo -Pr "%F{3}$file:$line %F{9}${error} %K{1}%F{15}${error2}%f%k"
+					if type v 2>&1 >/dev/null; then
+						v $file:$line &
+					else
+						${EDITOR:-vim} $file +$line &
+					fi
+				done
+				echo EOF >&p
+			)
+
+			if ((required)); then
+				techo -P "\n%F{9}Required %F{11}\"zsh_$name\"%F{9} not loaded%f"
+				[[ -o interactive ]] || abort 2
+				return 2
+			fi
+			return $ret
 		fi
 	fi
 }
 
+function reload()
+{
+	local lib ll info libs=($(typeset -m 'ZSH_*_INFO' | cut -d'=' -f1))
+	for lib in $libs; do
+		if [[ $lib =~ 'ZSH_(.*)_INFO' ]]; then
+			info=ZSH_${match[1]}_INFO
+			((${${(P)info}[lazyload]})) && ll=-l || ll=''
+			include -q $ll ${(L)match[1]}
+		fi
+	done
+}
+
+function TRAPHUP() { reload }
+#function TRAPINT() {
+#	kill -$1 $$
+#	return $((128+$1))
+#}
+
 comp+=("inst=apt")
 function inst()
 {
-	local machine pkgs
-	zparseopts -D -E -M - m:=machine
-	if [[ -z "$machine" ]]; then
-		if [[ ${#@} -ge 1 ]]; then
-			pkgs=("$@")
+	local machine cmd pkgs pkg
+	zparseopts -D -M - m:=machine
+	if [[ -z $machine ]]; then
+		if (($#)); then
+			cmd=("$@")
 		else
-			pkgs=${$(fc -ln -1)[1]}
+			#@TODO findcmd(use inalias)
+			cmd=(${$(fc -ln -1)[1]})
 		fi
-		sudo apt-get install $pkgs
+		for cmd in $cmd; do
+			pkg=$(chooser -s':' -f1 --ifs $'\n' "$(dpkg -S '*/'$cmd)}") || return
+			(($#pkg)) && sudo apt-get install $pkg
+		done
 	else
-		echo "$@" >> "$CFG/${machine[2]}.pkgs.txt"
+		echo "$@" >> $CFG/$machine[2].pkgs.txt
 	fi
 }
 
@@ -271,15 +389,39 @@ function inst()
 # in_array array_name value
 function in_array()
 {
-	local name=$1 val="$2"
-	[[ ${${(P)name}[(i)$val]} -le ${(P)#name} ]]
+	local name val _var
+	zparseopts -D -M - v:=_var
+	[[ -v $_var[2] ]] && _var=$_var[2]
+	name=$1
+	val=$2
+	integer i=${${(P)name}[(i)$val]}
+	
+	((i <= ${(P)#name}))
 }
 
+#TODO call this within chooser
+function match_array()
+{
+	local _var field choose sep
+	zparseopts -D -M - v:=_var f:=field c=choose s:=sep
+	[[ -v $_var[2] ]] || return 1
+	_var=${_var[2]:-REPLY}
+	typeset -ga $_var
+	typeset "$_var=(${(M)${(P)2}:#${1}*})"
+	[ -t 1 ] || echo $_var
+	if (($#choose)); then
+		chooser -v $_var $field $sep ${(P)_var} || cancel
+	else
+		(($#_var))
+	fi
+}
+
+#@untested check escaping
 function ltrim() {
-	echo "${*##[[:blank:]]##}"
+	echo "${(q)*##[[:blank:]]##}"
 }
 function rtrim() {
-	echo "${*%%[[:blank:]]##}"
+	echo "${(q)*%%[[:blank:]]##}"
 }
 function trim()
 {
@@ -296,10 +438,26 @@ function aptinst()
 # Added 2019-09-03 19:29
 function libmonitor()
 {
-	local name evt
+	# last   t       last+1.5   
+	# | DIFF | SLEEP |
+	local name evt pids
+	float t lastt=0 diff
 	while read -r evt name; do
 		[[ $evt == 'exit' ]] && break
-		techo -c warn "$evt $name"
+		pids=($(pidof inotifywait 2>/dev/null))
+		if (($#pids > 1)); then
+			command kill ${pids:0:-1}
+		fi
+		techo -c warn "$evt $name $$"
+		t=$(date '+%s.%3N')
+		((diff = t - lastt))
+		if ((diff < 1.5)); then
+			((diff = 1.5 - diff))
+			sleep $diff
+			((t += diff))
+		fi
+		((lastt = t))
+		killall -HUP zsh
 	done < <(inotifywait -m -q -e modify -r --format '%e %f' $ZSH_LIBS || echo "exit $?")
 	return $name
 }
@@ -307,11 +465,47 @@ function libmonitor()
 # "include" itself
 lib_set_info main $VERSION "$0" 1 "$(stat -L --printf='%Y' "$0")"
 
-if [[ -o interactive ]] && { [[ -z $LIBMON_PID ]] || ! kill -0 $LIBMON_PID 2>/dev/null }; then
+#if [[ -o interactive ]] && { [[ -z $LIBMON_PID ]] || ! kill -0 $LIBMON_PID 2>/dev/null }; then
+if [[ -o interactive ]] && ! pidof inotifywait 2>&1 >/dev/null; then
 	while ! type inotifywait 2>&1 >/dev/null; do
 		aptinst inotify-tools || {
 			ret=$?
-			[[ $ret -eq 130 || $ret -eq 1 ]] && break
+			(( ret==130 || ret==1 )) && break
 		}
-	done && { libmonitor & export LIBMON_PID=$! }
+	done && { libmonitor &! }
+#	done && { libmonitor & export LIBMON_PID=$! }
 fi
+
+alias sudo='noglob do_sudo '
+comp+=("do_sudo=sudo")
+function do_sudo()
+{
+	integer glob=1
+	local -a run
+	include -r functions
+	if [[ $# -gt 1 && $1 == -u ]]; then
+		run=(command sudo -u $2)
+		shift ; shift
+	else
+		run=(run -s)
+	fi
+	(($# == 0)) && 1=/bin/zsh
+	while (($#)); do
+		case $1 in
+			command|exec|-) shift
+				break
+				;;
+			nocorrect) shift
+				;;
+			noglob) glob=0; shift
+				;;
+			*) break
+				;;
+		esac
+	done
+	if ((glob)); then
+		PATH="/sbin:/usr/sbin:/usr/local/sbin:$PATH" $run $~==*
+	else
+		PATH="/sbin:/usr/sbin:/usr/local/sbin:$PATH" $run $==*
+	fi
+}

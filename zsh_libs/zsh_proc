@@ -30,12 +30,11 @@ function ps()
 		cmd=(-C "$1")
 		shift
 	fi
-	(( $#cmd )) && cmd[2]=("$(getfilename "$cmd[2]")")
 	#if in_array args '-C'; then
 	#fi
 	select=($user $pid $ppid $tty $cmd)
 	# hide kernel threads by default, if no other select options are given
-	if (( ! $#kern && ! $#select )); then
+	if ((!$#kern && !$#select)); then
 		args+=(--ppid 2 -p 2 --deselect)
 	else
 		args+=($select)
@@ -46,13 +45,17 @@ function ps()
 	##  ##  ##
 	# output #
 	##  ##  ##
-	if [[ -n "$o" ]]; then
+	if [[ -n $o ]]; then
 		cols=($(explode "$o[2]" ','))
 		#elif in_array args --any '-o,-O'; then
 	else
 		cols=(pid ppid %cpu stat cmd) # euid if not -u or -u $x with $x != $UID
 	fi
-	args+=(-o "${(j.,.)cols}")
+	if [[ -n $appendcols ]]; then
+		cols+=($(explode "$appendcols[2]" ','))
+		#elif in_array args --any '-o,-O'; then
+	fi
+	args+=(-o "${(j.,.)${(u)cols}}")
 
 	run command ps $args
 }
@@ -128,9 +131,9 @@ function k()
 	set - $args
 	zparseopts -M -D - f:=forceProcName
 	if [[ $1 = [0-9]## ]]; then
-		sudo kill "$@"
+		run -S kill $kopts "$@"
 	else
-		sudo killall "$@"
+		run -S killall $kopts "$@" #@TODO || ps -S "$@"
 	fi
 }
 
@@ -140,10 +143,10 @@ function procmon()
 	local prog=$1 timeout=5
 	while true; do
 		pid=$(pidof $prog)
-		[[ -z "$pid" ]] && continue || e $pid
+		[[ -z $pid ]] && continue || e $pid
 		sleep $timeout
 		pid2=$(pidof $prog)
-		[[ -z "$pid2" ]] && continue || e $pid2
+		[[ -z $pid2 ]] && continue || e $pid2
 		[[ $pid -eq $pid2 ]] && kill $pid
 		sleep 1
 	done

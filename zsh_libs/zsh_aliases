@@ -3,7 +3,7 @@ VERSION=1.0.5
 alias e=echo
 alias op="xdg-open"
 alias open="xdg-open"
-alias vmake="make SHELL='$$SHELL -x'"
+alias vmake="make SHELL='$SHELL -x'"
 alias web="cd gp3320/app/bcm-webconf ; . venv/bin/activate ; ./webconf.py &"
 alias sv="v -s"
 alias pytags="ctags -R --python-kinds=-i ."
@@ -22,9 +22,9 @@ function hg()
 {
 	local match fopt gopt ic range
 	zparseopts -D -E -K i=ic r:=range
-	[[ -n "$ic" ]] && gopt+=" -i"
+	[[ -n $ic ]] && gopt+=' -i'
 	gopt+=" $1"
-	[[ -n "$range" ]] && fopt="${range[2]}" || fopt="0"
+	[[ -n $range ]] && fopt=${range[2]} || fopt="0"
 	fc -li ${=fopt} | grep ${=gopt}
 }
 
@@ -36,14 +36,14 @@ function aptlist()
 
 function mkscript()
 {
-	local shell func name data data2 edit err_exists file isLib help
-	err_exists="exists but isn't a shell script."
-	zparseopts -D -K s:=shell f:=func n:=name e=edit || abort
+	local shell func name edit
+	local file isLib help line data data2 
+	zparseopts -D -K s:=shell f:=func n:=name e=edit
 	
 	data2="$@"
 	if [[ -n "$func[2]" ]]; then
 		func=$func[2]
-		if [[ "$(typeOf $func)" == 'func' ]]; then
+		if [[ "$(typeOf $func)" == 'function' ]]; then
 			techo -c warn "$func() already exists"
 			vw $func
 			return
@@ -53,6 +53,7 @@ function mkscript()
 	input -p "Function name" -v func
 	isLib=false
 	if [[ -n "$name" ]]; then
+		local err_exists="exists but isn't a shell script."
 		name=$name[2]
 		file=$(getpath $name)
         if [[ "$file" != "." ]]; then # full path given
@@ -68,6 +69,7 @@ function mkscript()
 			cmdtype=($(typeOf $name))
 			type=${cmdtype[1]}
 			file=${cmdtype[2]}
+			name=${name#zsh_*}
 			if [[ "$type" != "script" ]]; then
 				if [[ -f "$ZSH_LIBS/zsh_$name" ]]; then # is it a lib?
 					file="$ZSH_LIBS/zsh_$name"
@@ -75,6 +77,9 @@ function mkscript()
 				elif [[ "$type" != 'none' ]]; then
 					echo "$file $err_exists"
 					return 1
+				else
+					file="$ZSH_LIBS/zsh_$name"
+					isLib=true
 				fi
 			fi
 		fi
@@ -113,6 +118,7 @@ function mkscript()
     if [[ -n "$func" ]]; then
 		data+=$(zindent $func "$data2")
 	else
+		line=$(wc -l $file)
 		data+=$(zindent "$data2")
 	fi
 
@@ -124,7 +130,11 @@ function mkscript()
 
 	# edit
 	if [[ -n "$edit" || -z "$data2" ]] || confirm "Edit file"; then
-		[[ -n "$func" ]] && $isLib && edfunc $func || gvim -f $file
+		if [[ -n "$func" ]] && $isLib; then
+			edfunc $func
+		else
+			gvim -f $file
+		fi
 	fi
 }
 #function _stack()
@@ -156,45 +166,68 @@ function add_key()
 	chmod 700 ${base}/.ssh
 	chmod 600 ${base}/.ssh/authorized_keys
 }
+
+# finds command(s) in an alias
+function inalias()
+{
+	if [[ $(type -f $1) =~ "^$1 is an alias for (.*)$" ]]; then
+		local f m prefix=(run)
+		for m in $=match[1]; do
+			if [[ ${m:0:1} = [[:alpha:]] && $+functions[$m] -eq 1 ]] && ! in_array prefix $m; then
+				f=$m
+				break
+			fi
+		done
+		(($#f)) && echo $f
+		return
+	fi
+	return 1
+}
+
 function edalias()
 {
-	local line pat file var is
-	zparseopts -D -M l:=line
+	local linenum pat file var
+	zparseopts -D -M l:=linenum
 	[[ -n "$1" ]] || return 1
 	if [[ "$1" == '-f' ]]; then
 		shift
-		pat="(function )?$1\(\)"
-		line=${line[2]:-2}
+		pat="(function +)?$1\(\)"
+		linenum=${linenum[2]:-2}
 	else
-		pat="alias $1="
-		line=0
+		pat="alias +$1="
+		linenum=0
 	fi
 	file=${2:-~/.zsh_aliases}
-	var="$(egrep -n "^[[:space:]]*$pat" "$file")" || var="2:$file"
-	if [[ $? -eq 0 ]]; then
-		((line+=$(explode "$var" ':' 1)))
-		gvim -f $file +$line
-		echo "PPID=$PPID"
-		include $file
+	var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $file $fpath)}")
+	if (($#var)); then
+		local result line
+		typeset -a tmp
+		for result in $var; do
+			explode -v tmp "$result" ':'
+			file=$tmp[1]
+			((linenum+=$tmp[2]))
+			# @TODO
+		done
+		# echo "PPID=$PPID"
+		gvim -f $file +$linenum
+		isZshLib $file && include $file
 	else
-		techo -c err "Could not find \"$1\""
+		techo -c err "Could not find \"$1\" alias"
 	fi
 }
 
 function edfunc()
 {
 	local arg file
-	arg=($(type "$1"))
-	[[ $? -ne 0 ]] && return 1
+	arg=($(type $1)) || return 1
 	if [[ "${arg[4]}" == 'autoload' ]]; then
-		techo "autoload function todo: find not loaded autoload functions in fpath"
-		file="${arg[-1]}"
-		[[ -f "$file" ]] || {
-			typeset -a files=($(f -b "${j.,.)fpath}" "$1"))
-			file=$(chooser -p "Choose file" $files) || cancel
-		}
-	elif [[ "${arg[5]}" != 'function' ]]; then
-		abort 2 "$1 is not a function:\n\t$arg"
+		autoload +X $1 && edfunc $1
+		return
+	elif [[ $arg[5] != 'function' ]]; then
+		if [[ $arg[4] != 'alias' ]] || (( ! $#functions[$name] )); then
+			abort 2 "$1 is not a function:\n\t$arg"
+		fi
+		file=$functions_source[$name]
 	else
 		file="${arg[-1]}"
 	fi
@@ -203,13 +236,30 @@ function edfunc()
 comp+=("vw=exec")
 function vw()
 {
-	local array mime cpath name line
-	array=($(explode "$1" ':')) ; name=$array[1]; line=$array[2]
+	local array mime cpath name linenum
+	array=($(explode "$1" ':')) ; name=$array[1]; linenum=$array[2]
 	array=($(type -w "$name"))
 	case "${array[2]}" in
-		function) edfunc $name $line
+		function)
+			edfunc $name $linenum
 			;;
-		alias) edalias $name $line
+		alias)
+			local func
+			if (( $#functions[$name] )); then # also a function exists
+				local opt
+				(( $#linenum )) && { edfunc $name $linenum ; return }
+				func=$name
+			else
+				if [[ $(type -f $name) =~ "^$name is an alias for (.*)$" ]]; then
+					func=$(inalias $match[1])
+				fi
+			fi
+
+			if (($#func)); then
+				opt=$(chooser -f1 "alias $name" "function $func()") || cancel
+				[[ $opt == 'function' ]] && { edfunc $func $linenum ; return }
+			fi
+			edalias $name $linenum
 			;;
 		command)
 			cpath=$(which "$name")
@@ -219,14 +269,15 @@ function vw()
 					echo "$tpath is binary executable"
 					return 1
 				fi
-				gvim $cpath ${line:++$line}
+				gvim $cpath ${linenum:++$linenum}
 			else
 				echo Invalid path \"$cpath\"
 			fi
 			;;
 	esac
 }
-# call vim to each file:line argument
+
+# call vim to each file:linenum argument
 # file1:l4 file2:l66 
 function v()
 {
@@ -241,9 +292,9 @@ function v()
 	fi
 	for arg; do
 		if [[ "$arg" =~ ":" ]]; then
-			line=+$(echo $arg | cut -d: -f2)
+			linenum=+$(echo $arg | cut -d: -f2)
 			file=$(echo $arg | cut -d: -f1)
-			$sudo gvim $opt $line $file
+			$sudo gvim $opt $linenum $file
 		else
 			$sudo gvim $opt $arg
 		fi
@@ -254,11 +305,11 @@ function finderror()
 {
 	errline=`tail /var/log/apache2/error.log |  grep -e "PHP \(Parse\|Fatal\|Notice\)" | tail -n1`
 	str=`echo $errline| sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/ /g'`
-	line=`echo $str | sed 's/.*line \([0-9]*\).*$/\1/'`
+	linenum=`echo $str | sed 's/.*line \([0-9]*\).*$/\1/'`
 	filename=`echo $str | sed 's/.*\(\/media\/sparc\/xdata\/[^ ]*\).*$/\1/'`
 	echo $filename
-	echo $line
-	v --remote-tab-silent "$filename:$line"
+	echo $linenum
+	v --remote-tab-silent "$filename:$linenum"
 }
 function cptree()
 {
@@ -527,7 +578,6 @@ function find_dupes()
 #	dupes=(find . ! -empty -type f -exec md5sum {} + | sort -k1 | uniq -w32 -D --all-repeated=separate)
 	#getpath $(printf "%s\n" "$string1" "$string2" | sed -e 'N;s/^\(.*\).*\n\1.*$/\1/'
 }
-
 
 # Added 2019-03-30 20:31
 function lastarg()

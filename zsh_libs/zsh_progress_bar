@@ -1,0 +1,172 @@
+VERSION=1.0.2
+
+# Usage:
+# Source this script
+# enable_trapping <- optional to clean up properly if user presses ctrl-c
+# setup_scroll_area <- create empty progress bar
+# draw_progress_bar 10 <- advance progress bar
+# draw_progress_bar 40 <- advance progress bar
+# block_progress_bar 45 <- turns the progress bar yellow to indicate some action is requested from the user
+# draw_progress_bar 90 <- advance progress bar
+# destroy_scroll_area <- remove progress bar
+
+# Constants
+CODE_SAVE_CURSOR="\033[s"
+CODE_RESTORE_CURSOR="\033[u"
+CODE_CURSOR_IN_SCROLL_AREA="\033[1A"
+COLOR_FG="\e[30m"
+COLOR_BG="\e[42m"
+COLOR_BG_BLOCKED="\e[43m"
+RESTORE_FG="\e[39m"
+RESTORE_BG="\e[49m"
+
+function init_vars() {
+	PROGRESS_BLOCKED="false"
+	TRAPPING_ENABLED="true"
+	TRAP_SET="false"
+	PBAR_CHAR="X"
+}
+
+function setup_scroll_area() {
+	init_vars
+	#[[ -n "$1" ]] && PBAR_CHAR=${1[1]}
+	# If trapping is enabled, we will want to activate it
+	# whenever we setup the scroll area and remove it when we break the scroll area
+	[[ "$TRAPPING_ENABLED" = "true" ]] && trap_on_interrupt
+
+	lines=$(tput lines)
+	((lines--))
+	# Scroll down a bit to avoid visual glitch when the screen area shrinks by one row
+	echo -en "\n"
+	echo -en "$CODE_SAVE_CURSOR" # Save cursor
+	echo -en "\033[0;${lines}r"  # Set scroll region (this will place the cursor in the top left)
+	# Restore cursor but ensure its inside the scrolling area
+	echo -en "$CODE_RESTORE_CURSOR"
+	echo -en "$CODE_CURSOR_IN_SCROLL_AREA"
+	# Start empty progress bar
+	draw_progress_bar 0
+}
+
+function destroy_scroll_area() {
+	lines=$(tput lines)
+	# Save cursor
+	echo -en "$CODE_SAVE_CURSOR"
+	# Set scroll region (this will place the cursor in the top left)
+	echo -en "\033[0;${lines}r"
+
+	# Restore cursor but ensure its inside the scrolling area
+	echo -en "$CODE_RESTORE_CURSOR"
+	echo -en "$CODE_CURSOR_IN_SCROLL_AREA"
+
+	# We are done so clear the scroll bar
+	clear_progress_bar
+
+	# Scroll down a bit to avoid visual glitch when the screen area grows by one row
+	echo -en "\n\n"
+
+	# Once the scroll area is cleared, we want to remove any trap previously set.
+	# Otherwise, ctrl+c will exit our shell
+	[[ "$TRAP_SET" = "true" ]] && trap - INT
+}
+
+function draw_progress_bar() {
+	percentage=$1
+	lines=$(tput lines)
+	echo -en "$CODE_SAVE_CURSOR"	# Save cursor
+	echo -en "\033[${lines};0f"		# Move cursor to last row
+	tput el							# Clear progress bar
+	print_bar_text $percentage $2	# Draw progress bar
+	echo -en "$CODE_RESTORE_CURSOR" # Restore cursor position
+}
+
+function block_progress_bar() {
+	draw_progress_bar $1 block
+}
+
+function clear_progress_bar() {
+	lines=$(tput lines)
+	let lines=$lines
+	# Save cursor
+	echo -en "$CODE_SAVE_CURSOR"
+
+	# Move cursor position to last row
+	echo -en "\033[${lines};0f"
+
+	# clear progress bar
+	tput el
+
+	# Restore cursor position
+	echo -en "$CODE_RESTORE_CURSOR"
+}
+
+function print_bar_text() {
+	local percentage=$1 color cols
+	cols=$(tput cols)
+	bar_size=$(($cols-17))
+
+	if [[ -n "$2" ]]; then
+		color="${COLOR_FG}${COLOR_BG_BLOCKED}"
+	else
+		color="${COLOR_FG}${COLOR_BG}"
+	fi
+
+	# Prepare progress bar
+	((complete_size=(bar_size*percentage)/100))
+	((remainder_size=bar_size-complete_size))
+	progress_bar=$(
+	echo -ne "[${color}"; printf_new $PBAR_CHAR $complete_size; \
+		echo -en "${RESTORE_FG}${RESTORE_BG}" \
+		printf_new "." $remainder_size \
+		echo -ne "]"
+	)
+
+	# Print progress bar
+	echo -ne " Progress ${percentage}% ${progress_bar}"
+}
+
+function disable_trapping() {
+	TRAPPING_ENABLED="false"
+}
+function enable_trapping() {
+	TRAPPING_ENABLED="true"
+}
+
+function trap_on_interrupt() {
+	# If this function is called, we setup an interrupt handler to cleanup the progress bar
+	TRAP_SET="true"
+	trap cleanup_on_interrupt INT
+}
+
+function cleanup_on_interrupt() {
+	destroy_scroll_area
+	exit
+}
+
+function printf_new() {
+	local v str=$1 num=$2
+	v=$(printf "%-${num}s" "$str")
+	echo -ne "${v// /$str}"
+}
+
+# Added 2019-09-03 01:39
+function pbar()
+{
+	case "$1" in
+		start) # setup
+			setup_scroll_area $2
+			enable_trapping		# optional to clean up properly if user presses ctrl-c
+			;;
+		set) # advance progress bar
+			draw_progress_bar $2
+			;;
+		block) # turns the progress bar yellow to
+			block_progress_bar $2        # indicate some action is requested from the user
+			;;
+		end) # finish
+			destroy_scroll_area 
+			;;
+		*)
+			return 1
+			;;
+	esac
+}

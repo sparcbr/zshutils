@@ -1,6 +1,17 @@
 VERSION=1.0.5
 setopt extendedglob
 
+NOBLKDEV=32
+MNTBUSY=33
+DEVERR[32]='not a block device'
+DEVERR[33]='dir busy. Another device mounted here.'
+function abortDevError()
+{
+	local cod=$1 ret
+	ret=${(P)cod}
+	abort $ret "ERR$cod: \"$2\" - ${DEVERR[$ret]}"
+}
+
 function findDev()
 {
 	local devin="$1"
@@ -140,7 +151,6 @@ function deviceUnmount()
 			continue
 		}
 
-			#@bug || { ((err++)); techo -c warn $dev is not a device; continue }
 		mnt=$(isDeviceMounted $dev) || continue
 		var=$(run -s -p "Unmounting $dev ($mnt)" udisksctl unmount -b $dev 2>&1) && continue
 		var=$(run -s umount $dev 2>&1)
@@ -178,19 +188,10 @@ function diskUnmount()
 	deviceUnmount $parts
 	[[ -n $eject ]] && run -s eject $dev
 }
-function diskOff()
+
+function deviceOff()
 {
 	sudo udisksctl power-off -b $1
-}
-NOBLKDEV=32
-MNTBUSY=33
-DEVERR[32]='not a block device'
-DEVERR[33]='dir busy. Another device mounted here.'
-function abortDevError()
-{
-	local cod=$1 ret
-	ret=${(P)cod}
-	abort $ret "ERR$cod: \"$2\" - ${DEVERR[$ret]}"
 }
 
 function diskMount()

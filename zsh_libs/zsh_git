@@ -20,7 +20,7 @@ alias q48="cd ~/Q48API"
 
 function gfollow()
 {
-	local hash diff log
+	local hash entries pat REPLY
 	zparseopts -M -D - d=diff -diff=d
 	log=$(egrep '^commit' <(git log --follow "$@") | awk '{print $2}')
 	for hash in $log; do
@@ -37,6 +37,7 @@ function gtag()
 	tag=$()
 	git tag -a $tag $hash
 }
+
 function gmerge()
 {
 	local branch=${1:-$(chooser $(git branch))}
@@ -58,6 +59,7 @@ function ggrep()
 	git grep "$pattern" $(git rev-list --all -- ${=files}) -- ${=files}
 	set +x
 }
+
 function commit()
 {
 	local m args
@@ -166,20 +168,19 @@ function gitgetrepo()
 
 function gselect()
 {
-	local i n var line lines noSelect nlimit='-500'
-	
+	local var line lines noSelect nlimit='-500'
+	integer i n
 	setopt extendedglob
-	
 	lines=("${(@f)$(git log --graph --oneline --all $nlimit $@)}")
 
 	# mark lines without content as non-selectable
 	n=$#lines
-	for ((i=1; i<=$n; i++)); do
-		if [[ ! "${lines[$i]}" =~ [a-f0-9] ]]; then
+	for ((i=1; i<=n; i++)); do
+		if [[ ! $lines[$i] =~ [a-f0-9] ]]; then
 			noSelect+=($i)
 		fi
 	done
-	chooser -n "$noSelect" -R '([a-f0-9]{5,40} .*)' "$lines[@]"
+	chooser -n $noSelect -R '([a-f0-9]{5,40} .*)' $lines
 	#line=(${=line##[^a-f0-9]#})
 }
 
@@ -236,7 +237,8 @@ function gclone()
 	cd $HOME/repos
 	for repo; do
 		if [[ -n "$(url getscheme $repo)" ]] || repo="$(github -e $repo)"; then
-			git clone "$repo" #&& cd TODO
+			git clone $repo
 		fi
 	done
+	[[ -d $repo ]] && cd $repo
 }
