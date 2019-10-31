@@ -1,12 +1,13 @@
-VERSION=1.0.5
+VERSION=1.0.7
 [[ -v comp ]] || typeset -g -a comp
 alias e=echo
+alias up='xdotool key Ctrl+Shift+F type ❯ ; xdotool key F3 key F3' # find last prompt
+alias up='xdotool key Ctrl+Shift+F type ❯ ; xdotool key Shift+F3 key Shift+F3' # find last prompt
 alias op="xdg-open"
 alias open="xdg-open"
 alias vmake="make SHELL='$SHELL -x'"
 alias web="cd gp3320/app/bcm-webconf ; . venv/bin/activate ; ./webconf.py &"
 alias sv="v -s"
-alias pytags="ctags -R --python-kinds=-i ."
 alias cfg="cd $CFG"
 alias s="sudo"
 alias cpa="sudo cp -a"
@@ -16,16 +17,38 @@ alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ign
 alias sys="sudo systemctl"
 #alias jtags="ctags -R . && sed -i -E '/^(if|switch|function|module\.exports|it|describe).+language:js$/d' tags"
 alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags2'
+alias pytags="ctags -R --python-kinds=-i ."
 
+function tags()
+{
+	local lang
+	zparseopts -lang:=lang
+	if (($#)) && [[ ! -f $1 && -z $lang ]]; then
+		lang=$1
+		shift
+	elif [[ -n $lang[2] ]]; then
+		lang=$lang[2]
+	else
+		lang=$(chooser Javascript Python Shell) || cancel
+	fi
+
+	case ${(L)lang} in
+		javascript|js) jtags ;;
+		python|py) pytags ;;
+		shell|sh) ctags --language-force=Sh -R . ;;
+		*) techo -c err "Unsupported language: $lang" ;;
+	esac
+}
 
 function hg()
 {
 	local match fopt gopt ic range
-	zparseopts -D -E -K i=ic r:=range
-	[[ -n $ic ]] && gopt+=' -i'
-	gopt+=" $1"
+	zparseopts -D - i=ic r:=range
+	#gopt+=($ic ${@#-[]})
+	gopt+=($ic)
 	[[ -n $range ]] && fopt=${range[2]} || fopt="0"
-	fc -li ${=fopt} | grep ${=gopt}
+	#@TODO 
+	fc -li ${=fopt} | egrep ${=gopt} -- $1
 }
 
 # Added 2019-04-12 11:45
@@ -37,13 +60,15 @@ function aptlist()
 function mkscript()
 {
 	local shell func name edit
-	local file isLib help line data data2 
+	local file isLib help line data data2 _type
 	zparseopts -D -K s:=shell f:=func n:=name e=edit
 	
 	data2="$@"
-	if [[ -n "$func[2]" ]]; then
+	if [[ -n $func[2] ]]; then
 		func=$func[2]
-		if [[ "$(typeOf $func)" == 'function' ]]; then
+		_type=($(typeOf $func))
+		(($#_type))
+		if [[ "" == 'function' ]]; then
 			techo -c warn "$func() already exists"
 			vw $func
 			return
@@ -170,18 +195,85 @@ function add_key()
 # finds command(s) in an alias
 function inalias()
 {
+	local needsFunc ret=1 arr
+	zparseopts -D -M - f=needsFunc
 	if [[ $(type -f $1) =~ "^$1 is an alias for (.*)$" ]]; then
-		local f m prefix=(run)
+		local f m _type prefix=(run do_sudo) bins
+		local integer command=0 glob=1 builtin=0
 		for m in $=match[1]; do
-			if [[ ${m:0:1} = [[:alpha:]] && $+functions[$m] -eq 1 ]] && ! in_array prefix $m; then
-				f=$m
-				break
+			if [[ ${m:0:1} = [[:alpha:]] ]]; then
+				_type=($(typeOf $m))
+
+				if [[ $_type == 'none' ]]; then
+					techo $m:none
+					return 1
+				fi
+
+				if ((cmd)); then
+					(($#needsFunc)) && return 1
+					f=($(type -p $m))
+					break
+				elif ((builtin)); then
+					_type='builtin'
+					builtin=0
+				fi
+
+				if [[ $_type == 'builtin' ]]; then
+					case $m in
+						builtin) builtin=1
+							;;
+						command) cmd=1
+							;;
+						nocorrect)
+							;;
+						noglob) glob=0
+							;;
+						*) bins+=($m)
+							;;
+					esac
+					continue
+				fi
+
+				in_array prefix $m && continue
+
+				if [[ $_type == 'alias' ]]; then
+					if [[ $m == $1 ]]; then
+						if (($+functions[$m])) ; then
+							f=$m
+							break
+						else
+							return 1
+						fi
+					else
+						tmp=$(inalias $needsFunc $m) || return 1
+						f=($tmp[1])
+						break
+					fi
+				fi
+
+				if (($#needsFunc)); then # needs function
+					if (($+functions[$m])) ; then # found a function
+						f=$m
+						break
+					else
+						return 1
+					fi
+				else
+					f=($m $_type[1])
+					break
+				fi
 			fi
 		done
-		(($#f)) && echo $f
-		return
+
+		if (($#f)); then
+			echo -n $f
+			ret=0
+		elif ((! $#needsFunc)); then
+			ret=0
+		fi
+		(($#bins)) && echo $^bins":builtin"
 	fi
-	return 1
+	return $ret
 }
 
 function edalias()
@@ -194,23 +286,46 @@ function edalias()
 		pat="(function +)?$1\(\)"
 		linenum=${linenum[2]:-2}
 	else
-		pat="alias +$1="
+		pat="alias +$1=['\"].*['\"]"
 		linenum=0
 	fi
-	file=${2:-~/.zsh_aliases}
-	var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $file $fpath)}")
-	if (($#var)); then
-		local result line
-		typeset -a tmp
-		for result in $var; do
-			explode -v tmp "$result" ':'
-			file=$tmp[1]
+	if (($#2)); then
+		file=$2
+		var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $file)}") || var=($file:0)
+	else
+		var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $ZSH_LIBS $fpath)}")
+	fi
+	
+	if [[ -n $var[1] ]]; then
+		local result line col=0 opts i=1
+		typeset -a tmp opts
+
+		if (($#var > 1)); then
+			for result in $var; do
+				explode -v tmp "$result" ':'
+				file=$(getfullpath -r . $tmp[1])
+				line=${tmp:2}
+				opts+=("$i $file $line")
+				((i++))
+			done
+			i=$(chooser -f1 $opts) || cancel
+		fi
+		result=$var[$i]
+		explode -v tmp "$result" ':'
+		file=$tmp[1]
+		if ((tmp[2])); then
+			[[ ${tmp:2} =~ $pat ]] && {
+				((MBEGIN > 1)) && col=$MBEGIN
+				# @TODO
+				#echo $MATCH $match "{$MBEGIN $MEND} {$mbegin[1] $mend[1]}"
+			}
 			((linenum+=$tmp[2]))
-			# @TODO
-		done
-		# echo "PPID=$PPID"
-		gvim -f $file +$linenum
-		isZshLib $file && include $file
+			file+=:$linenum
+			((col)) && file+=:$col
+			v $file
+		else
+			v $file
+		fi
 	else
 		techo -c err "Could not find \"$1\" alias"
 	fi
@@ -224,10 +339,10 @@ function edfunc()
 		autoload +X $1 && edfunc $1
 		return
 	elif [[ $arg[5] != 'function' ]]; then
-		if [[ $arg[4] != 'alias' ]] || (( ! $#functions[$name] )); then
+		if [[ $arg[4] != 'alias' ]] || (( ! $#functions[$1] )); then
 			abort 2 "$1 is not a function:\n\t$arg"
 		fi
-		file=$functions_source[$name]
+		file=$functions_source[$1]
 	else
 		file="${arg[-1]}"
 	fi
@@ -251,7 +366,7 @@ function vw()
 				func=$name
 			else
 				if [[ $(type -f $name) =~ "^$name is an alias for (.*)$" ]]; then
-					func=$(inalias $match[1])
+					func=$(inalias -f $name)
 				fi
 			fi
 
@@ -281,22 +396,36 @@ function vw()
 # file1:l4 file2:l66 
 function v()
 {
-	local opt sudo
-	if [ "${1:0:1}" = "-" ]; then
-		if [[ $1 = -s ]]; then
-			sudo='sudo'
+	local opts sudo arg args skip
+	while (($#)); do
+		if [[ ${1:0:1} == '-' ]]; then
+			if [[ $1 == '-s' ]]; then
+				sudo='sudo'
+			elif [[ $1 == '-#' ]]; then
+				opts+=('+/^\s*[^#]')
+			else
+				opts+=($1)
+			fi
 		else
-			opt=$1
+			args+=($1)
 		fi
 		shift
-	fi
-	for arg; do
+	done
+
+	for arg in $args; do
 		if [[ "$arg" =~ ":" ]]; then
-			linenum=+$(echo $arg | cut -d: -f2)
-			file=$(echo $arg | cut -d: -f1)
-			$sudo gvim $opt $linenum $file
+			local tmp pos
+			explode -v tmp $arg ':'
+			file=$tmp[1]
+			linenum=$tmp[2]
+			if ((tmp[3])); then
+				pos="+call cursor($linenum,$tmp[3])"
+			elif ((linenum)); then
+				pos=+$linenum
+			fi
+			$sudo gvim $opts $pos $file
 		else
-			$sudo gvim $opt $arg
+			$sudo gvim $opts $arg
 		fi
 	done
 }

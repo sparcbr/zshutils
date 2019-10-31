@@ -101,7 +101,7 @@ function explode()
 			if [[ -n $_Asep ]]; then
 				typeset -gA $_var
 				_Asep=$_Asep[2]
-				set -A $_var ${(@ps/$Asep/)_list}
+				set -A $_var ${(@ps/$_Asep/)_list}
 			else 
 				typeset -ga $_var
 				set -A $_var $_list
@@ -163,7 +163,7 @@ function zshLibReadHeader()
 function isZshLib()
 {
 	local mime=$(getmime "$*")
-	[[ $mime = 'text/plain' && $(read -e "$*") = VERSION=[0-9\.]## ]]
+	[[ $mime = 'text/plain' && $(read -e <"$*") = VERSION=[0-9\.]## ]]
 }
 
 function isScript()
@@ -179,7 +179,7 @@ function typeOf()
 	local integer i=2
 	zparseopts -D -M - a=all p=p
 	name=$1
-	if [[ ! -f '$name' ]]; then
+	if [[ ! -f $name ]]; then
 		ret=($(which -w $all $p $name))
 
 		for ((i=2 ; $+ret[i] ; i+=2)); do
@@ -191,7 +191,7 @@ function typeOf()
 			fi
 
 			if [[ $type == 'command' ]]; then
-				tpath=$(which $name)
+				tpath=$(which -p $name)
 				isScript $tpath && type='script'
 			fi
 
@@ -205,10 +205,10 @@ function typeOf()
 	
 	if isScript $tpath; then
 		type='script'
-	elif [[ -x "$tpath" ]]; then
+	elif [[ -x $tpath ]]; then
 		type='command'
 	else
-		echo "none"
+		echo 'none'
 		return 1
 	fi
 	
@@ -320,7 +320,6 @@ function include()
 			lib_set_info -E $name $VERSION "$lpath" ${required:-0} "$mtime"
 			techo -P "%F{11}$name%f [%K{1}%F{15}FAIL%f%k]"
 			(
-				coproc parseErrors 
 				#@TODO sort errors by file before opening files
 				while read -pr tmp; do
 					split=(${(z)tmp})
@@ -392,11 +391,7 @@ function in_array()
 	local name val _var
 	zparseopts -D -M - v:=_var
 	[[ -v $_var[2] ]] && _var=$_var[2]
-	name=$1
-	val=$2
-	integer i=${${(P)name}[(i)$val]}
-	
-	((i <= ${(P)#name}))
+	((${(P)#2[(re)$1]}))
 }
 
 #TODO call this within chooser

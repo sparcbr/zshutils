@@ -5,7 +5,7 @@ VERSION=1.0.1
 integer DEBUG=0
 #zmodload zsh/zprof && zprof
 
-_dbg_def_lvl=2
+_dbg_def_lvl=4
 
 function _dbg_PS()
 {
@@ -34,15 +34,18 @@ function _dbg_fcfg()
 
 function _dbg_funcOnOff()
 {
+	integer lvl=$1
+	shift
 	[[ -v _dbg_flvl ]] || { techo -c err not defined: _dbg_flvl; return 1 }
-	if (($2)); then
-		_dbg_flvl[$1]=$2
-		(($2>DEBUG)) && typeset -tf $1 || typeset -Tf $1
-		return
-	else
-		unset "_dbg_flvl[$1]"
+	if (($#)); then
+		_dbg_flvl[$1]=$lvl
+		#(($2>DEBUG)) && typeset -tf $1 || typeset -Tf $1
+		if (($lvl)); then
+			typeset -Tf "$@"
+		else
+			typeset +Ttf "$@"
+		fi
 	fi
-	typeset +Ttf $1
 }
 
 function _test()
@@ -71,41 +74,51 @@ function _test_explode()
 
 function debug()
 {
-	local _cmd _data _type keep _func ret debug alias run
+	local _cmd _data _type _types keep _func debug alias run script
+	integer ret
 	zparseopts -D -M - k=keep D:=debug -alias:=alias r=run
-	_cmd=$1 ; shift
 
 	#@TODO source /usr/local/share/zshdb/dbg-trace.sh
 	# _Dbg_debugger
-
-	_type=($(typeOf -a $_cmd))
-	case $_type[1] in
-		alias)
-			local tmp=$(inalias $_cmd) || return 1
-			_func=$tmp
-			;;
-		command)
-			;;
-		function)
-			if [[ -v functions[$_cmd] ]]; then
-				_func=$_cmd
-			fi
-			;;
-		*)
-			;;
-	esac
-
-	(($#_func)) && _dbg_funcOnOff $_func 9
+	#typeset -Tf debug
+	for _cmd; do
+		_types=($(typeOf -a $_cmd)) || { run=1; _cmd=$1; break }
+		for _type in $_types; do
+			case $_type in
+				alias)
+					local tmp=$(inalias -f $_cmd) || continue
+					_func+=($tmp)
+					;;
+				command)
+					;;
+				function)
+					if [[ -v functions[$_cmd] ]]; then
+						_func+=($_cmd)
+					fi
+					;;
+				script) #shell script
+					script=$_cmd
+					break
+					;;
+				*) ;;
+			esac
+		done
+		[[ -n $run ]] && break
+	done
+	(($#_func)) && _dbg_funcOnOff 9 $_func
 
 	if (($#run)); then
 		#_data=$($_cmd "$@" 2>&1 | egrep "^\+$_cmd:|[^+]")
 		#_data=$($_cmd "$@" 2>&1) ; ret=$?
+		#(( $#_data )) && colorify -d $_cmd <<<$_data
+		shift
 		$_cmd "$@" #|& colorify -D $_cmd
 		ret=$pipestatus[1]
-		(( ! keep && $#_func )) && _dbg_funcOnOff $_func
-		#(( $#_data )) && colorify -d $_cmd <<<$_data
-		return $ret
-	fi	
+	fi
+
+	(( ! $#keep && $#_func )) && _dbg_funcOnOff 0 $_func
+	set +x
+	return $ret
 }
 
 # Say the file, line number and optional message for debugging

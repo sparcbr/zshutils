@@ -14,15 +14,12 @@ if [[ -n $dryrun ]] || { [[ -n $DRYRUN ]] && ((DRYRUN)) }; then
 	DRYRUN=-n
 fi
 if (($#debug)); then
-	set -x
 	DEBUG=${debug[1]:2}
 	if [[ $DEBUG != [0-9]## ]]; then
-		[[ -n $DEBUG ]] && set - $DEBUG "$@"
+		[[ -n $DEBUG ]] && set - $DEBUG "$@" # not a number means it's not an argumento to -d 
 		DEBUG=1
 	fi
-	set +x
 fi
-((DEBUG)) && set -x
 
 ABORT='sexit'
 function sexit()
@@ -34,13 +31,128 @@ function sexit()
 }
 [[ -n $interactive ]] && interactive=1
 
-cmds=(focuswindow\|focus focusactivity home en\|enable\|dis\|disable install\|inst list poweroff stop\|restart uninstallall\|removeall\|delall\|deleteall uninstall\|remove\|rm\|del\(ete\)\? wallpaper\|anim\|animation hidekeyb\|hidekeyboard start immersive log\|logcat)
+cmds=(focuswindow\|focus focusactivity home en\|enable\|dis\|disable install\|inst list poweroff stop\|restart uninstallall\|removeall\|delall\|deleteall uninstall\|remove\|rm\|del\(ete\)\? wallpaper\|anim\|animation hidekeyb\|hidekeyboard start immersive log\|logcat reboot\|restart doc)
 
 (($# || interactive)) || { usage ; sexit 1 }
 
+docurl='https://developer.android.com/studio/command-line/adb'
 function usage()
 {
 	print -l ${(o)cmds}
+	print "app doc for online documentation (docurl)"
+}
+
+function parseADBErrors()
+{
+	local line
+	while read line; do
+		echo -Pr ${(q)line}
+		[[ $line == 'EOF' ]] && return
+
+		if [[ $line =~ '^(adb: )?error: (.*)' ]]; then
+			case $match[2] in
+				*'more than one device/emulator') echo EMultDev ;;
+				*) ;;
+			esac
+		elif [[ $line =~ $'^adb: unknown command (.*)' ]]; then
+		elif [[ $line == '- waiting for device -' ]]; then
+			echo EConn
+		elif [[ $line =~ $'^failed to connect to \'(.*)\': (.*)' ]]; then
+			echo EConn $match[1] $match[2]
+		else
+			techo -c warn 'Unknown error:' $line
+			continue
+		fi
+		techo -Pr "%F{9}${line}%f"
+		#print -Pr ${(@q)match}
+	done
+}
+
+connType=(-d)
+function adb()
+{
+	local err line
+	integer ret=0 pid
+
+	coproc parseADBErrors
+	#run $DRYRUN command adb $devOpts "$@" 2>&p & pid=$!
+	#run -c 0 $DRYRUN command adb $devOpts "$@" 2>&p 
+	while ! run $DRYRUN command adb $devOpts "$@" 2>&p; do
+	#@TODO sort errors by file before opening files
+		while read -pr line; do
+			split=(${(z)line})
+			case $split[1] in
+				EMultDev)
+					chooseDevice
+					continue
+					;;
+				EConn)
+					connect --setError $split[1] : $split[2]
+					continue
+					;;
+				*)
+					;;
+			esac
+		done
+		break
+	done
+	#wait $pid; ret=$?
+	print -p EOF
+	return $ret
+}
+#typeset -Tf adb
+
+function shell()
+{
+	adb shell "$@"
+}
+
+function chooseDevice()
+{
+	local devList
+
+	#@TODO device usb:1-5.3 product:surnia_retbr_ds model:MotoE2_4G_LTE_ device:surnia_uds transport_id:1
+	deviceID=$(chooser -f1 --ifs $'\n' -n1 "$(adb devices -l)")
+	connType=(-s $deviceID)
+}
+
+function connect()
+{
+	local err line
+	coproc parseADBErrors
+	if ! adb connect "$@" 2>&p; then
+	(
+		#@TODO sort errors by file before opening files
+		while read -pr line; do
+			split=(${(z)line})
+			case $split[1] in
+				EmultDev) ;;
+				EConn) ;;
+			esac
+		done
+	)
+	fi
+	print -p EOF
+	failed to connect to '192.168.1.101:5555':
+}
+
+function netDevice()
+{
+	local family obj='addr' iface='wlan0'
+	(($#family)) || family=(-f inet)
+	shell ip $family $obj show ${1:-$iface}
+}
+
+function getDeviceIP()
+{
+	local iface val
+	case $1 in
+		''|wlan[0-9]|wifi) ;;
+		lo) iface='lo' ;;
+		*) techo -c warn "Invalid interface: \"$1\"" ;;
+	esac
+	val=$(netDevice $iface) || return 1
+	[[  $val =~ 'inet ([0-9.]+)/[0-9]+' ]] && e $match[1]
 }
 
 function listPkg()
@@ -49,12 +161,12 @@ function listPkg()
 	zparseopts -D -M - a=all d=date
 	[[ -n $all ]] || flags="-3"
 	sorted=() ; sortedPkgs=()
-	pkgs=($(run $DRYRUN adb shell pm list packages $flags "$@" | tr -d '\r')) || return
+	pkgs=($(shell pm list packages $flags "$@" | tr -d '\r')) || return
 	(($#pkgs)) || return 10
 	pkgs=(${pkgs#package:})
 	for pkg in $pkgs; do
 		local _date=$(
-			adb shell dumpsys package $pkg | \
+			shell dumpsys package $pkg | \
 				awk -F'=' '/lastUpdateTime/{print $2}' | \
 				head -n1 | tr -d '\r\n'
 		)
@@ -75,56 +187,68 @@ function listPkg()
 	done
 	print -l $sortedPkgs
 }
-function listRunningApk()
+
+function info()
 {
-	run $DRYRUN adb shell ps | awk "\$9 ~ /${@:-.}/{print \$9}" | tr -d $'\r\t'
+	shell dumpsys package $1 | tr -d '\r'
+}
+
+function listRunning()
+{
+	shell ps | awk "\$9 ~ /${@:-.}/{print \$9}" | tr -d $'\r\t'
 }
 
 function getMainActivity()
 {
-	local arr=($(listApkActivities $1))
+	local arr=($(listActivities $1))
 	echo ${arr[1]}
 }
 
-function listApkActivities()
+function listActivities()
 {
-	adb shell dumpsys package $1 | grep -B 10 category\.LAUNCHER | grep -o '[^ ]*/[^ ]*'
+	shell dumpsys package $1 | \
+		egrep -A 10 '^Activity Resolver Table:' | \
+		tr -d $'\r' | grep -o '[^ ]*/[^ ]*'
 }
 
-function startApk()
+function start()
 {
 	local act
 
-	if [[ "$1" =~ "/" ]]; then
-		act="$1"
-   elif [ -n "$2" ]; then
-		act="$1"/"$2"
+	if [[ $1 =~ "/" ]]; then
+		act=$1
+	elif [[ -n $2 ]]; then
+		act=$1/$2
 	else
-		act=$(chooser $(listApkActivities $apk))
+		chooser -v act $(listActivities $1) || cancel
 	fi
-	run adb shell am start -n $act
+	shell am start $act && sendkey power on
 }
 
-function stopApk()
+function stop()
 {
-    foreach p; do
-	    run adb shell am force-stop $p
-    done
+	local p
+	for p; do
+	    shell am force-stop $p
+	done
 }
-function enDisApk()
+
+function enDis()
 {
-    local cmd="$1"
-    [ $cmd = 'en' ] && cmd='enable'
-    [ $cmd = 'dis' ] && cmd='disable'
-    shift
-    foreach p; do
-	    run adb shell pm $cmd $p
-    done
+	local cmd="$1"
+	[ $cmd = 'en' ] && cmd='enable'
+	[ $cmd = 'dis' ] && cmd='disable'
+	shift
+	foreach p; do
+	    shell pm $cmd $p
+	done
 }
-function installApk()
+
+function install()
 {
-    run adb push $1 /data/local/tmp/$1
-    run adb shell pm install -t -r /data/local/tmp/$1
+	#adb push $1 /data/local/tmp/$1
+	#shell pm install -t -r /data/local/tmp/$1
+	adb install $1
 }
 
 #@TODO
@@ -138,16 +262,39 @@ function getLocalApkVersion()
 
 function getPkgVersion()
 {
-	run $DRYRUN adb shell dumpsys package $1 | grep versionName
+	shell dumpsys package $1 | grep versionName
 }
-function uninstallApk()
+
+function choosePkg()
 {
-    #if [[ "$1" = '-a' ]]; then
-	#	shift 
-	#	args=("${(@)$(listPkg -a $@)}")
-    #else
-		args=("${(@)$(chooser -s_ -f1 "${(@)$(listPkg -ad $@)}")}")
-	#fi
+	local running
+	zparseopts -D -M - r=running
+	if [[ -n $running ]]; then
+		chooser -f1 --ifs $'\n' "$(listRunning "$@")"
+	else
+		chooser -f1 --ifs $'\n' "$(listPkg -d "$@")"
+	fi
+}
+
+function clearData()
+{
+	local all arg args
+	integer ret=0
+	zparseopts -D -M - a=all
+	args=($(choosePkg $all "$@"))
+	for arg in $args; do
+		if [[ "$(getext $arg)" = 'apk' ]]; then
+			arg=$(getPkg $arg) || {
+				techo -c err "Failed getting package name from $C[warn]$arg$_C. Ignoring."
+				((ret++))
+				continue
+			}
+		fi
+		# run --confirm
+		shell pm clear $arg
+	done
+	return $ret
+}
 
 function sendkey() {
 	typeset -A keys=(
@@ -183,12 +330,22 @@ function sendkey() {
 	elif [[ $1 == 'list' ]]; then
 		techo -c head ${(o)keys}
 		return 0
-	else 
+	else
 		key=${(U)1}
 		keycode=${(k)keys[(re)$key]}
 		[[ -n $keycode ]] || abort 1 "Invalid key $C[warn]$key"
 	fi
-	run $DRYRUN -p "Sending key $key ($keycode)" adb shell input keyevent $keycode
+	case $key in
+		POWER)
+			if [[ ${(U)2} =~ 'ON|OFF' ]]; then
+				if [[ $(shell dumpsys power | grep 'Display Power') =~ state=(OFF|ON) ]]; then
+					[[ $match[1] == ${(U)2} ]] && return 0
+				fi
+			fi
+		;;
+		*) ;;
+	esac
+	run $DRYRUN -p "Sending key $key ($keycode)" shell input keyevent $keycode
 }
 
 # pm uninstall: removes a package from the system. Options:
@@ -203,38 +360,121 @@ function uninstallPkg()
 	#@TODO -k: keep the data and cache directories around after package removal.
 	for p; do
 		if [[ -n $force ]] || confirm "Remove $p"; then
-			if [[ -n $keep ]] || confirm "Delete app data as well"; then
-				keepData='-k'
-			else
+			if [[ -z $keep ]] && confirm "Delete app data as well"; then
 				keepData=
+			else
+				keepData='-k'
 			fi
-			run $DRYRUN adb shell pm uninstall $keepData $p
+			shell pm uninstall $keepData $p
 		fi
 	done
 }
 
-    [[ -n "$1" ]] || return 1
-	pkgs=("$@")
-
-    #@TODO -k: keep the data and cache directories around after package removal.
-    for p in $pkgs; do
-    	run adb shell pm uninstall -k "$p"
-    done
+function uninstall()
+{
+	local all arg args keepData
+	zparseopts -D -M - a=all k=keepData
+	args=("$@") ; args=(${(M)args:#*.apk})
+	(($#args)) || args=($(choosePkg $all)) || return
+	for arg in $args; do
+		if [[ "$(getext $arg)" = 'apk' ]]; then
+			uninstallPkg $keepData $(getPkg $arg)
+		else
+			uninstallPkg $keepData $arg
+		fi
+	done
 }
 
+function logcat()
+{
+	local count follow args
+	zparseopts -D -M - n:=count f=follow
+	[[ -z $follow ]] && args+=(-d)
+	if [[ -n $count ]]; then
+		((count[2])) && args+=(-T $count[2]) || args+=(-T "$count[2]")
+	fi
+	adb logcat $args "$@"
+}
+
+function getprop()
+{
+	local name names val values tmp
+	
+	if (($# == 0)); then
+		confirm "List all properties" && run shell getprop
+		return
+	fi
+	
+	names=() ; values=()
+	for name; do
+		if [[ $name != *'*'* ]]; then
+			val=$(shell getprop $name | tr -d $'\r')
+			if [[ -n $val ]]; then
+				names+=($name)
+				values+=($val)
+				continue
+			fi
+		fi
+		explode -v val --ifs $'\n' "$(shell getprop | grep $name | tr -d $'\r')" $'\n'
+		for line in $val; do
+			explode -v tmp $line ':'
+			names+=("${${tmp[1]#\[}%\]}")
+			values+=("${${tmp[2]# \[}%\]}")
+		done
+	done
+
+	if (($#names == 1)); then
+		echo $values[1]
+	else
+		integer i
+		for ((i=1; i<=$#names; i++)); do
+			echo "$names[$i]=$values[$i]"
+		done
+	fi
+}
+
+function setting()
+{
+	local nspace nspace_m nspaces=(system secure global)
+	local setting value nspace_m
+	integer n
+	zparseopts -D -M - g=nspace s=nspace S=nspace
+	if [[ -n $nspace ]]; then
+		nspace=${nspace[1]:1:1}
+	else
+		nspace=$1 ; shift
+	fi
+	in_array -v nspace_m $nspace nspaces
+	n=$#nspace_m
+	((n)) || abort 10 namespace: ${C_}$nspaces
+	chooser -v nspace $nspace_m || cancel
+	setting=$1
+	value=$2
+	if [[ -n $value ]]; then
+		oper='put'
+	elif [[ -n $setting ]]; then
+		oper='get'
+	else
+		oper='list'
+	fi
+	shell settings put $nspace $setting $value
+}
+
+devOpts=()
 function processLine()
 {
 	local cmd pkg
-	cmd=$1 ; shift
+	zparseopts -D -M - t:=devOpts s:=devOpts e=devOpts d=devOpts
+	cmd=${(L)1} ; shift
 	case $cmd in
 		(*=*)
 			verbose=${cmd#verbose=}
 		;;
 		(focuswindow|focus)
-			#cur=$(adb shell dumpsys window windows | awk '/mCurrentFocus/{print $3}' | cut -d'}' -f1)
+			#cur=$(shell dumpsys window windows | awk '/mCurrentFocus/{print $3}' | cut -d'}' -f1)
 		;;
 		(focusactivity)
-			run $DRYRUN adb shell dumpsys activity activities | grep mFocusedActivity
+			shell dumpsys activity activities | grep mFocusedActivity
 		;;
 		(immersive)
 			local value imm setting
@@ -246,7 +486,6 @@ function processLine()
 				'navigation - Hide navigation bar only'
 				'status - Hide status bar only'
 			)
-			set -x
 			if match_array -c -v value $value imm; then
 				case $value in
 					d*) setting='null*' ;;
@@ -256,18 +495,15 @@ function processLine()
 				esac
 				setting g policy_control $setting
 			fi
-			set +x
 		;;
 		(logcat) logcat "$@" ;;
+		(settings(#c,1)) logcat "$@" ;;
 		(home)
 			action=android.intent.action.MAIN
 			category=android.intent.category.HOME
-			run $DRYRUN adb shell am start -a $action -c $category
+			shell am start -a $action -c $category
 		;;
-		(ps)
-			#run $DRYRUN adb shell ps "$@"
-			print -l $(listRunning $1)
-		;;
+		(ps) listRunning $1 ;;
 		(en|enable|dis|disable) enDis $cmd "$@" ;;
 		(install|inst)
 			if [[ $(getext "$1") != "apk" ]]; then
@@ -277,38 +513,61 @@ function processLine()
 			install $1
 		;;
 		(list) listPkg "$@" ;;
+		(listactivities|listact|listacts) listActivities "$@" ;;
 		(stop|restart)
-			chooser -v pkg -f1 $(listRunning "$@") || cancel 
-			stop $pkg || abort 1 "Could not stop $C[cyan]$pkg"
-			[[ $cmd == 'restart' ]] && start $pkg
+			if choosePkg -r "$@"; then
+				stop $pkg || abort 1 "Could not stop $C[cyan]$pkg"
+			elif [[ $? -ne 10 ]]; then
+				cancel
+			fi
+			if [[ $cmd == 'restart' ]]; then
+				if [[ -z $pkg ]]; then
+					choosePkg "$@"
+				fi
+				start $pkg
+			fi
 		;;
 		(start)
-			chooser -v pkg -f1 $(listPkg -d "$@") || cancel
+			choosePkg "$@" || cancel
 			start $pkg
+		;;
+		(pull|get) pull "$@" .
+		;;
+		(push|send) push "$@"
+		;;
+		(edit|view)
+			pull "$@"
+			v -f $f
+			push $f "$@"
+			v /system/etc/hosts
+			v $file/system/etc/hosts
 		;;
 		(uninstallall|removeall|delall|deleteall) uninstall -a "$@" ;;
 		(uninstall|remove|rm|del(ete)?) uninstall "$@" ;;
 		(clear) clearData "$@" ;;
-		(info) selectPkg -v pkg "$@" && info $pkg ;;
+		(info) pkg=$(choosePkg "$@") && info $pkg ;;
 		(wallpaper|anim|animation) #@TODO use rsync or md5
-			ro=$(run $DRYRUN adb shell mount | awk '/^\/dev\/block\/mmcblk0p2/{print $4}') || abort
+			ro=$(shell mount | awk '/^\/dev\/block\/mmcblk0p2/{print $4}') || abort
 			if [ "${ro:0:2}" = 'ro' ]; then
-				run $DRYRUN adb shell mount -o remount,rw /system || abort
+				shell mount -o remount,rw /system || abort
 			fi
 			techo -c head Transfering wallpaper
-			run $DRYRUN adb push $HOME/PeD/logo.png /data/system/users/0/wallpaper || abort
+			adb push $HOME/PeD/logo.png /data/system/users/0/wallpaper || abort
 
 			techo -c head Transfering boot animation
-			run $DRYRUN adb push $HOME/PeD/android/bootanimation.zip /system/media || abort
+			adb push $HOME/PeD/android/bootanimation.zip /system/media || abort
 		;;
 		(hidekeyb|hidekeyboard|keyb) sendkey 111 ;;
-		(key|sendkey) sendkey $1 ;;
+		(key|sendkey) sendkey "$@" ;;
+		(shell) shell "$@" ;;
+		(reboot) confirm "Reboot device" && adb reboot ;;
 		(poweroff)
-			run $DRYRUN adb shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
+			shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
 		;;
 		(\\h|h|help) usage ;;
+		(doc) open $docurl ;;
 		(\q|exit|quit) running=0 ;;
-		(version|ver|release) getprop ro.build.version.release ;;
+		(version|ver|release) getprop ro.build.version. ;;
 		(getprop|prop) getprop "$@" ;;
 		(*)
 			techo -c warn type $C[lred]\h$_C or $C[lred]help$_C for usage
@@ -316,6 +575,10 @@ function processLine()
 		;;
 	esac
 }
+
+if ((DEBUG)); then
+	debug -k adb parseADBErrors processLine choosePkg
+fi
 
 integer running=1
 

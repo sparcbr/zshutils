@@ -45,7 +45,7 @@ function input()
 	zparseopts -M -D - c:=c p:=p v:=_var g=gui z=z t:=title r=raw \
 		b:=_buttons -buttons:=b
 
-	typeset -A buttons=(Cancel 1 Ok 0)
+	typeset -A buttons=(Cancel 130 Ok 0)
 	if (($#_buttons)); then
 		explode -A':' -v _buttons $_buttons[2] ','
 		buttons+=(${(kv)_buttons})
@@ -71,9 +71,12 @@ function input()
 		args=($colors -center -ontop -wrap -buttons "$(implode -A':' buttons ',')")
 		str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")
 		ret=$?
-		in_array $ret buttons || cancel
-		str=$buttons[(ie)$ret] #@TODO
-		(($#str)) && techo -c warn $str
+		in_array $ret buttons || abort $ret
+		if ((ret)); then
+			((ret == 130)) && cancel
+			return $ret
+		fi
+		[[ -n $str ]] && techo -c warn $str
 	else
 		if [[ -o zle ]]; then
 			techo # newline, because vared clears the line
@@ -82,8 +85,10 @@ function input()
 			read -r str
 		fi
 		ret=$?
+		in_array $ret buttons || abort $ret
 		if ((ret)); then
-			((ret == 130)) && cancel || return 1
+			((ret == 130)) && cancel
+			return $ret
 		fi
 	fi
 	
@@ -334,7 +339,7 @@ function run()
 
 	if [[ -z $color ]]; then
 		color=(-c head)
-	elif [[ $color == 'none' ]]; then
+	elif [[ $color[2] == (0|) ]] || ; then
 		color=''
 	fi
 	[[ -n $print ]] && print=$print[2]
@@ -366,7 +371,7 @@ function run()
 			okcodes=(0)
 		else
 			explode -v okcodes $okcodes[2] ','
-			in_array okcodes 0 || okcodes+=(0)  # add 0 to successful exit codes
+			in_array 0 okcodes || okcodes+=(0)  # add 0 to successful exit codes
 		fi
 
 		(($#debug)) && DEBUG=$debug[2]
@@ -396,13 +401,13 @@ function run()
 			break
 		done
 
-		if ! in_array okcodes $ret; then
+		if ! in_array $ret okcodes; then
 			if [[ -n $trysudo ]]; then
 				techo "Trying with sudo"
 				sudo $fullcmd
 				ret=$?
 			fi
-			in_array okcodes $ret || throw $ret
+			in_array $ret okcodes || throw $ret
 		fi
 	} always {
 		if ((DEBUG)); then
@@ -423,7 +428,7 @@ function run()
 		fi
 	}
 
-	if in_array okcodes $ret; then
+	if in_array $ret okcodes; then
 		((verbose>=4)) && techo "$cmd $OK"
 		[[ -n $alert ]] && success "$cmd finished successfully."
 	else
