@@ -120,15 +120,11 @@ function vartype() {
 # Set info for a lib
 function lib_set_info()
 {
-	local name info
-	integer ll=$6 err
-	if [[ $1 == '-E' ]]; then
-		err=1
-		shift
-	fi
-	name=${(U)1}
-	typeset -Ag ZSH_${name}_INFO
-	set -A ZSH_${name}_INFO ver $2 path "$3" required $4 mtime "$5" lazyload $ll err $err
+	local name info ll err
+	zparseopts -D - E=err l=ll
+	err=$#err; ll=$#ll; name=${(U)1}
+	typeset -Ag "ZSH_${name}_INFO"
+	set -A "ZSH_${name}_INFO" ver $2 path "$3" required $4 mtime "$5" lazyload $ll err $err
 }
 
 function getmime()
@@ -234,6 +230,7 @@ function parseErrors()
 	while read line; do
 		#echo line=${(q)line}
 		[[ $line == 'EOF' ]] && return
+		techo line=${(q)line}
 		if [[ $line =~ $'^(.+):([0-9]+): (parse error near) `(.*)\'' ]]; then
 		elif [[ $line =~ $'^(.+):([0-9]+): (condition expected): "(.*)"' ]]; then
 		elif [[ $line =~ $'^(.+):([0-9]+): (not an identifier):(.*)' ]]; then
@@ -273,9 +270,8 @@ function include()
 	required=$#required
 
 	if [[ ! -f $lpath ]]; then
-		techo -P "[%1K%F{15}FAIL%f%k] %F{11}$lpath %F{9}not found%f"
+		techo -P "[%K{1}%F{15}FAIL%f%k] ${${required:#0}:+%F\{9\}Required }%F{11}$lpath %F{9}not found%f"
 		if ((required)); then
-			techo -P "%F{9}Required %F{11}$name %F{9}not loaded%f"
 			[[ ! -o interactive ]] && abort 127
 		fi
 		return 127
@@ -287,7 +283,10 @@ function include()
 	if [[ -z ${(P)info} ||  # not loaded
 		-n $force ||  # force load 
 		${${(P)info}[mtime]} -lt $mtime ]] || # file was modified
-		((${${(P)info}[lazyload]} && ! $#lazyload)) # was lazy loaded 
+		((
+			${${(P)info}[err]} ||
+			( ${${(P)info}[lazyload]} && ! $#lazyload )
+		)) # has error or was lazy loaded 
 	then 
 		if ! zshLibReadHeader $lpath; then
 			techo -P "%F{11}$lpath %F{9}is not a zsh library%f"
@@ -300,45 +299,53 @@ function include()
 
 		if (($#lazyload)); then # @TODO
 			local llfuncs func
-			if [[ -n $HEADER[lazyload] ]]; then
+			if (($#HEADER[lazyload])); then
+				# register a autoload function for each lazy load function
 				explode -v llfuncs ${HEADER[lazyload]} ','
 				for func in $llfuncs; do
 					functions[$func]="include $name && $func \$@"
 				done
 			fi
-			lib_set_info $name $VERSION "$lpath" ${required:-0} "$mtime" 1
+			lib_set_info -l $name $VERSION "$lpath" $required "$mtime"
 			return 0
 		fi
 
 		#[[ -o interactive ]] && 
 		techo -P -r "Including %F{11}$name%f ("${lpath/$ZSH_LIBS/"\\$"ZSH_LIBS}") [%F{2}$VERSION%f]"
-		if source $lpath; then
-			lib_set_info $name $VERSION "$lpath" ${required:-0} "$mtime"
+		typeset -Tf parseErrors
+		coproc parseErrors
+		if source $lpath 2>&p; then
+			lib_set_info $name $VERSION "$lpath" $required "$mtime"
+			echo EOF >&p
 			#[[ -o interactive ]] &&
 		else
 			local error error2 file line tmp split
-			lib_set_info -E $name $VERSION "$lpath" ${required:-0} "$mtime"
-			techo -P "%F{11}$name%f [%K{1}%F{15}FAIL%f%k]"
+			lib_set_info -E $name $VERSION "$lpath" $required "$mtime"
+			echo EOF >&p
 			(
 				#@TODO sort errors by file before opening files
-				while read -pr tmp; do
-					split=(${(z)tmp})
+				set -x
+				while read -p tmp; do
+					split=(${(Q)${(z)tmp}})
 					file=$split[1]; line=$split[2]; error=$split[3]; error2=$split[4]
-					techo -Pr "%F{3}$file:$line %F{9}${error} %K{1}%F{15}${error2}%f%k"
-					if type v 2>&1 >/dev/null; then
-						v $file:$line &
-					else
-						${EDITOR:-vim} $file +$line &
-					fi
+					techo -Pr "%F{3}$file:$line %F{9}${error}%f${error2:+" %K{1}%F{15}${error2}%f%k"}"
+					#@TODO this is going to run once per terminal. Wanted: once total.
+					#@idea run this part only on current terminal, if there is one focused.
 				done
-				echo EOF >&p
+				if type v 2>&1 >/dev/null; then
+					#v $file:$line &
+				else
+					#${EDITOR:-vim} $file +$line &
+				fi
+				set +x
 			)
 
 			if ((required)); then
-				techo -P "\n%F{9}Required %F{11}\"zsh_$name\"%F{9} not loaded%f"
+				techo -P "[%K{1}%F{15}FAIL%f%k] %F{9}Required %F{11}zsh_$name%F{9} not loaded%f"
 				[[ -o interactive ]] || abort 2
 				return 2
 			fi
+			techo -P "[%K{1}%F{15}FAIL%f%k] %F{11}zsh_$name%F{9} not loaded%f"
 			return $ret
 		fi
 	fi
@@ -433,17 +440,18 @@ function aptinst()
 # Added 2019-09-03 19:29
 function libmonitor()
 {
-	# last   t       last+1.5   
-	# | DIFF | SLEEP |
-	local name evt pids
-	float t lastt=0 diff
-	while read -r evt name; do
+	local name lastname evt pids
+	float t lastt diff
+	integer ts=0 lastts=0
+	while read -r evt name ts; do
 		[[ $evt == 'exit' ]] && break
 		pids=($(pidof inotifywait 2>/dev/null))
 		if (($#pids > 1)); then
 			command kill ${pids:0:-1}
 		fi
-		techo -c warn "$evt $name $$"
+		((ts <= lastts)) && [[ $name == $lastname ]] && continue
+		techo -c warn "$evt $name $ts"
+		((lastts = ts))
 		t=$(date '+%s.%3N')
 		((diff = t - lastt))
 		if ((diff < 1.5)); then
@@ -453,7 +461,7 @@ function libmonitor()
 		fi
 		((lastt = t))
 		killall -HUP zsh
-	done < <(inotifywait -m -q -e modify -r --format '%e %f' $ZSH_LIBS || echo "exit $?")
+	done < <(inotifywait -m -q -e modify -r --format '%e %f %T' --timefmt '%s' $ZSH_LIBS || echo "exit $?")
 	return $name
 }
 

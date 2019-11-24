@@ -1,8 +1,16 @@
-VERSION=1.0.3
+VERSION=1.0.4
 # databases data dir
 DB_DATA_DIR=/var/lib/mysql
-DBNAME=idiomus
-sqlPass='my7866'
+DBNAME='idiomus'
+
+typeset -gA sqlPass=(
+	'sparc' 'my!7866'
+	'idiomus' '#58dhAms$3xx'
+)
+typeset -gA sqlUser=(
+	'root' 'sparc'
+	'idiomus' 'idiomus'
+)
 
 # get last modification time of dbname(s)
 # usage: dbtstamp dbname
@@ -19,8 +27,8 @@ alias sqlmaq="noglob sql --ssh maquina"
 # sql [-d dbname] [-f file.sql] SELECT ...
 function sql()
 {
-	local file name sql nodb verbose pass silent host
-	zparseopts -D - f:=file d:=name n=nodb v=verbose p:=pass s=silent -ssh:=host
+	local file name sql nodb verbose user pass silent host
+	zparseopts -D - f:=file d:=name n=nodb v=verbose u:=user p:=pass s=silent -ssh:=host
 	if [[ -n $file ]]; then
 		file=$file[2]
 		# [[ $file size greater than X lines ]] && 
@@ -32,11 +40,17 @@ function sql()
 	fi
 
 	if [[ -n $host ]]; then
-		ssh $host[2] "noglob sql $sql"
+		ssh $host[2] "noglob sql ${(qqq)sql}"
 	else
 		[[ -n $nodb ]] || usedb $name[2]
-		pass="${pass[2]:-$sqlPass}"
-		mysql $silent -u root -p$pass -e "$sql" $db
+		if [[ -n $db ]]; then
+			user=${user[2]:-${sqlUser[$db]:-root}}
+			pass=${pass[2]:-$sqlPass[$user]}
+		else
+			user=${user[2]:-$sqlUser[root]}
+			pass=${pass[2]:-$sqlPass[$user]}
+		fi
+		mysql $silent ${user:+-u$user} ${pass:+-p"$pass"} -e "$sql" $db
 	fi
 }
 
@@ -49,10 +63,10 @@ function usedb()
 {
 	#${${dbname:-$(proj get dbname)}}
 	[[ $1 == '-s' ]] && { db= ; shift }
-	if [ $# -gt 0 ]; then
-		isdb $1 && db=$1 || abort "$1: database not found"
+	if (($#)); then
+		isdb $1 && db=$1 || abort 127 "$1: database not found"
 	elif [[ -z $db ]]; then
-		db=$(chooser $(mklist $DBNAME $(dblist)))
+		db=$(chooser ${DBNAME:+-D $DBNAME} $(dblist))
 	fi
 }
 function dblist()

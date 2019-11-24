@@ -1,5 +1,6 @@
 VERSION=1.0.2
-
+#lazyload=gclone,github,gh,gpush,pull,push
+[[ ! -v comp ]] && typeset -g -a comp
 export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 alias pull="git pull"
@@ -7,9 +8,8 @@ alias push="gpush"
 alias gdiff="git diff --ignore-space-at-eol -b -w --ignore-blank-lines --minimal"
 alias gadd="git add"
 alias gadd-modified="git add \$(git diff --name-only --relative)"
-alias gshow="git show"
-alias gunstage="git reset HEAD --"
-alias unstage="git reset HEAD --"
+alias gshow="git show --color=always"
+alias unstage="gunstage"
 alias git_get_tag='git describe --tags $(git rev-list --tags --max-count=1)'
 alias gchk='git checkout'
 alias glog2='git log --date=iso -g'
@@ -17,6 +17,12 @@ alias glog2='git log --date=iso -g'
 alias maquina="cd ~/MaquinaDeConversao/www/api.maquinadeconversao.com.br"
 alias idiomus="cd ~/xdata/idiomusAPI"
 alias q48="cd ~/Q48API"
+
+comp+=('gunstage=git')
+function gunstage()
+{
+	git restore --staged "$@"
+}
 
 function gfollow()
 {
@@ -38,13 +44,13 @@ function gtag()
 	git tag -a $tag $hash
 }
 
-function gmerge()
+function gmerge() #@TODO
 {
 	local branch=${1:-$(chooser $(git branch))}
 	[[ -n $branch ]] && run git merge $branch --no-ff --no-commit
 }
 
-function ggrep()
+function ggrep() #@TODO
 {
 	local files pattern
 	pattern=$(echo "$@" | awk -F' - ' '// {print $1}')
@@ -60,7 +66,7 @@ function ggrep()
 	set +x
 }
 
-function commit()
+function commit() #@TODO
 {
 	local m args
 	zparseopts -D -M - m:=m
@@ -80,27 +86,27 @@ function croot()
 
 # Added 2019-01-25 11:17:01
 # https://github.com/search?q=
-alias gh='github'
-[[ ! -v comp ]] && typeset -g -a comp
 comp+=('github=cd' 'gh=cd')
 function github()
 {
 	local url repo search echo
 	zparseopts -D -M - r=repo s=search e=echo
 	if [[ $# -eq 0 ]]; then
-		open "https://github.com/"
+		url=$(gitgetrepo .) || url='https://github.com/'
+		open $url
 	elif [[ -n $search ]]; then
 		open "https://github.com/search?q=$(omz_urlencode $*)"
 	elif [[ -n $repo ]]; then
 		url="https://github.com/$*"
-		[[ -n $echo ]] && echo $url || open $url
+		[[ -n $echo || ! -t 1 ]] && echo $url || open $url
 	elif url=$(gitgetrepo "$*"); then
-		[[ -n $echo ]] && echo $url || open $url
+		[[ -n $echo || ! -t 1 ]] && echo $url || open $url
 	else
 		githubAPI $echo "$@"
 	fi
 }
-
+alias gh='github'
+typeset -Tf github
 #
 function githubAPI()
 {
@@ -127,11 +133,12 @@ function githubAPI()
 	request=${request//$'\n'/}
 	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d $request $endpoint)
 	ret=$?
-	(( $#verbose )) && {
-		jq -r >$TTY <<<$request
-		jq -r >$TTY <<<$response
+	type jq >/dev/null || chkCmdInstall jq 
+	(($#verbose)) && {
+		jq -r <<<$request
+		jq -r <<<$response
 	}
-	if (( ret == 0 )); then
+	if ((ret == 0)); then
 		local field
 		typeset -a repos tmp
 		while read -r field; do
@@ -141,28 +148,43 @@ function githubAPI()
 				tmp=
 			fi
 		done < <(jq -cr "$fields" <<<$response)
-		
-		if [[ $#repos -eq 0 ]]; then
-			techo "No repositories found"
-		elif [[ $#repos -eq 1 ]]; then
+
+		if ((!$#repos)); then
+			abort 10 'No repositories found'
+		elif (($#repos == 1)); then
 			github -r $echo $(explode "$repos" ' ' 1)
 		else
 			name=$(chooser -s' ' -f1 $repos "Open this search in github") || cancel
-			[[ "$name" == 'Open' ]] && github -s "$*" || github -r $echo $name
+			if [[ $name == 'Open' ]]; then
+				github -s "$*"
+			else
+				github -r $echo $name
+			fi
 		fi
 	fi
 }
 
 function gitgetrepo()
 {
-	local repo d q
+	local repo d remote
 	zparseopts -D -M - d:=d
 	(
-	[[ -n "$d" ]] && d=$d[2] || d="$*"
-		[[ -d "$d" ]] && cd $1 || { techo -c err "Directory not found: $1"; return 1 }
-		repo=$(git remote show origin 2>/dev/null) || return 1
-		repo=$(echo $repo | awk '/Fetch URL/{print $3}')
-		[[ -n $repo ]] && echo "$repo"
+		d=${d[2]:-"$*"}
+		if [[ -n $d && -d $d ]]; then
+			cd $1 || {
+				[ -t 1 ] && techo -c err "Directory not found: $1"
+				return 1
+			}
+		fi
+		gremote || { techo -c warn 'No remotes'; return 10 }
+		repo=$(git remote get-url $remote[1] 2>/dev/null) || {
+			[ -t 1 ] && techo -c err 'Git repository not found'
+			return 1
+		}
+		[[ -n $repo ]] && echo $repo || {
+			[ -t 1 ] && techo -c err 'No remotes'
+			return 10
+		}
 	)
 }
 
@@ -210,24 +232,6 @@ function gremote()
 	#zparseopts c=current
 	
 	remote=($(git remote))
-}
-
-function url() {
-	local schemes=(ssh git http https ftp ftps)
-	local getscheme gethost getuser userhostpat='(([-[:alnum:]]+)@)?([-.[:alnum:]]+)'
-	zparseopts -D -M - -s=getscheme h=gethost u=getuser
-	if (( $#getscheme )); then
-		if [[ $2 =~ (${(j.|.)schemes})'://'$~userhostpat ]]; then
-			echo $match[1]
-			return
-		fi
-	fi
-
-	if [[ $2 =~ $~userhostpat ]]; then
-		(( $#getscheme )) && echo 'git'
-		(( $#getuser )) && echo $match[2]
-		(( $#gethost )) && echo $match[3]
-	fi
 }
 
 # Added 2019-09-03 19:04

@@ -8,7 +8,6 @@ include -qr functions
 include -qr file
 include -qr android
 include -ql debug
-
 zparseopts -D -M - n=dryrun D::=debug d::=D i=interactive
 if [[ -n $dryrun ]] || { [[ -n $DRYRUN ]] && ((DRYRUN)) }; then
 	DRYRUN=-n
@@ -16,7 +15,7 @@ fi
 if (($#debug)); then
 	DEBUG=${debug[1]:2}
 	if [[ $DEBUG != [0-9]## ]]; then
-		[[ -n $DEBUG ]] && set - $DEBUG "$@" # not a number means it's not an argumento to -d 
+		[[ -n $DEBUG ]] && set - $DEBUG "$@" # not a number means it's not an argumento to -d
 		DEBUG=1
 	fi
 fi
@@ -39,19 +38,20 @@ docurl='https://developer.android.com/studio/command-line/adb'
 function usage()
 {
 	print -l ${(o)cmds}
-	print "app doc for online documentation (docurl)"
+	print "\"app doc\" for online documentation ($docurl)"
 }
 
 function parseADBErrors()
 {
 	local line
 	while read line; do
-		echo -Pr ${(q)line}
 		[[ $line == 'EOF' ]] && return
 
-		if [[ $line =~ '^(adb: )?error: (.*)' ]]; then
-			case $match[2] in
+		if [[ $line =~ '^(\[[0-9;]+m)?(adb: )?error: (.*)(\[0?m)?' ]]; then
+		#if [[ $line =~ '^(\[[0-9;]+m)?error: (.*)' ]]; then
+			case $match[3] in
 				*'more than one device/emulator') echo EMultDev ;;
+				'no devices/emulators found') echo EConn ;;
 				*) ;;
 			esac
 		elif [[ $line =~ $'^adb: unknown command (.*)' ]]; then
@@ -76,14 +76,14 @@ function adb()
 
 	coproc parseADBErrors
 	#run $DRYRUN command adb $devOpts "$@" 2>&p & pid=$!
-	#run -c 0 $DRYRUN command adb $devOpts "$@" 2>&p 
-	while ! run $DRYRUN command adb $devOpts "$@" 2>&p; do
+	#run -c 0 $DRYRUN command adb $devOpts "$@" 2>&p
+	while ! run -Ae $DRYRUN command adb $devOpts "$@" 2>&p; do
 	#@TODO sort errors by file before opening files
-		while read -pr line; do
+		while read -p line; do
 			split=(${(z)line})
 			case $split[1] in
 				EMultDev)
-					chooseDevice
+					chooseDevice || cancel
 					continue
 					;;
 				EConn)
@@ -104,7 +104,7 @@ function adb()
 
 function shell()
 {
-	adb shell "$@"
+	adb shell "$@" | stdbuf -o0 tr -d $'\r'
 }
 
 function chooseDevice()
@@ -123,7 +123,7 @@ function connect()
 	if ! adb connect "$@" 2>&p; then
 	(
 		#@TODO sort errors by file before opening files
-		while read -pr line; do
+		while read -p line; do
 			split=(${(z)line})
 			case $split[1] in
 				EmultDev) ;;
@@ -161,14 +161,14 @@ function listPkg()
 	zparseopts -D -M - a=all d=date
 	[[ -n $all ]] || flags="-3"
 	sorted=() ; sortedPkgs=()
-	pkgs=($(shell pm list packages $flags "$@" | tr -d '\r')) || return
+	pkgs=($(shell pm list packages $flags "$@" | stdbuf -o0 tr -d '\r')) || return
 	(($#pkgs)) || return 10
 	pkgs=(${pkgs#package:})
 	for pkg in $pkgs; do
 		local _date=$(
 			shell dumpsys package $pkg | \
 				awk -F'=' '/lastUpdateTime/{print $2}' | \
-				head -n1 | tr -d '\r\n'
+				head -n1 | stdbuf -o0 tr -d '\r\n'
 		)
 		sorted+=("${(f)_date} $n")
 		((n++))
@@ -190,12 +190,12 @@ function listPkg()
 
 function info()
 {
-	shell dumpsys package $1 | tr -d '\r'
+	shell dumpsys package $1 | stdbuf -o0 tr -d '\r'
 }
 
 function listRunning()
 {
-	shell ps | awk "\$9 ~ /${@:-.}/{print \$9}" | tr -d $'\r\t'
+	shell ps | awk "\$9 ~ /${@:-.}/{print \$9}" | stdbuf -o0 tr -d $'\r\t'
 }
 
 function getMainActivity()
@@ -206,9 +206,10 @@ function getMainActivity()
 
 function listActivities()
 {
-	shell dumpsys package $1 | \
-		egrep -A 10 '^Activity Resolver Table:' | \
-		tr -d $'\r' | grep -o '[^ ]*/[^ ]*'
+	local pkg=$(choosePkg "$@")
+	shell dumpsys package $pkg | \
+		awk '/^Activity Resolver Table/,/^$/ { s = $0 } \
+			match(s, /([^: =]+\/[^: ]+)$/, m) { print m[1]; s="" }'
 }
 
 function start()
@@ -220,9 +221,9 @@ function start()
 	elif [[ -n $2 ]]; then
 		act=$1/$2
 	else
-		chooser -v act $(listActivities $1) || cancel
+		chooser -H 'Start activity' -v act $(listActivities $1) || cancel
 	fi
-	shell am start $act && sendkey power on
+	shell am start $act && sendkey WAKEUP
 }
 
 function stop()
@@ -270,9 +271,9 @@ function choosePkg()
 	local running
 	zparseopts -D -M - r=running
 	if [[ -n $running ]]; then
-		chooser -f1 --ifs $'\n' "$(listRunning "$@")"
+		chooser -H 'Select package' -f1 --ifs $'\n' "$(listRunning "$@")"
 	else
-		chooser -f1 --ifs $'\n' "$(listPkg -d "$@")"
+		chooser -H 'Select package' -f1 --ifs $'\n' "$(listPkg -d "$@")"
 	fi
 }
 
@@ -321,7 +322,16 @@ function sendkey() {
 		73 'BACKSLASH' 74 'SEMICOLON' 75 'APOSTROPHE' 76 'SLASH'
 		77 'AT' 78 'NUM' 79 'HEADSETHOOK' 80 'FOCUS' 81 'PLUS' 82 'MENU'
 		83 'NOTIFICATION' 84 'SEARCH' 85 'TAG_LAST_KEYCODE'
+		92 'PAGEUP' 93 'PAGEDOWN'
 		111 'HIDEKEYBOARD'
+		113 'CONTROL_LEFT' 114 'CONTROL_RIGHT'
+		131 'F1' 132 'F2' 133 'F3' 134 'F4' 135 'F5'
+		136 'F6' 137 'F7' 138 'F8' 139 'F9' 140 'F10' 141 'F11' 142 'F12'
+		176 'SETTINGS'
+		207 'CONTACTS' 208 'CALENDAR' 209 'MUSIC' 210 'CALCULATOR'
+		220 'DEC_BRIGHT' 221 'INC_BRIGHT'
+		223 'SLEEP' 224 'WAKEUP'
+		277 'CUT' 278 'COPY' 279 'PASTE'
 	)
 	local keycode key
 	if [[ $1 == <-> ]]; then
@@ -332,19 +342,9 @@ function sendkey() {
 		return 0
 	else
 		key=${(U)1}
-		keycode=${(k)keys[(re)$key]}
+		keycode=${(k)keys[(r)(*\|)#($key)(\|*)#]}
 		[[ -n $keycode ]] || abort 1 "Invalid key $C[warn]$key"
 	fi
-	case $key in
-		POWER)
-			if [[ ${(U)2} =~ 'ON|OFF' ]]; then
-				if [[ $(shell dumpsys power | grep 'Display Power') =~ state=(OFF|ON) ]]; then
-					[[ $match[1] == ${(U)2} ]] && return 0
-				fi
-			fi
-		;;
-		*) ;;
-	esac
 	run $DRYRUN -p "Sending key $key ($keycode)" shell input keyevent $keycode
 }
 
@@ -375,7 +375,7 @@ function uninstall()
 	local all arg args keepData
 	zparseopts -D -M - a=all k=keepData
 	args=("$@") ; args=(${(M)args:#*.apk})
-	(($#args)) || args=($(choosePkg $all)) || return
+	(($#args)) || args=($(choosePkg $all "$@")) || return
 	for arg in $args; do
 		if [[ "$(getext $arg)" = 'apk' ]]; then
 			uninstallPkg $keepData $(getPkg $arg)
@@ -408,14 +408,14 @@ function getprop()
 	names=() ; values=()
 	for name; do
 		if [[ $name != *'*'* ]]; then
-			val=$(shell getprop $name | tr -d $'\r')
+			val=$(shell getprop $name | stdbuf -o0 tr -d $'\r')
 			if [[ -n $val ]]; then
 				names+=($name)
 				values+=($val)
 				continue
 			fi
 		fi
-		explode -v val --ifs $'\n' "$(shell getprop | grep $name | tr -d $'\r')" $'\n'
+		explode -v val --ifs $'\n' "$(shell getprop | grep $name | stdbuf -o0 tr -d $'\r')" $'\n'
 		for line in $val; do
 			explode -v tmp $line ':'
 			names+=("${${tmp[1]#\[}%\]}")
@@ -447,7 +447,7 @@ function setting()
 	in_array -v nspace_m $nspace nspaces
 	n=$#nspace_m
 	((n)) || abort 10 namespace: ${C_}$nspaces
-	chooser -v nspace $nspace_m || cancel
+	chooser -H 'Setting namespace:' -v nspace $nspace_m || cancel
 	setting=$1
 	value=$2
 	if [[ -n $value ]]; then
@@ -470,41 +470,34 @@ function processLine()
 		(*=*)
 			verbose=${cmd#verbose=}
 		;;
-		(focuswindow|focus)
-			#cur=$(shell dumpsys window windows | awk '/mCurrentFocus/{print $3}' | cut -d'}' -f1)
-		;;
+		(clear) clearData "$@" ;;
+		(en|enable|dis|disable) enDis $cmd "$@" ;;
 		(focusactivity)
 			shell dumpsys activity activities | grep mFocusedActivity
 		;;
-		(immersive)
-			local value imm setting
-			((#)) || { usage ; return 10 }
-			value=$1
-			imm=(
-				'default - Reset to normal config'
-				'full - Hide both bars'
-				'navigation - Hide navigation bar only'
-				'status - Hide status bar only'
+		(focuswindow|focus)
+			#cur=$(shell dumpsys window windows | awk '/mCurrentFocus/{print $3}' | cut -d'}' -f1)
+		;;
+		(getprop|prop) getprop "$@" ;;
+		(home) sendkey HOME
+			#action=android.intent.action.MAIN
+			#category=android.intent.category.HOME
+			#shell am start -a $action -c $category
+		;;
+		(immersive) immersive "$@"
+			local value options setting
+			options=(
+				'default - Reset to normal config'		'null*'					 
+				'full - Hide both bars'					'immersive.full=*'		 
+				'navigation - Hide navigation bar only' 'immersive.navigation=*' 
+				'status - Hide status bar only'			'immersive.status=*'	 
 			)
-			if match_array -c -v value $value imm; then
-				case $value in
-					d*) setting='null*' ;;
-					f*) setting=immersive.full='*' ;;
-					n*) setting=immersive.navigation='*' ;;
-					s*) setting=immersive.status='*' ;;
-				esac
+			((#)) || { techo $0 $cmd ${options} ; return 10 }
+			if match_array -c -v input --array $1 options; then
 				setting g policy_control $setting
 			fi
 		;;
-		(logcat) logcat "$@" ;;
-		(settings(#c,1)) logcat "$@" ;;
-		(home)
-			action=android.intent.action.MAIN
-			category=android.intent.category.HOME
-			shell am start -a $action -c $category
-		;;
-		(ps) listRunning $1 ;;
-		(en|enable|dis|disable) enDis $cmd "$@" ;;
+		(info) pkg=$(choosePkg "$@") && info $pkg ;;
 		(install|inst)
 			if [[ $(getext "$1") != "apk" ]]; then
 				techo -c warn $1 is not a APK
@@ -512,40 +505,63 @@ function processLine()
 			fi
 			install $1
 		;;
+		(keyb|hidekeyb|hidekeyboard) sendkey 111 ;;
+		(key|sendkey) sendkey "$@" ;;
+		(logcat) logcat "$@" ;;
+		(wifi) ;;
+		(net) getDeviceIP ;;
 		(list) listPkg "$@" ;;
-		(listactivities|listact|listacts) listActivities "$@" ;;
+		(listactivities|listact|listacts|activities) listActivities "$@" ;;
+		(poweroff)
+			shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
+		;;
+		(ps) listRunning $1 ;;
+		(pull|get) apull "$@" ;;
+		(push|send) apush "$@" ;;
+		(reboot) confirm "Reboot device" && adb reboot ;;
+		(setting|settings) set -x; setting "$@" ; set +x;;
+		(shell) shell "$@" ;;
+		(start)
+			pkg=$(choosePkg "$@") || cancel
+			start $pkg
+		;;
 		(stop|restart)
-			if choosePkg -r "$@"; then
+			if pkg=$(choosePkg -r "$@"); then
 				stop $pkg || abort 1 "Could not stop $C[cyan]$pkg"
 			elif [[ $? -ne 10 ]]; then
 				cancel
 			fi
 			if [[ $cmd == 'restart' ]]; then
 				if [[ -z $pkg ]]; then
-					choosePkg "$@"
+					pkg=$(choosePkg "$@") || return
 				fi
 				start $pkg
 			fi
 		;;
-		(start)
-			choosePkg "$@" || cancel
-			start $pkg
+		(pull|get) apull "$@" ;;
+		(push|send) apush "$@" ;;
+		(setting|settings) setting "$@" ;;
+		(reboot) confirm "Reboot device" && adb reboot ;;
+		(poweroff)
+			shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
 		;;
-		(pull|get) pull "$@" .
-		;;
-		(push|send) push "$@"
-		;;
-		(edit|view)
+		(shell) shell "$@" ;;
+		(\q|exit|quit) running=0 ;;
+		(swipeup|unlock) shell input swipe 30 600 30 300 ;;
+		(swipetop) shell input swipe 30 0 30 300 ;;
+		(swipedown) shell input swipe 30 300 30 600 ;;
+		(swipeleft) shell input swipe 300 400 30 400 ;;
+		(swiperight) shell input swipe 30 400 300 400 ;;
+		(uninstallall|removeall|delall|deleteall) uninstall -a "$@" ;;
+		(uninstall|remove|rm|del(ete)?) uninstall "$@" ;;
+		(version|ver|release) getprop ro.build.version. ;;
+		(view|edit)
 			pull "$@"
 			v -f $f
 			push $f "$@"
 			v /system/etc/hosts
 			v $file/system/etc/hosts
 		;;
-		(uninstallall|removeall|delall|deleteall) uninstall -a "$@" ;;
-		(uninstall|remove|rm|del(ete)?) uninstall "$@" ;;
-		(clear) clearData "$@" ;;
-		(info) pkg=$(choosePkg "$@") && info $pkg ;;
 		(wallpaper|anim|animation) #@TODO use rsync or md5
 			ro=$(shell mount | awk '/^\/dev\/block\/mmcblk0p2/{print $4}') || abort
 			if [ "${ro:0:2}" = 'ro' ]; then
@@ -557,18 +573,8 @@ function processLine()
 			techo -c head Transfering boot animation
 			adb push $HOME/PeD/android/bootanimation.zip /system/media || abort
 		;;
-		(hidekeyb|hidekeyboard|keyb) sendkey 111 ;;
-		(key|sendkey) sendkey "$@" ;;
-		(shell) shell "$@" ;;
-		(reboot) confirm "Reboot device" && adb reboot ;;
-		(poweroff)
-			shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
-		;;
 		(\\h|h|help) usage ;;
 		(doc) open $docurl ;;
-		(\q|exit|quit) running=0 ;;
-		(version|ver|release) getprop ro.build.version. ;;
-		(getprop|prop) getprop "$@" ;;
 		(*)
 			techo -c warn type $C[lred]\h$_C or $C[lred]help$_C for usage
 			return 1
@@ -577,7 +583,9 @@ function processLine()
 }
 
 if ((DEBUG)); then
-	debug -k adb parseADBErrors processLine choosePkg
+	set -x
+	debug -k adb processLine choosePkg sendkey
+	set +x
 fi
 
 integer running=1

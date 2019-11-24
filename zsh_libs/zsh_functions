@@ -39,11 +39,18 @@ CANCEL=" [${C[warn]}CANCEL$C_]"
 FAIL=" [${C[err]}FAIL$C_]"
 OK=" [${C[ok]}OK$C_]"
 
+# like grep with optional 'cut -fN'
+# regex pattern [Nfield]
+function regex {
+	gawk 'match($0,/'$1'/, ary) {print ary['${2:-'0'}']}'
+}
+
 function input()
 {
-	local _var str p gui z c colors args title raw _buttons
+	local _var p gui z c title raw _buttons okcodes
+	local colors args str default
 	zparseopts -M -D - c:=c p:=p v:=_var g=gui z=z t:=title r=raw \
-		b:=_buttons -buttons:=b
+		b:=_buttons -buttons:=b N:=okcodes -okcodes:=N D:=default
 
 	typeset -A buttons=(Cancel 130 Ok 0)
 	if (($#_buttons)); then
@@ -66,30 +73,42 @@ function input()
 
 	if [[ -n $z ]] && type zenity>/dev/null; then
 		str=$(zenity -title "$title" --entry --text="$p" --entry-text="$str") || cancel
-		(($#str)) && techo -c warn $str
+		(($#str)) && techo -c warn -E $str
 	elif type gxmessage >/dev/null && [[ -z $raw ]]; then
-		args=($colors -center -ontop -wrap -buttons "$(implode -A':' buttons ',')")
-		str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")
-		ret=$?
-		in_array $ret buttons || abort $ret
-		if ((ret)); then
-			((ret == 130)) && cancel
-			return $ret
-		fi
-		[[ -n $str ]] && techo -c warn $str
+		{
+			args=($colors -name name -center -ontop -wrap -buttons "$(implode -A':' buttons ',')")
+			str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")
+			ret=$?
+		} always {
+			if catch '*'; then
+				ret=$CAUGHT
+			fi
+			in_array $ret buttons || abort $ret
+			if ((ret)) && ! in_array $ret okcodes; then
+				((ret == 130)) && cancel
+				return $ret
+			fi
+		}
+		[[ -n $str ]] && techo -c warn -E $str
 	else
-		if [[ -o zle ]]; then
-			techo # newline, because vared clears the line
-			vared -e str
-		else
-			read -r str
-		fi
-		ret=$?
-		in_array $ret buttons || abort $ret
-		if ((ret)); then
-			((ret == 130)) && cancel
-			return $ret
-		fi
+		{
+			if [[ -o zle ]]; then
+				techo # newline, because vared clears the line
+				vared -e str
+			else
+				read -r str
+			fi
+			ret=$?
+		} always {
+			if catch '*'; then
+				ret=$CAUGHT
+			fi
+			in_array $ret buttons || abort $ret
+			if ((ret)) && ! in_array $ret okcodes; then
+				((ret == 130)) && cancel
+				return $ret
+			fi
+		}
 	fi
 	
 	(($#str)) || return 10
@@ -99,7 +118,7 @@ function input()
 	else
 		echo $str
 	fi
-	return 0
+	return $ret
 }
 
 function confirm()
@@ -125,13 +144,14 @@ function confirm()
 
 function chooser()
 {
-	local noSelect sep field bytes search default
+	local noSelect sep field bytes search default head foot
 	local list ifs var chosen chosenList selectors events
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
-	zparseopts -D -M - c=color p:=print n:=noSelect R:=regex S:=search \
-		 v:=var d:=default s:=sep f:=field -ifs:=ifs b:=bytes E:=events
+	zparseopts -D -M - c=color n:=noSelect R:=regex S:=search \
+		 v:=var D:=default s:=sep f:=field -ifs:=ifs b:=bytes E:=events \
+		 H:=head -head:=H p:=H F:=foot -foot:=F
 
 	if (($#sep || $#field)); then
 		(($#sep && $#field)) && unset 'selectors[(I)[sf]]'
@@ -139,10 +159,12 @@ function chooser()
 		sep=${sep[2]:- }
 	fi
 
+	(($#var)) && set -A list ${(P)var[2]}
+
 	if [[ -n $ifs ]]; then
 		explode -v list "$*" $ifs[2]
 	else
-		list=("$@")
+		list+=("$@")
 	fi
 
 	if (($#list > 1)); then
@@ -153,6 +175,7 @@ function chooser()
 				ZSHSELECT_START_IN_SEARCH_MODE=$+search[2] \
 				ZSHSELECT_NONSELECTABLE=$noSelect[2] \
 				ZSHSELECT_ENABLE_EVENTS=$events[2] \
+				ZSHSELECT_HEAD=$head[2] ZSHSELECT_FOOT=$foot[2] \
 				zsh-select $default "${(@)list:|default}" || throw $?
 			)" $'\n'
 		} always {
@@ -201,11 +224,13 @@ function chooser()
 	return 0
 }
 
+#@TODO merge with inst() from zsh_main
 function chkCmdInstall()
 {
 	if ! command -v $1 >/dev/null; then
-		local deb ret tmp
-		techo -c lred "$1$C_: command not found. $C[warn]Searching for package to install."
+		local deb cmd=$1 ret tmp
+		techo -c lred "Command not found: ${C[head]}\"$cmd\"$C_ ${C[warn]}Searching for package to install."
+		#@TODO make unique list of potential packages
 		[[ -n $2 ]] && deb=$2 || {
 			chooser -v deb -s':' -f1 --ifs=$'\n' "$(dpkg -S '*/'$1)" || return 127
 		}
@@ -317,10 +342,10 @@ function run()
 {
 	local ret cmd fullcmd logfile watch cmdPrefix
 	local sudo trysudo dryrun verbose color alert print
-	local cmdinst workdir skipErrors okcodes debug
+	local cmdinst workdir skipErrors okcodes debug noEx
 
 	if [[ ${1:0:1} == - ]]; then
-		zparseopts -M -D - v:=verbose c:=color a=alert p:=print \
+		zparseopts -M -D - v:=verbose c:=color a=alert p:=print e=noEx A=noAbort \
 			s=sudo S=trysudo n=dryrun I:=cmdinst -cd:=workdir E=skipErrors \
 			l:=logfile w:=watch N:=okcodes -ok-exit-codes:=N D:=debug
 
@@ -423,7 +448,7 @@ function run()
 			fi
 			((verbose)) && techo "$print $FAIL ($data)"
 			[[ -n $alert ]] && error "$print error: $data"
-			abort $skipErrors $ret
+			abort $noAbort $noEx $skipErrors $ret
 			return
 		fi
 	}
@@ -434,7 +459,7 @@ function run()
 	else
 		((verbose)) && techo "$print $FAIL"
 		[[ -n $alert ]] && error "$print error: ret=$ret"
-		abort $skipErrors $ret
+		abort $noAbort $noEx $skipErrors $ret
 	fi
 	return $ret
 }
@@ -450,7 +475,7 @@ function banner()
 	elif type figlet>/dev/null; then
 		cmd='figlet'
 	else
-		if type apt-get 2>&1 >/dev/null && sudo apt install toilet lolcat; then
+		if type apt-get 2>&1 >/dev/null && aptinst toilet lolcat; then
 			if type toilet >/dev/null; then
 				cmd='toilet'
 			fi
@@ -485,7 +510,7 @@ function group()
 	zparseopts -D -M - g:=opt
 
 	[[ -n $opt ]] && num=$opt[2]
-	while read -r line; do
+	while IFS='' read -r line; do
 		echo $line
 		((++i % num == 0)) && echo ――――――――――――――――――――――――
 	done
@@ -498,25 +523,44 @@ function color()
 
 function colorify()
 {
-	local line data debug
-	zparseopts -D -M - D:=debug
+	local line data debug isPipe=0 highlight hcolor hl2 C1 Ch c
+	zparseopts -D -M - D:=debug h:=highlight -hc:=hcolor c:=c
 	#@broken: [ ! -p /dev/stdin ] && exit 0
-	if [ "$1" = '-all' ] || [ "$1" = '-c' ]; then
-		if [ "$1" = '-all' ]; then
-			c='err'
+	[ -t 0 ] || isPipe=1
+	if [[ -n $highlight ]]; then
+		highlight=$highlight[2]
+		hcolor=${hcolor[2]:-head}
+	fi
+	if [[ -n $c ]]; then
+		c=$c[2]
+		if (($+C[$c])); then
+			C1=$C[$c]
 		else
-			c=$2
-			shift
+			colorSet $c && C1=$C[$c] || C1=$C[lred]
 		fi
-		shift
-		if [[ -n $1 ]]; then
+		if (($+C[$hcolor])); then
+			Ch=$C[$hcolor]
+		else
+			colorSet $hcolor && Ch=$C[$hcolor] || Ch=$C[head]
+		fi
+		[[ $C1 == $Ch ]] && Ch=$C[lred]
+		hl2=$Ch$highlight$C1
+		if ((isPipe)); then
+			while IFS='' read -r line; do
+				if [[ -n $highlight ]]; then
+					echo "$C1${line//$highlight/$hl2}$C_"
+				else
+					echo "$C1$line$C_"
+				fi
+			done
+		elif [[ -n $1 ]]; then
 			data=("${(@f)@}")
 			for line in $data; do
-				echo "${C[$c]}$line$C_"
-			done
-		else
-			while read line; do
-				echo "${C[$c]}$line$C_"
+				if [[ -n $highlight ]]; then
+					echo "$C1${line//$highlight/$hl2}$C_"
+				else
+					echo "$C1$line$C_"
+				fi
 			done
 		fi
 	else
@@ -524,19 +568,23 @@ function colorify()
 		if [[ -n $debug ]]; then
 			cmd=$debug[2]
 			# @TODO dbg_ps
-			while read line; do
+			while IFS='' read line; do
 				if [[ $line =~ ^\\+([0-9]?)\<?$cmd:([0-9]+)\>\ (.*) ]]; then
-					techo -c lcyan $cmd:$match[2] ${_C}$match[3]
+					techo -c lcyan $cmd:$match[2] $C_$match[3]
 				elif [[ $line =~ ^\\+([0-9]?)\<?([[:alnum:]]+):([0-9]+)\>\ (.*) ]]; then
-					((DEBUG)) && techo -c blue $match[1]:$match[2] ${_C}$match[3]
+					((DEBUG)) && techo -c blue $match[1]:$match[2] $C_$match[3]
 				else
 					techo -c lred $line
 				fi
 			done
 		else
-			while read line; do
-				techo $line
-			done
+			if [[ -n $highlight ]]; then
+				if ((isPipe)); then
+					grep --color $highlight'\|$'
+				else
+					grep --color $highlight'\|$' "$@"
+				fi
+			fi
 		fi
 #			debug=$(cat)<<-END
 #				function dbg(c,name,line,str) {
