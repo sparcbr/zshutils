@@ -1,5 +1,4 @@
 #!/bin/zsh
-cd $(dirname "$0")
 if [ -z "$ZSH_MAIN_INFO" ] || [ -z "$ZSH_LIBS" ]; then
 	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS="$PWD"
 	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; exit 127 }
@@ -83,11 +82,14 @@ function adb()
 			split=(${(z)line})
 			case $split[1] in
 				EMultDev)
-					chooseDevice || cancel
+					while ! chooseDevice; do
+						techo -c warn Connect an android device
+						sleep 2
+					done
 					continue
 					;;
 				EConn)
-					connect --setError $split[1] : $split[2]
+					connect $split[1] $split[2]
 					continue
 					;;
 				*)
@@ -109,10 +111,11 @@ function shell()
 
 function chooseDevice()
 {
-	local devList
+	local devList=("${(f)$(adb devices -l)}")
 
-	#@TODO device usb:1-5.3 product:surnia_retbr_ds model:MotoE2_4G_LTE_ device:surnia_uds transport_id:1
-	deviceID=$(chooser -f1 --ifs $'\n' -n1 "$(adb devices -l)")
+	curDevice=
+	#@TODO device usb:1-5.3 product:surnia_retbr_ds model:MotoE2_4G_LTE_ device:surnia_uds stdbuf -o0 transport_id:1
+	deviceID=$(chooser -H 'Select device' -D $curDevice -f1 $devList) || return
 	connType=(-s $deviceID)
 }
 
@@ -245,7 +248,7 @@ function enDis()
 	done
 }
 
-function install()
+function apkinstall()
 {
 	#adb push $1 /data/local/tmp/$1
 	#shell pm install -t -r /data/local/tmp/$1
@@ -444,6 +447,7 @@ function setting()
 	else
 		nspace=$1 ; shift
 	fi
+	typeset -Tf in_array
 	in_array -v nspace_m $nspace nspaces
 	n=$#nspace_m
 	((n)) || abort 10 namespace: ${C_}$nspaces
@@ -460,10 +464,17 @@ function setting()
 	shell settings put $nspace $setting $value
 }
 
+function screenshot()
+{
+	local name=$(uniqfile -P screenshot -S png "$@")
+
+	adb exec-out 'screencap -p' > $name
+}
+
 devOpts=()
 function processLine()
 {
-	local cmd pkg
+	local cmd pkg tmp
 	zparseopts -D -M - t:=devOpts s:=devOpts e=devOpts d=devOpts
 	cmd=${(L)1} ; shift
 	case $cmd in
@@ -492,8 +503,8 @@ function processLine()
 				'navigation - Hide navigation bar only' 'immersive.navigation=*' 
 				'status - Hide status bar only'			'immersive.status=*'	 
 			)
-			((#)) || { techo $0 $cmd ${options} ; return 10 }
-			if match_array -c -v input --array $1 options; then
+			(($#)) || { techo $0 $cmd ${options} ; return 0 }
+			if match_array -c -v tmp --array $1 options; then
 				setting g policy_control $setting
 			fi
 		;;
@@ -503,22 +514,26 @@ function processLine()
 				techo -c warn $1 is not a APK
 				return 1
 			fi
-			install $1
+			apkinstall $1
 		;;
 		(keyb|hidekeyb|hidekeyboard) sendkey 111 ;;
 		(key|sendkey) sendkey "$@" ;;
 		(logcat) logcat "$@" ;;
-		(wifi) ;;
-		(net) getDeviceIP ;;
+		(wifi)  ;;
+		(net) getDeviceIP  ;;
 		(list) listPkg "$@" ;;
 		(listactivities|listact|listacts|activities) listActivities "$@" ;;
+		(view|open|openurl|url)
+			shell am start -W -a android.intent.action.VIEW -d $1 $2
+		;;
 		(poweroff)
 			shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
 		;;
 		(ps) listRunning $1 ;;
 		(pull|get) apull "$@" ;;
 		(push|send) apush "$@" ;;
-		(reboot) confirm "Reboot device" && adb reboot ;;
+		(reboot) chooser -f1 -p "Reboot device"  && adb reboot ;;
+		(ss|screenshot|screencap) screenshot "$@" ;;
 		(setting|settings) set -x; setting "$@" ; set +x;;
 		(shell) shell "$@" ;;
 		(start)
@@ -538,14 +553,6 @@ function processLine()
 				start $pkg
 			fi
 		;;
-		(pull|get) apull "$@" ;;
-		(push|send) apush "$@" ;;
-		(setting|settings) setting "$@" ;;
-		(reboot) confirm "Reboot device" && adb reboot ;;
-		(poweroff)
-			shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
-		;;
-		(shell) shell "$@" ;;
 		(\q|exit|quit) running=0 ;;
 		(swipeup|unlock) shell input swipe 30 600 30 300 ;;
 		(swipetop) shell input swipe 30 0 30 300 ;;
@@ -555,7 +562,7 @@ function processLine()
 		(uninstallall|removeall|delall|deleteall) uninstall -a "$@" ;;
 		(uninstall|remove|rm|del(ete)?) uninstall "$@" ;;
 		(version|ver|release) getprop ro.build.version. ;;
-		(view|edit)
+		(edit)
 			pull "$@"
 			v -f $f
 			push $f "$@"

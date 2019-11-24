@@ -3,7 +3,7 @@ type getfullpath 2>&1 >/dev/null || include file
 export ANDROID_SDK_ROOT=$(getfullpath "$HOME/androidSDK")
 export ANDROID_HOME=$ANDROID_SDK_ROOT
 export ANDROID_PLATFORM_TOOLS="$ANDROID_SDK_ROOT/platform-tools"
-export PATH="$PATH:$ANDROID_HOME:$ANDROID_PLATFORM_TOOLS"
+path+=($ANDROID_HOME $ANDROID_PLATFORM_TOOLS)
 
 if ! type aapt 2>&1 >/dev/null; then
 	() {
