@@ -1,17 +1,26 @@
-VERSION=1.0.1
-#lazyload=debug,fstack
+VERSION=1.0.2
+#lazyload=debug,fstack,array_dump
+alias dbg='debug -r'
+
 [[ -v comp ]] || typeset -ga comp
 [[ -v _dbg_flvl ]] || typeset -gA _dbg_flvl
-integer DEBUG=0
+integer DEBUG=${DEBUG:-0}
 #zmodload zsh/zprof && zprof
-
+#TODO: kcachegrind, https://github.com/raboof/zshprof
 _dbg_def_lvl=4
 
 function _dbg_PS()
 {
 	local lvl c
 	lvl=${1:-$_dbg_def_lvl}
-	export PS4="%(${lvl}e,%F{8},%F{2})+%e<%N:%i>%f "
+	# default: '+%N:%i'
+	if ((DEBUG > 1)); then
+		PS4=$'\\\011%D{%s%6.}\011%x\011%I\011%N\011%e\011'
+	else
+		#@TODO add ts=%D{%s.%.}, %=(ts - startTs)
+		PS4="%(${lvl}e,%F{8},%F{2})+%D{%s.%.}>%e<%1x:%I><%N:%i>%f "
+	fi
+	export PS4
 }
 
 _dbg_PS
@@ -72,6 +81,7 @@ function _test_explode()
 	return true
 }
 
+alias dbg='debug -r'
 function debug()
 {
 	local _cmd _data _type _types keep _func debug alias run script
@@ -143,4 +153,25 @@ function fstack()
 			techo -c warn $functrace[$i] $_C in $C[lgray]$funcfiletrace[$i]
 		done
 	fi
+}
+
+function array_dump()
+{
+	local key val
+	case "$(vartype $1)" in
+	  association*)
+		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
+		for key in ${(Pk)1}; do
+			techo "${(qq)key} -> ${(qqq)${(P)1}[$key]}"
+		done
+		;;
+	  array*)
+		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
+		for val in "${(qP@)1}"; do
+			techo "${(qqq)val}"
+		done
+		;;
+	  *)
+		techo -c err "\"$1\": not an array." ;;
+	esac
 }

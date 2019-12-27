@@ -94,7 +94,7 @@ function rename()
 	fullpath="$dir/$orig"
 	[[ -f "$1" || -d "$1" ]] || abort 127 "$1 doesn't exist or no file permission"
 	name=${2:-$orig}
-	if input -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -v name && \
+	if input -r -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -v name && \
 		[[ -n $name && $name != $orig ]]
 	then
 		run $sudo mv "$fullpath" "$dir/$name"
@@ -155,10 +155,10 @@ function syncDirs()
 {
 	local integer i n
 	local src targets dir data rsArgs checksum arg
-	local quiet sudo ignores dry extraArgs reverse
+	local quiet sudo excludeFrom dry extraArgs reverse
 	local files stat name
-	typeset -a src targets rsArgs extraArgs files
-	zparseopts -D -M - q=quiet s=sudo i:=ignores d=dry t:=targets c=checksum r=reverse
+	typeset -a src targets rsArgs extraArgs files excludePatterns
+	zparseopts -D -M - q=quiet s=sudo i:=excludeFrom d=dry t:=targets c=checksum r=reverse
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	[[ $# -ge 2 ]] || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
@@ -198,9 +198,11 @@ function syncDirs()
 	else
 		rsArgs+=(-tu)
 	fi 
+
 	# exclusions
-	rsArgs+=(--exclude=.osync_workdir --exclude='backup*' --exclude='*.local' --exclude='.bsync*')
-	[[ -n $ignores ]] && rsArgs+=(--exclude-from="${ignores[2]}")
+	excludePatterns=(.osync_workdir 'backup*' '*.local' '.bsync*' '.git' 'node_modules')
+	rsArgs+=(--exclude=$^excludePatterns)
+	[[ -n $excludeFrom ]] && rsArgs+=(--exclude-from="${excludeFrom[2]}")
 	for ((n=1; n<=$#src; n++)); do
 		if [[ -d "${src[$n]}" ]]; then
 			if [[ -f "${src[$n]}/rsync.ignore" ]]; then
@@ -280,6 +282,7 @@ function box()
 {
 	local box base=$HOME/repos search=$1
 	#zparseopts -D -M - S:=search
+	include functions
 	#include boxes
 	#box start
 	if [[ -n $search && -d $base/$search ]]; then
@@ -290,6 +293,7 @@ function box()
 		[[ -d $base/$box ]] || abort 127
 	fi
 	cd $base/$box
+	[ -d .git ] && git status
 	todo -d . #@TODO mv to cd hook
 }
 
@@ -373,4 +377,36 @@ function show() #TODO
 	local cmd
 	type bat 2>&1 >/dev/null && cmd='bat' || cmd='cat'
 	$cmd "$@"
+}
+
+# Added 2019-11-05 23:25
+function diff()
+{
+	command diff --color=always "$@"
+}
+
+function uniqfile()
+{
+	local suffix prefix name base
+	zparseopts -D -M - S:=suffix P:=prefix
+	[[ -n $prefix ]] && prefix=$prefix[2]
+	[[ -n $suffix ]] && suffix=.${suffix[2]#.}
+	if (($#1)); then
+		base=$1
+		[[ -n $prefix ]] && base=${base#$prefix}
+		if [[ -n $suffix ]]; then
+			base=${base%$suffix}
+		else
+			suffix=.${base:e}
+		fi
+	fi
+	name="$prefix$base$suffix"
+	if [[ -z $name ]]; then
+		techo 'empty filename'
+		return 1
+	fi
+	if [[ -e $name ]]; then
+		name="$prefix$base$(date +"%Y%m%d-%H%m%S")$suffix"
+	fi
+	echo -n $name
 }

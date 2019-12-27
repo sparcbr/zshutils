@@ -1,5 +1,5 @@
-VERSION=1.0.7
-#lazyload=run,input,chooser,confirm,todo 
+VERSION=1.0.8
+#lazyload=run,input,chooser,confirm,todo,chkCmd,pizza
 
 #@TODO check i it's the top shell, and i it is, don't exit, just return: [[ $- =~ m ]] || EXIT=1
 #		echo $ZSH_EVAL_CONTEXT
@@ -45,6 +45,7 @@ function regex {
 	gawk 'match($0,/'$1'/, ary) {print ary['${2:-'0'}']}'
 }
 
+# --okcodes button codes
 function input()
 {
 	local _var p gui z c title raw _buttons okcodes
@@ -145,13 +146,13 @@ function confirm()
 function chooser()
 {
 	local noSelect sep field bytes search default head foot
-	local list ifs var chosen chosenList selectors events
+	local list ifs var chosen chosenList selectors events keys
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
 	zparseopts -D -M - c=color n:=noSelect R:=regex S:=search \
 		 v:=var D:=default s:=sep f:=field -ifs:=ifs b:=bytes E:=events \
-		 H:=head -head:=H p:=H F:=foot -foot:=F
+		 H:=head -head:=H p:=H F:=foot -foot:=F -keys:=keys
 
 	if (($#sep || $#field)); then
 		(($#sep && $#field)) && unset 'selectors[(I)[sf]]'
@@ -172,11 +173,11 @@ function chooser()
 			[[ -n $default[2] ]] && default=($default[2])
 			explode -v chosenList "$(
 				NLIST_SET_SEARCH_TO=$search[2] \
-				ZSHSELECT_START_IN_SEARCH_MODE=$+search[2] \
+				ZSHSELECT_START_IN_SEARCH_MODE=1 \
 				ZSHSELECT_NONSELECTABLE=$noSelect[2] \
 				ZSHSELECT_ENABLE_EVENTS=$events[2] \
 				ZSHSELECT_HEAD=$head[2] ZSHSELECT_FOOT=$foot[2] \
-				zsh-select $default "${(@)list:|default}" || throw $?
+				zsh-select $default ${list:|default} || throw $?
 			)" $'\n'
 		} always {
 			if catch '*'; then
@@ -203,8 +204,8 @@ function chooser()
 				fi
 			;;
 			b)
-				#chosen=$(echo - $chosen | cut $bytes)
-				typeset -l "chosen=${chosen:bytes[1,]}"
+				chosen=$(echo - $chosen | cut $bytes)
+				#typeset -l "chosen=${chosen:bytes[1,]}"
 			;;
 			s|f)
 				explode -v chosen $chosen $sep $field
@@ -217,7 +218,7 @@ function chooser()
 	if (($#var)); then
 		set -A "$var[2]" $list
 	else
-		print -r $list
+		print -r -- $list
 	fi
 
 	#[[ ! -t 1 || -z $var ]] && print -r $list
@@ -225,22 +226,122 @@ function chooser()
 }
 
 #@TODO merge with inst() from zsh_main
-function chkCmdInstall()
+function chkCmd()
 {
-	if ! command -v $1 >/dev/null; then
-		local deb cmd=$1 ret tmp
-		techo -c lred "Command not found: ${C[head]}\"$cmd\"$C_ ${C[warn]}Searching for package to install."
-		#@TODO make unique list of potential packages
-		[[ -n $2 ]] && deb=$2 || {
-			chooser -v deb -s':' -f1 --ifs=$'\n' "$(dpkg -S '*/'$1)" || return 127
-		}
-		techo "Installing $C[lcyan]$deb (provides $C[lcyan]$1)"
-		sudo apt install $deb || {
-			ret=$?
-			techo -c err "Error installing $deb"
-			return $ret
-		}
+	local cmd tmp verbose list pkgs pkg packager
+	zparseopts -D -M - v=verbose l=list p:=pkgs
+	(($#1)) || { techo -c lred "chkCmd: Empty command"; fstack; return 1 }
+	cmd=$1
+	if command -v $cmd >/dev/null; then
+		[[ -n $verbose ]] && techo -c head "$cmd$C_ already installed."
+		[[ -z $list ]] && return 0
+	else
+		techo -c lred "Command not found: ${C[head]}\"$cmd\"$C_. ${C[warn]}Searching for package to install."
 	fi
+	integer i n
+	typeset -a similar lines pkgList
+	#@TODO make unique list of potential packages
+	if (($#pkgs)); then
+		for pkg in ${(z)pkgs[2]}; do
+			# check package exists
+			pkgList+=($pkg - apt -)
+		done
+	fi
+
+	if [[ -z $pkgList && -x /usr/lib/command-not-found ]] ; then
+		pkgList=(
+			${(z)"$(
+				/usr/lib/command-not-found --no-failure-msg ${list:+--ignore-installed} $cmd |& awk $'
+				match($0, /^sudo (apt|snap) +install (\\S+)(\\s*#\\s*version ([^ ,]+))?/, a) {
+					print a[2]" "(a[4]==""?"-":a[4])" "a[1]" -"
+				}
+				# similar commands found
+				match($0, /^ *command \'(\\S+)\' from (deb|snap) (\\S+) ?(\(([^)]+)\))?$/, b) {
+					print b[3]" "(b[5]==""?"-":b[5])" "(b[2]!="deb"?b[2]:"apt")" "b[1]
+				}'
+			)"}
+		)
+	fi
+
+	if ((!$#pkgList)); then
+		# order: 1º (pkg == cmd) 2º cmdpath in $path 3º cmdpath ~ bin
+		# pkg cmdpath
+		pkgList=($(apt-file find "/$cmd$" |\
+			awk 'match($0, /([^:]+): (\/.*\/'$cmd')$/, a) {print a[1]" - apt "a[2]}'
+		))
+	fi
+
+	if ((!$#pkgList)); then
+		techo -c warn "No packages found to install command $cmd"
+		return 10
+	fi
+
+	# pkg version packager cmd
+	for ((i=1; i<=$#pkgList; i+=4)); do
+		# get package version and description
+		case $pkgList[i+2] in
+		apt)
+			tmp=("${(@f)$(
+				apt-cache --no-all-versions show $pkgList[i] | awk 'x && /^\S/ { exit }
+					/^Version/ { print $2"\n"; next }
+					match($0,/^Description(-en)?:\s+(.*)/,a) { x=1; print a[2]; next }
+					x && match($0,/^\s+(.*)/,a) { print a[1] }')}"
+			) || abort
+			;;
+		snap)
+			tmp=("${(@f)$(
+				snap info $pkgList[i] | awk '
+					function join(array, sep, start, end)
+					{
+						if (start == "") start=0
+						if (end == "") end=length(array)
+						result=array[start]
+						for (n in array) if (n > end) break
+							else if (n >= start) result=result sep array[n]
+						return result
+					}
+					x && /^\S/ { x=0; if (d) { d=0; n++ } else if (c) c=0; if (n == 2) exit }
+					match($0,/^summary:\s*(.*)/,a) { desc[0]=a[1]; next }
+					match($0,/^description: (.*)/,a) { x=1; d=1; next }
+					/^channels:/ { x++; c=1; next }
+					x && d && match($0,/^\s+(.*)/,a) { desc[d++]=a[1]; next }
+					x && c && match($0,/^\s+([^:]+):\s+(.*)/,a) { ver[c++]=a[1]" "a[2]; next }
+					END { print join(ver,"\n",1)"\n"join(desc,"\n") }'
+				)}"
+			) || abort
+			;;
+		*)
+			techo -c lred "Unsupported packager: $C[warn]$tmp[i+2]"
+			continue
+			;;
+		esac
+		pkgList[i+1]=$tmp[1] # version
+		in_array -v n '' tmp || n=2 
+		desc=("${(@f)tmp[n,-1]}") # description
+		print "desc[1]="$desc[1]
+
+		# pkg version packager cmd
+		case $pkgList[i+3] in
+			$cmd|'-')
+				lines+=($pkgList[i] "(version $pkgList[i+1])" $pkgList[i+2] $cmd "$desc[1]")
+				;;
+			*)
+				similar+=("Similar command:" $pkgList[i+3] "($pkgList[i+2] package: $pkgList[i] version: $pkgList[i+1])" $cmd "$desc[1]")
+				;;
+		esac
+	done
+
+	tmp=()
+	chooser -v tmp --ifs $'\n' $lines $similar || return
+	#chooser -v tmp --ifs $'\n' $(print -a -C 5 $lines $similar) || return
+
+	if [[ $tmp[1] == 'Similar' ]]; then
+		pkg=$tmp[6]; cmd=$tmp[5]; packager=$tmp[4]
+	else
+		pkg=$tmp[1]; cmd=$tmp[4]; packager=$tmp[4]
+	fi
+
+	run -s -p "Installing $pkg (provides $C[lcyan]$cmd$C_)" $packager install $pkg
 }
 
 function alert()
@@ -273,23 +374,6 @@ function sndplay()
 }
 
 [ -z "$BASH" ] || return
-function array_dump()
-{
-	local key val
-	if [[ $(vartype "$1") = association* ]]; then
-		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
-		for key in ${(Pk)1}; do
-			techo "${(qq)key} -> ${(qqq)${(P)1}[$key]}"
-		done
-	elif [[ $(vartype "$1") = array* ]]; then
-		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
-		for val in "${(qP@)1}"; do
-			techo "${(qqq)val}"
-		done
-	else
-		techo -c err "\"$1\": not an array."
-	fi
-}
 function _push()
 {
 	local data l=${#stack[@]}
@@ -420,7 +504,7 @@ function run()
 
 			((ret==130)) && throw $ret
 			if ((ret==127)); then
-				chkCmdInstall $cmd $cmdinst[2] && continue || throw 127
+				chkCmd -p $cmdinst[2] $cmd && continue || throw 127
 			fi
 
 			break
@@ -629,9 +713,9 @@ alias q=todo
 # Added 2019-06-04 17:47
 function todo()
 {
-	local id filter cmd todo todos
+	local id search cmd todo todos
 	local box dir glob data baseDir=$CFG e='todo'
-	zparseopts -D -M - d:=dir -dir:=d f:=filter
+	zparseopts -D -M - d:=dir -dir:=d S:=search
 	if (( ! $# )); then
 		cmd='show'
 	else
@@ -644,17 +728,15 @@ function todo()
 		dir=$baseDir
 	fi
 	[[ -d $dir ]] || abort 127 "\"$dir\": directory not found"
-	[[ -z $filter ]] && filter='*'
 
 	include file
-	#glob=$dir/$filter.$e
 	glob="$dir/*.$e"
 	todos=($~glob(-N))
 	case $cmd in
 	add)
-		todo=$(chooser -S $filter $todos:t "New todo" "Browse full path") || cancel
-		if [[ "$todo" == "New todo" ]]; then
-			todo=$(input -p "Enter todo id") || cancel
+		todo=$(chooser $search -f1 $todos:t "New todo" "Browse full path") || cancel
+		if [[ $todo == 'New' ]]; then
+			todo=$(input -p 'Enter todo id') || cancel
 			[[ ${todo:0:1} != / ]] && todo=$dir/$todo
 			[[ $(getext $todo) == $e ]] || todo=$todo.$e
 		elif [[ "$todo" == "Browse full path" ]]; then
@@ -667,8 +749,8 @@ function todo()
 		input -p "Adding to todo $id" "$data" || cancel
 		;;
 	show)
-		(($#todos)) || return 0
-		todo=$(chooser -S $filter $todos:t) || cancel
+		(($#todos)) || return 10
+		todo=$(chooser $search $todos:t) || cancel
 		id=$(noext $(getfilename $todo) $e)
 		run -p "Todo: $id" show $todo
 		#for todo in $~glob(-N); do
@@ -687,7 +769,7 @@ function todo()
 			dir	 d "path(default: $baseDir)" 'base directory'
 			help h ''						 'help'
 		)
-		techo "$0 [options] [add|show] [filter]"
+		techo "$0 [options] [add|show] [search]"
 		opts $opts
 	}
 }

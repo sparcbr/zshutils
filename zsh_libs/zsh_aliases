@@ -9,14 +9,13 @@ alias vmake="make SHELL='$SHELL -x'"
 alias web="cd gp3320/app/bcm-webconf ; . venv/bin/activate ; ./webconf.py &"
 alias sv="v -s"
 alias cfg="cd $CFG"
-alias s="sudo"
+alias s="do_sudo"
 alias cpa="sudo cp -a"
 alias mk="make"
 alias apt="sudo apt"
 alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ignore-trailing-space --ignore-blank-lines"
 alias sys="sudo systemctl"
-#alias jtags="ctags -R . && sed -i -E '/^(if|switch|function|module\.exports|it|describe).+language:js$/d' tags"
-alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags2'
+alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags'
 alias pytags="ctags -R --python-kinds=-i ."
 
 function tags()
@@ -34,7 +33,10 @@ function tags()
 
 	#args=${@:-
 	case ${(L)lang} in
-		javascript|js) jtags ;;
+		javascript|js)
+			type jsctags >/dev/null || npm install -g git+https://github.com/ramitos/jsctags.git
+			jtags
+			;;
 		php) phpctags -R --exclude='vendor/*' $args ;;
 		python|py) pytags ;;
 		shell|sh) ctags --language-force=Sh -R . ;;
@@ -236,7 +238,7 @@ function inalias()
 					continue
 				fi
 
-				in_array prefix $m && continue
+				in_array $m prefix && continue
 
 				if [[ $_type == 'alias' ]]; then
 					if [[ $m == $1 ]]; then
@@ -345,8 +347,20 @@ function edfunc()
 			abort 2 "$1 is not a function:\n\t$arg"
 		fi
 		file=$functions_source[$1]
+	elif [[ -f $arg[-1] ]]; then
+		file=$arg[-1]
 	else
-		file="${arg[-1]}"
+		techo "$1 is anonymous function:"
+		local tmp=$(which $1)
+		techo -c warn $tmp
+		if [[ $tmp =~ 'include ([-a-z_]+)' ]]; then
+			file=$match[1]
+			if [[ $file = */* ]]; then
+				file=$(getfullpath $file)
+			else
+				file="$ZSH_LIBS/zsh_"${file#zsh_}
+			fi
+		fi
 	fi
 	edalias ${2:+-l $2} -f "$1" "$file" 
 }
@@ -362,7 +376,7 @@ function vw()
 			;;
 		alias)
 			local func
-			if (( $#functions[$name] )); then # also a function exists
+			if (( $+functions[$name] )); then # also a function exists
 				local opt
 				(( $#linenum )) && { edfunc $name $linenum ; return }
 				func=$name
@@ -401,13 +415,16 @@ function v()
 	local opts sudo arg args skip
 	while (($#)); do
 		if [[ ${1:0:1} == '-' ]]; then
-			if [[ $1 == '-s' ]]; then
-				sudo='sudo'
-			elif [[ $1 == '-#' ]]; then
-				opts+=('+/^\s*[^#]')
-			else
-				opts+=($1)
-			fi
+			case $1 in
+				-s) sudo='sudo'
+					;;
+				-#) opts+=('+/^\s*[^#]')
+					;;
+				-) opts+=(-u NONE -N)
+					;;
+				*) opts+=($1)
+					;;
+			esac
 		else
 			args+=($1)
 		fi
@@ -536,31 +553,35 @@ function send()
 
 function ge()
 {
-	local sudo icase args in_exts ex_exts width prefix
-	zparseopts -D -E -M - i=icase s=sudo --exclude:=ex_exts C::=width -cols::=C
-	IFS=',;:' read -rA in_exts <<<"$1"
+	local sudo icase in_exts ex_exts ex_dirs width prefix
+	local opts args 
+	zparseopts -D -E -M - i=icase s=sudo --exclude:=ex_exts E:=ex_dirs C::=width -cols::=C
+	IFS=',;: ' read -rA in_exts <<<"$1"
 	shift
 	#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
-	(($#ex_exts)) && args+=('--exclude=*.'${^ex_exts[@]})
-	args+=('--include=*.'${^in_exts[@]})
-	args+=(--color=always)
-	[[ -n $icase ]] && args+=('-i')
+	if (($#ex_exts)); then
+		IFS=',;: ' read -rA ex_exts <<<$ex_exts[2]
+		opts+=('--exclude=*.'${^ex_exts[@]})
+	fi
+	if (($#ex_dirs)); then
+		IFS=',;: ' read -rA ex_dirs <<<$ex_dirs[2]
+		opts+=('--exclude-dir='${^ex_dirs[@]})
+	fi
+	opts+=('--include=*.'${^in_exts[@]} --color=always $icase)
 	if [[ -n $sudo ]]; then
 		prefix='sudo'
 	else
 		prefix='command'
 	fi
-	if (( $#width )); then
+	if (($#width)); then
 		(($#width[1] > 2)) && width=${width[1]:2} || width=0
 		if ((!width)); then
-			$prefix grep -rn $args $@
+			$prefix grep -rn $opts "$@"
 			return
 		fi
-	else
-		#width=$(( $(tput cols) - 50 ))
-		width=300
 	fi
-	$prefix grep -rn $args $@ | cut -c1-$width
+	((width=$(tput cols)-50))
+	$prefix grep -rn $opts "$@" | cut -c1-$width
 }
 
 function duh()

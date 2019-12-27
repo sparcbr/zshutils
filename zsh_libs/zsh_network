@@ -1,7 +1,200 @@
-#!/bin/zsh
+VERSION=1.0.2
+#lazyload=urlfollow,urlinfo,vnc,imdb,globo
+[[ ! -v comp ]] && typeset -g -a comp
+
+function urlfollow() {
+	curl -Ls -I -o /dev/null -w %{url_effective} $1
+}
+
+function urlinfo()
+{
+	local schemes=(ssh git https http ftp ftps file)
+	local getscheme getuser getport gethost getpath getquery
+	local userpat hostpat pathpat querypat argpat out
+	userpat='[[:alnum:]]+'
+	hostpat='[[:alnum:]][-.[:alnum:]]*\.[[:alpha:]]+'
+	pathpat='~?[-_./[:alnum:]]+'
+	argpat='[^&]+'
+	querypat="$argpat(&$argpat)*"
+	out=()
+	zparseopts -D -M - s=getscheme h=gethost u=getuser p=getpath q=getquery a=getall
+
+	if [[ $1 =~ (${(j.|.)schemes})'://'($~userpat'@')?($~hostpat)(':'[0-9]+)?('/'$~pathpat)?('\?'$~querypat)? ]]; then
+		(($#getscheme)) && out+=($match[1])
+		(($#getuser)) && out+=(${match[2]%@})
+		(($#gethost)) && out+=($match[3])
+		(($#getport)) && out+=(${match[4]#:})
+		(($#getpath)) && out+=($match[5])
+		(($#getquery)) && out+=(${match[6]#\?})
+	elif [[ $1 =~ (${~userpat}'@')?(${~hostpat}):($~pathpat)? ]]; then
+		if (($#getscheme)); then
+			[[ $match[1] == 'git' ]] && out+=(git) || out+=(ssh)
+		fi
+		(($#getuser)) && out+=(${match[1]%@})
+		(($#gethost)) && out+=($match[2])
+		(($#getpath)) && out+=($match[3])
+	else
+		return 1
+	fi
+	echo -n ${(q)out}
+	return 0
+}
 
 # Added 2019-09-16 14:25
 function vnc()
 {
 	run x0vncserver -rfbport 5555
+}
+
+function imdb()
+{
+	local url e
+	[[ $1 == '-e' ]] && { shift; e=1 }
+	url="https://www.imdb.com/find?q=$(omz_urlencode $*)"
+	((e)) && echo $url || open $url
+}
+
+function htmlget()
+{
+	local url output begin end tmp data opts code
+	zparseopts -D -M - b:=begin e:=end o:=output u=update
+	
+	url=$1
+	opts=(-q --show-errors 0 --show-warnings false --wrap 0)
+	if (($#output)); then
+		if [[ -z $update && -f $output[2] && "$(stat -c"%s" $output[2])" -gt 200000 ]]; then
+			return 0
+		fi
+		opts+=($output)
+	fi
+
+	if (($#begin)); then
+		tmp="($begin[2].*)"
+		begin='x==0 && match($0,/'$tmp'/,a){x=1; if (a[1]!="") print a[1]; next} '
+	else
+		begin='BEGIN{x=1} '
+	fi
+
+	if (($#end)); then
+		tmp="(.*)$end[2]"
+		end='x==1 && match($0,/'$tmp'/,a){print a[1]; x=2} '
+	fi
+
+	tmp=($(curl -Ss -w "\n¬ %{http_code}" -L $url | awk ${begin}${end}'x==1{print} /^¬/{print $2}'))
+	code=$tmp[-1]
+	if ((code!=200)); then
+		techo -c err "curl: http code $code"
+		return 1
+	fi
+	
+	tidy $opts <<< $tmp[1,-2]
+	#echo $pipefail
+}
+
+# print: sed -n '/^<tr>/p' file
+# ! delete: sed '/^<tr>/!d' file
+function globo()
+{
+	local tmp vars expr data file=$HOME/globo.html
+	zparseopts -D -M - u=update 
+
+	htmlget $update -b '<section class="schedule-item' \
+		-e '<div class="grade-de-programacao-container-bottom"' \
+		-o $file https://redeglobo.globo.com/sao-paulo/programacao || return
+
+	vars=(today=$(date '+%Y%m%d') yesterday=$(date -d yesterday '+%Y%m%d') now=$(date '+%s'))
+	expr=(
+		BEGIN - -
+			'pat_section="^<section .*data-event-container=\"("yesterday"|"today")[0-9]+\">"'
+		0 m 'pat_section'
+			'x=1; dt=m[1]'
+		1 m '/<time .*data-start-time="([0-9]+)" data-end-time="([0-9]+)"/'
+			'dt1=m[1]; dt2=m[2]; if (now-dt2<10000  && dt1-now<10000) { x=3; print "time",dt1,dt2,(dt1<now && now<dt2) }'
+		3 m '/^<h2><label[^>]*>([^<]*)</'
+			'print "title",m[1]'
+		3 m '/^<p>([^<]*)</'
+			'print "summary",m[1]'
+		3 m '/<dt>([^<]+)</'
+			'print "dt",m[1]'
+		3 m '/<dd>([^<]+)</'
+			'print "dd",m[1]'
+		- - '/<\/section>/'
+			'if (x); x=0'
+	)
+	
+	if data=("${(@f)$(awkWrapper -v vars -e expr $file)}"); then
+		local field isCurrent dt a c
+		(($#data)) || abort 1 'No match'
+		for tmp in $data; do
+			a=($=tmp)
+			field=$a[1]
+			tmp=$a[2,-1]
+			case $field in
+				time)
+					dt=($=tmp)
+					isCurrent=$dt[3]
+					((isCurrent)) && c=$C[warn] || c=
+					techo -rc head $(date -d @$dt[1] '+%d/%m/%Y:'$C_$c' %H:%M to '; date -d @$dt[2] '+%H:%M')
+					;;
+				title)
+					if ((isCurrent)); then
+						techo -rc head "title: $C[ok]$tmp$C_ ($(imdb -e $tmp))"
+					else
+						techo -r "title: $tmp"
+					fi
+					;;
+				summary)
+					if ((isCurrent)); then
+						techo -r "summary: $tmp"
+					else
+						techo -r "summary: $tmp[1,150] $C[lred]...$C_"
+					fi
+					;;
+				dt)
+					if ((isCurrent)); then
+						techo -rn "$tmp: "
+					fi
+					;;
+				dd)
+					if ((isCurrent)); then
+						techo -r $tmp
+					fi
+					;;
+			esac
+		done
+	fi
+}
+
+function awkWrapper()
+{
+	local opts prog _vars _expr x m pat action
+	zparseopts -D -M - v:=_vars e:=_expr
+
+	if [[ -n $_vars ]]; then
+		_vars=(${(P)_vars[2]})
+		opts=('-v '$^_vars)
+		opts=($=opts)
+	fi
+
+	if [[ -n $_expr ]]; then
+		_expr=(${(P)_expr[2]})
+		for x m pat action in $_expr; do
+			if [[ $x == <-> ]]	; then
+				prog+="x==$x && "
+			elif [[ $x == 'BEGIN' ]]; then
+				prog+="BEGIN { $action }"$'\n'
+				continue
+			fi
+			
+			if [[ $m != '-' ]]; then
+				prog+="match(\$0,$pat,$m)"
+			else
+				prog+="$pat"
+			fi
+
+			prog+=" { $action }"$'\n'
+		done
+	fi
+
+	awk $opts $prog $1
 }

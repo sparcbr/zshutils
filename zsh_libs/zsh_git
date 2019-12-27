@@ -1,22 +1,24 @@
-VERSION=1.0.2
-#lazyload=gclone,github,gh,gpush,pull,push
-[[ ! -v comp ]] && typeset -g -a comp
-export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
-
+VERSION=1.0.3
+#lazyload=gclone,gpr,commit,github,gh,gpush,croot,gfollow,gunstage,gmerge,gchk
 alias pull="git pull"
 alias push="gpush"
 alias gdiff="git diff --ignore-space-at-eol -b -w --ignore-blank-lines --minimal"
 alias gadd="git add"
 alias gadd-modified="git add \$(git diff --name-only --relative)"
 alias gshow="git show --color=always"
+alias gh='github'
 alias unstage="gunstage"
 alias git_get_tag='git describe --tags $(git rev-list --tags --max-count=1)'
-alias gchk='git checkout'
 alias glog2='git log --date=iso -g'
-# repos
-alias maquina="cd ~/MaquinaDeConversao/www/api.maquinadeconversao.com.br"
-alias idiomus="cd ~/xdata/idiomusAPI"
-alias q48="cd ~/Q48API"
+
+export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
+
+[[ ! -v comp ]] && typeset -g -a comp
+
+function gchk()
+{
+	git checkout "$@" && git status
+}
 
 comp+=('gunstage=git')
 function gunstage()
@@ -26,11 +28,35 @@ function gunstage()
 
 function gfollow()
 {
-	local hash entries pat REPLY
+	local hash entries REPLY
 	zparseopts -M -D - d=diff -diff=d
-	log=$(egrep '^commit' <(git log --follow "$@") | awk '{print $2}')
-	for hash in $log; do
-		gdiff $hash -- "$@" | more
+	#hashes=($(egrep '^commit' <(git log --follow "$@") | awk '{print $2}'))
+	#entries=("${(@f)$(git log --format=format:%h\ %an\ \<%aE\>\ %ai\ %f --follow $1)}")
+	while hash=$(
+		chooser -f1 --ifs $'\n' --keys 'v f' \
+			--head 'Commits containing "$1"' \
+			--foot '(Enter) Show commit in terminal (v) Open commit in vim (f) view full file revision' \
+			"$(git log --color=always --format=format:'%h %an <%aE> %ai %f' --follow $1)"
+	)
+	do
+		opts=()
+		case $REPLYKEY in
+			'')
+				gshow $hash $1
+				;;
+			v)
+				gshow $hash $1 | gvim -
+				;;
+			f)
+				gshow $hash:$1 | gvim -
+				;;
+			d)
+				gvimdiff $1 <(gshow $hash:$1)
+				;;
+			m)
+				meld $1 <(gshow $hash:$1)
+				;;
+		esac
 	done
 }
 
@@ -46,8 +72,31 @@ function gtag()
 
 function gmerge() #@TODO
 {
-	local branch=${1:-$(chooser $(git branch))}
-	[[ -n $branch ]] && run git merge $branch --no-ff --no-commit
+	local mergeHash branch status unmerged cmd=$1
+	(($#)) && shift || cmd='status'
+	mergeHash=$(git rev-parse MERGE_HEAD)
+	if [[ -n $mergeHash ]]; then
+		case $cmd in
+			cancel|abort) git merge --abort
+			;;
+			finish|commit|continue) git commit
+			;;
+			status)
+				local file
+				techo -c warn "Merge in progress (${mergeHash:0:10})"
+				unmerged=($(git ls-files --unmerged))
+				#chooser -v file -f1 
+				techo Needs merging: $unmerged
+			;;
+		esac
+	else
+		# case $cmd in
+		# 	status)
+		# 	;;
+		# esac
+		chooser -v branch -H 'Merge branch' -S "$1" -b2- --ifs $'\n' "$(git branch)" || cancel
+		confirm "Merge branch $branch" && run git merge $branch --no-ff --no-commit
+	fi
 }
 
 function ggrep() #@TODO
@@ -70,6 +119,7 @@ function commit() #@TODO
 {
 	local m args
 	zparseopts -D -M - m:=m
+	#@TODO check for empty changes
 	if [[ -n "$1" && ${1:0:1} != - ]]; then
 		m=(-m "$*")
 	else
@@ -77,6 +127,7 @@ function commit() #@TODO
 	fi
 	git commit $m $args
 }
+
 function croot()
 {
 	git config --global --get alias.root > /dev/null || git config --global --add alias.root '!pwd'
@@ -92,22 +143,25 @@ function github()
 	local url repo search echo
 	zparseopts -D -M - r=repo s=search e=echo
 	if [[ $# -eq 0 ]]; then
-		url=$(gitgetrepo .) || url='https://github.com/'
-		open $url
+		[[ -d .git ]] && github . || open 'https://github.com/'
 	elif [[ -n $search ]]; then
 		open "https://github.com/search?q=$(omz_urlencode $*)"
 	elif [[ -n $repo ]]; then
 		url="https://github.com/$*"
 		[[ -n $echo || ! -t 1 ]] && echo $url || open $url
 	elif url=$(gitgetrepo "$*"); then
-		[[ -n $echo || ! -t 1 ]] && echo $url || open $url
+		if [[ -n $echo || ! -t 1 ]]; then
+			echo $url
+		elif [[ $url =~ '^git@github.com:(.*)/(.*)' ]]; then
+			github -r $match[1]/$match[2]
+		else
+			open $url
+		fi
 	else
 		githubAPI $echo "$@"
 	fi
 }
-alias gh='github'
-typeset -Tf github
-#
+
 function githubAPI()
 {
 	local limit=20 endpoint='https://api.github.com/graphql' #request response fields
@@ -133,7 +187,7 @@ function githubAPI()
 	request=${request//$'\n'/}
 	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d $request $endpoint)
 	ret=$?
-	type jq >/dev/null || chkCmdInstall jq 
+	type jq >/dev/null || chkCmd jq 
 	(($#verbose)) && {
 		jq -r <<<$request
 		jq -r <<<$response
@@ -145,7 +199,7 @@ function githubAPI()
 			tmp+=("$(trim "$field")")
 			if (($#tmp == 5)); then
 				repos+=("$tmp")
-				tmp=
+				tmp=()
 			fi
 		done < <(jq -cr "$fields" <<<$response)
 
@@ -157,6 +211,8 @@ function githubAPI()
 			name=$(chooser -s' ' -f1 $repos "Open this search in github") || cancel
 			if [[ $name == 'Open' ]]; then
 				github -s "$*"
+				abort 0
+				return 
 			else
 				github -r $echo $name
 			fi
@@ -170,19 +226,23 @@ function gitgetrepo()
 	zparseopts -D -M - d:=d
 	(
 		d=${d[2]:-"$*"}
+		[[ -n $d ]] || d='.'
 		if [[ -n $d && -d $d ]]; then
-			cd $1 || {
-				[ -t 1 ] && techo -c err "Directory not found: $1"
+			cd $d 2>/dev/null || {
+				[ -t 1 ] && techo -c lred "Can't change to directory:$C_ $C[err]$d$C_"
 				return 1
 			}
+		else
+			[ -t 1 ] && techo -c lred "Directory not found:$C_ $C[err]$d$C_"
+			return 1
 		fi
-		gremote || { techo -c warn 'No remotes'; return 10 }
+		gremote || { [ -t 1 ] && techo -c warn 'No remotes'; return 10 }
 		repo=$(git remote get-url $remote[1] 2>/dev/null) || {
-			[ -t 1 ] && techo -c err 'Git repository not found'
+			[ -t 1 ] && techo -c lred 'Git repository not found'
 			return 1
 		}
 		[[ -n $repo ]] && echo $repo || {
-			[ -t 1 ] && techo -c err 'No remotes'
+			[ -t 1 ] && techo -c warn 'No remotes'
 			return 10
 		}
 	)
@@ -208,24 +268,48 @@ function gselect()
 
 function gpush()
 {
-	local remote
+	local remote branch
 	if ! git push "$@"; then
-		remote=${1:-$VCS_STATUS_REMOTE_NAME}
-		[[ -z $remote ]] && gremote
+		remote=(${1:-$VCS_STATUS_REMOTE_NAME})
+		if [[ -z $remote ]]; then
+			gremote || { techo -c warn 'No remotes'; return 10 }
+		fi
 		branch=${2:-$VCS_STATUS_LOCAL_BRANCH}
-		[[ -z $branch ]] && gbranch
+		if [[ -z $branch ]]; then
+			getbranch || { techo -c warn 'No branch'; return 10 }
+		fi
 		git push --set-upstream $remote[1] $branch
 	fi
 }
 
-function gbranch()
+function getbranch()
 {
-	#local current
-	#zparseopts c=current
-	
-	branch=$(git symbolic-ref --short ${1:-HEAD})
+	typeset -g branch
+	branch=$(git symbolic-ref --short ${1:-HEAD}) 
 }
 
+function gbranch() #@TODO
+{
+	local list diff cmd get current
+	zparseopts -M -D - d=diff -diff=d l=list -list=l c=current
+
+	cmd=($list $current)
+	case $cmd in
+		-c) getbranch "$@" ;;
+		-l) listbranch "$@" ;;
+		*) listbranch "$@" ;; 
+	esac
+}
+
+function listbranch()
+{
+	local head merged opts=()
+	zparseopts -M -D - --no-merged:=merged --merged:=merged
+
+	(($#merged)) && opts+=($merged) || opts+=(--no-merged origin/master) 
+	
+	git branch --sort=committerdate --format='%(HEAD) %(color:yellow)%(refname:short)%(color:reset) - %(color:red)%(objectname:short)%(color:reset) - %(contents:subject) - %(authorname) (%(color:green)%(committerdate:relative)%(color:reset))' --color=always $opts
+}
 function gremote()
 {
 	#local current
@@ -238,11 +322,65 @@ function gremote()
 function gclone()
 {
 	local repo
+	include -r network
 	cd $HOME/repos
 	for repo; do
-		if [[ -n "$(url getscheme $repo)" ]] || repo="$(github -e $repo)"; then
+		if [[ -n "$(urlinfo -s $repo)" ]] || repo="$(github -e $repo)"; then
 			git clone $repo
 		fi
 	done
+	repo=${repo##*/}
 	[[ -d $repo ]] && cd $repo
 }
+
+function gpr()
+{
+	local request owner 
+
+	request=$(cat) <<-GQL
+	{
+	"query":query(owner:"$owner", name:"$repname") {
+	  repository(owner:"$owner", name:"$repname") {
+		pullRequests(states:[OPEN]) {
+		  nodes {
+			... on PullRequest {
+			  id, author { login }, createdAt
+			  merged, mergedAt, mergeable
+			  body, changedFiles
+			  commits(first: 100) {
+				nodes { commit {
+					oid
+					message
+					status { context(name: "x") { description } }
+				  } }
+			  }
+			  comments(last: 100) {
+				nodes { author { login }, updatedAt, minimizedReason }
+			  }
+			  labels(last: 100) {
+				nodes {
+				  ... on Label { color, name, description }
+				}
+			  }
+			}
+		  }
+		}
+	  },
+	}
+	"variables":{ "search":"fork:true $*","limit":$limit }
+	}
+	GQL
+}
+
+# Added 2019-12-04 18:50
+function gbisect()
+{
+	cmd=$1
+	case $bisectState in
+		running)
+			;;
+		'')
+			;;
+	esac
+}
+

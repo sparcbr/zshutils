@@ -3,32 +3,37 @@ VERSION=1.0.8
 
 function techo()
 {
-	local c args nonl print
-	zparseopts -M -D - c:=c n=nonl P=print
-	[[ -n "$nonl" ]] && args=('-n')
+	local c args nonl print noesc ts
+	_dbg_trap $0
+	zparseopts -M -D - c:=c n=nonl P=print r=noesc T=ts
+	[[ -n $nonl ]] && args=('-n')
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
-	while [[ ${1[1]} = '-' ]]; do
+	while [[ ${1[1]} == '-' ]]; do
 		args+=("$1")
 		shift
 	done
 	if [[ -n $c ]]; then
 		local msg
 		c=$c[2]
-		if [[ $c = [0-9]## ]]; then
+		if [[ $c == <1-> ]]; then
 			msg="\e[38;5;${c}m$@$C_"
 		else
-			[[ -v C[$c] ]] && type colorSet >/dev/null && colorSet $c
-			msg="${C[$c]}${@}$C_"
+			if [[ -v C[$c] ]] || { type colorSet >/dev/null && colorSet $c }; then
+				msg="${C[$c]}${@}$C_"
+			else
+				msg="$@"
+			fi
 		fi
-		if [[ -n $print ]]; then
-			print -P $args $msg >$TTY
-		else
-			echo -e $args $msg >$TTY
-		fi
-	elif [[ -n "$print" ]]; then
-		print -P $args "$@" >$TTY
 	else
-		echo -e $args "$@" >$TTY
+		msg="$@"
+	fi
+	
+	[[ -n $ts ]] && { print=1; ts='%D{%s.%.}>' }
+
+	if [[ -n $print ]]; then
+		print -P $noesc $args - $ts$msg >$TTY
+	else
+		echo -e ${noesc:+-E} $args - $ts$msg >$TTY
 	fi
 }
 
@@ -53,63 +58,80 @@ function abort()
 	#@TODO $ZSH_EVAL_CONTEXT =~ toplevel* , does not seem to work
 	((EXIT)) && [[ ! -o interactive ]] && exit $cod
 
-	[[ -z $noexception ]] && throw $cod
+	[[ -z $noexception ]] && { autoload throw ; throw $cod }
 	return $cod
 }
 
 function implode()
 {
-	local _var _str _sep uniq _list ifs _Asep
+	local _var _str _sep uniq _list ifs _Asep out
 	zparseopts -D -M - v:=_var u=uniq -ifs:=ifs A:=_Asep
 
 	[[ -n $2 ]] && _sep=$2 || _sep=' '
 	if [[ -n $_Asep ]]; then
+		[[ $(vartype $1) != association* ]] && { techo -c err "$1 is not an association"; return 1 }
 		_Asep=$_Asep[2]
+		_list=()
+		for key in ${(Pk)1}; do
+			_list+=($key$_Asep${${(P)1}[$key]})
+		done
+		out=${(@pj/$_sep/)_list}
 	else
-		[[ $_sep != ':' ]] && _Asep=':' || _Asep=';'
+		out=${(@Ppj/$_sep/)1}
 	fi
-	_list=()
-	for key in ${(Pk)1}; do
-		_list+=($key$_Asep${${(P)1}[$key]})
-	done
-	echo -n ${(@pj/$_sep/)_list}
+
+	if [[ -v $_var[2] ]]; then
+		typeset -g "$_var[2]=$out"
+	else
+		echo -En $out
+	fi
 }
 
 function explode()
 {
-	local _var _str _sep uniq _list ifs _Asep
-	zparseopts -D -M - v:=_var u=uniq -ifs:=ifs A:=_Asep
-	_sep=${2:- }
-	[ -t 0 ] && _str=$1 || read _str
-	#[[ $_sep != ' ' ]] && _str=${_str// /$'\\ '}          #_str=${_str// /$'\\ '}
-	_list=(${(@ps/$_sep/)_str})
-	[[ -n $uniq ]] && _list=(${(@u)_list})
+	local _var _str _sep uniq _list ifs _Asep stdin _tmp
+	zparseopts -D -M - v:=_var u=uniq A:=_Asep -stdin=stdin
+
 	[[ -n $_var[2] ]] && _var=$_var[2]
-	if [[ -n $3 ]]; then
-		[[ $3 == [0-9]## ]] || abort 1 "\$3=$3: not a number"
-		if [[ -n $_var ]]; then
-			typeset -g $_var
-			#eval $_var="'${(Q)_str[$3]}'"
-			eval $_var="'${_list[$3]}'"
-			#echo ${(Q)_str[$3]}
-		else
-			print -r $_list[$3]
-		fi
-		#[ ! -t 1 ] && echo $_str[$3]
+	[[ -n $3 && $3 != <1-> ]] && abort 1 "field specifier is not a number: \$3=$3"
+
+	if [[ -n $stdin ]]; then
+		_sep=${1:- }
+		#_str=()
+		while read -r _tmp; do
+			#_str+=($_tmp)
+			explode $_tmp $_sep $3
+		done
+		return
 	else
-		if [[ -n $_var ]]; then
+		_str=$1
+		_sep=${2:- }
+	fi
+
+	_list=(${(@ps/$_sep/)_str})
+
+	[[ -n $uniq ]] && _list=(${(@u)_list})
+
+	if [[ -n $_var ]]; then
+		if [[ -n $3 ]]; then
+			typeset -g $_var
+			eval $_var="'${_list[$3]}'"
+		else
 			if [[ -n $_Asep ]]; then
-				typeset -gA $_var
+				[[ -v $_var ]] || typeset -gA $_var
 				_Asep=$_Asep[2]
 				set -A $_var ${(@ps/$_Asep/)_list}
 			else 
-				typeset -ga $_var
+				[[ -v $_var ]] || typeset -ga $_var
 				set -A $_var $_list
 			fi
+		fi
+	else
+		if [[ -n $3 ]]; then
+			print -r $_list[$3]
 		else
 			print -r $_list
 		fi
-		#[ ! -t 1 ] && echo $_list
 	fi
 }
 
@@ -135,10 +157,25 @@ function getmime()
 
 function zshLibReadHeader()
 {
-	local mime=$(getmime "$*") version header
+	local mime version header tmp ll
+	[[ $1 == '-l' ]] && { ll=1; shift }
+	mime=$(getmime $1)
 	typeset -gA HEADER=()
-	{ read version ; read header } < "$*" || return
-	if [[ $mime = 'text/plain' && $version =~ VERSION=([0-9\.]+) ]]; then
+	{
+		read version
+		read header
+		if ((ll)); then
+			while read -r tmp; do
+				[[ -z $tmp || $tmp == '#/head' ]] && break
+				if [[ $tmp =~ '^alias (.*)=(.*)' ]]; then
+					eval "alias $match[1]=$match[2]"
+				elif [[ $tmp[1] != '#' ]]; then
+					break
+				fi
+			done
+		fi
+	} < $1 || return
+	if [[ $mime == 'text/plain' && $version =~ VERSION=([0-9]+(\.[0-9]+)*) ]]; then
 		VERSION=$match[1]
 		if [[ $header =~ ^\#(([[:alnum:]]+)(=([^[:blank:]]+))?)([[:blank:]]+([[:alnum:]]+)(=([^[:blank:]]+))?)*$ ]]
 		then
@@ -159,13 +196,13 @@ function zshLibReadHeader()
 function isZshLib()
 {
 	local mime=$(getmime "$*")
-	[[ $mime = 'text/plain' && $(read -e <"$*") = VERSION=[0-9\.]## ]]
+	[[ $mime == 'text/plain' && $(read -e <"$*") =~ VERSION=[0-9]+(\.[0-9]+)* ]]
 }
 
 function isScript()
 {
 	local mime=$(getmime "$*")
-	[[ $mime = 'text/x-shellscript' || $mime = 'text/plain' && $(read -e "$*") = VERSION=[0-9\.]## ]]
+	[[ $mime = 'text/x-shellscript' || $mime == 'text/plain' && $(read -e "$*") =~ VERSION=[0-9]+(\.[0-9]+)* ]]
 }
 
 function typeOf()
@@ -228,19 +265,19 @@ function parseErrors()
 {
 	local line
 	while read line; do
-		#echo line=${(q)line}
 		[[ $line == 'EOF' ]] && return
 		techo line=${(q)line}
 		if [[ $line =~ $'^(.+):([0-9]+): (parse error near) `(.*)\'' ]]; then
-		elif [[ $line =~ $'^(.+):([0-9]+): (condition expected): "(.*)"' ]]; then
-		elif [[ $line =~ $'^(.+):([0-9]+): (not an identifier):(.*)' ]]; then
-
+		elif [[ $line =~ $'^(.+):([0-9]+): (condition expected): ?"?(.*)"?' ]]; then
+		elif [[ $line =~ $'^(.+):([0-9]+): (not an identifier): ?(.*)' ]]; then
+		elif [[ $line =~ $'^(.+):([0-9]+): (unmatched) (.*)' ]]; then
+		elif [[ $line =~ $'^(.+):([0-9]+): ?"?`?(.*)"?\'?' ]]; then
 		else
 			techo -Pr "%F{9}${line}%f"
 			continue
 		fi
 		
-		print -Pr ${(@q)match}
+		print -Pr ${(@qqq)match}
 	done
 }
 
@@ -256,10 +293,10 @@ function include()
 	verbose=${verbose[2]:-2}
 	[[ -n $quiet ]] && verbose=0
 	if [[ $1 = */* ]]; then
-		lpath="$(getfullpath $1)"
-		name="${$(getfilename $1)#zsh_*}"
+		lpath=${1:P}
+		name=${${1:t}#zsh_}
 	else
-		name="${1#zsh_*}"
+		name="${1#zsh_}"
 		if [[ -n $lpath ]]; then
 			lpath=$lpath[2]
 		else
@@ -288,7 +325,7 @@ function include()
 			( ${${(P)info}[lazyload]} && ! $#lazyload )
 		)) # has error or was lazy loaded 
 	then 
-		if ! zshLibReadHeader $lpath; then
+		if ! zshLibReadHeader $lazyload $lpath; then
 			techo -P "%F{11}$lpath %F{9}is not a zsh library%f"
 			if ((required)); then
 				[[ -o interactive ]] || abort 2
@@ -303,7 +340,9 @@ function include()
 				# register a autoload function for each lazy load function
 				explode -v llfuncs ${HEADER[lazyload]} ','
 				for func in $llfuncs; do
-					functions[$func]="include $name && $func \$@"
+					functions[$func]="include $name && {
+						$func \"\$@\"
+					}"
 				done
 			fi
 			lib_set_info -l $name $VERSION "$lpath" $required "$mtime"
@@ -312,7 +351,6 @@ function include()
 
 		#[[ -o interactive ]] && 
 		techo -P -r "Including %F{11}$name%f ("${lpath/$ZSH_LIBS/"\\$"ZSH_LIBS}") [%F{2}$VERSION%f]"
-		typeset -Tf parseErrors
 		coproc parseErrors
 		if source $lpath 2>&p; then
 			lib_set_info $name $VERSION "$lpath" $required "$mtime"
@@ -337,7 +375,6 @@ function include()
 				else
 					#${EDITOR:-vim} $file +$line &
 				fi
-				set +x
 			)
 
 			if ((required)); then
@@ -369,36 +406,48 @@ function TRAPHUP() { reload }
 #	return $((128+$1))
 #}
 
+#@TODO merge with chkCmd() from zsh_functions
 comp+=("inst=apt")
 function inst()
 {
 	local machine cmd pkgs pkg
-	zparseopts -D -M - m:=machine
-	if [[ -z $machine ]]; then
-		if (($#)); then
-			cmd=("$@")
-		else
-			#@TODO findcmd(use inalias)
-			cmd=(${$(fc -ln -1)[1]})
-		fi
-		for cmd in $cmd; do
-			pkg=$(chooser -s':' -f1 --ifs $'\n' "$(dpkg -S '*/'$cmd)}") || return
-			(($#pkg)) && sudo apt-get install $pkg
-		done
+	#zparseopts -D -M -
+	if (($#)); then
+		cmd=("$@")
 	else
-		echo "$@" >> $CFG/$machine[2].pkgs.txt
+		#@TODO findcmd(use inalias)
+		cmd=(${$(fc -ln -1)[1]})
 	fi
+	for cmd in $cmd; do
+		chkCmd $cmd
+	done
 }
 
 # Added 2019-09-05 00:57
 # check if any item of array equals value
-# in_array array_name value
+# in_array value array_name 
 function in_array()
 {
-	local name val _var
+	local name val _var ret i
 	zparseopts -D -M - v:=_var
-	[[ -v $_var[2] ]] && _var=$_var[2]
-	((${(P)#2[(re)$1]}))
+
+	case $(vartype $2) in
+	association*)
+		i=${(k)${(P)2}[(re)$1]}
+		;;
+	array*)
+		i=${${(P)2}[(rei)$1]}
+		;;
+	*)
+		techo -c err "\"$2\": not an array."
+		abort 2 "not an array"
+		return 2
+	esac
+
+	((i <= ${(P)#2})) || return 1
+
+	[[ -v $_var[2] ]] && typeset -g "$_var=$i"
+	return 0
 }
 
 #TODO call this within chooser
@@ -412,7 +461,7 @@ function match_array()
 	typeset "$_var=(${(M)${(P)2}:#${1}*})"
 	[ -t 1 ] || echo $_var
 	if (($#choose)); then
-		chooser -v $_var $field $sep ${(P)_var} || cancel
+		chooser -v $_var $field $sep ${(P)_var} || return
 	else
 		(($#_var))
 	fi
@@ -420,10 +469,10 @@ function match_array()
 
 #@untested check escaping
 function ltrim() {
-	echo "${(q)*##[[:blank:]]##}"
+	echo "${*##[[:blank:]]##}"
 }
 function rtrim() {
-	echo "${(q)*%%[[:blank:]]##}"
+	echo "${*%%[[:blank:]]##}"
 }
 function trim()
 {
@@ -479,19 +528,16 @@ if [[ -o interactive ]] && ! pidof inotifywait 2>&1 >/dev/null; then
 #	done && { libmonitor & export LIBMON_PID=$! }
 fi
 
-alias sudo='noglob do_sudo '
 comp+=("do_sudo=sudo")
 function do_sudo()
 {
 	integer glob=1
-	local -a run
+	local args user
+	
 	include -r functions
-	if [[ $# -gt 1 && $1 == -u ]]; then
-		run=(command sudo -u $2)
-		shift ; shift
-	else
-		run=(run -s)
-	fi
+	zparseopts -D -M - u:=user
+
+	args=(-H $user)
 	(($# == 0)) && 1=/bin/zsh
 	while (($#)); do
 		case $1 in
@@ -506,9 +552,26 @@ function do_sudo()
 				;;
 		esac
 	done
-	if ((glob)); then
-		PATH="/sbin:/usr/sbin:/usr/local/sbin:$PATH" $run $~==*
+
+	if (($#)); then
+		if [[ $(typeOf $1) == 'alias' ]]; then
+			local tmp=$(inalias -f $1) || return 1
+			1=$tmp
+		fi
 	else
-		PATH="/sbin:/usr/sbin:/usr/local/sbin:$PATH" $run $==*
+		1=/bin/zsh
+	fi
+
+	if ((glob)); then
+		PATH="/sbin:/usr/sbin:/usr/local/sbin:$PATH" sudo $args $~==*
+	else
+		PATH="/sbin:/usr/sbin:/usr/local/sbin:$PATH" sudo $args $==*
 	fi
 }
+
+# Added 2019-11-18 19:33
+function heredoc()
+{
+	IFS='\n' read -r -d '' $1 || true
+}
+
