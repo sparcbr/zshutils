@@ -1,5 +1,6 @@
 VERSION=1.0.2
 #lazyload=urlfollow,urlinfo,vnc,imdb,globo
+
 [[ ! -v comp ]] && typeset -g -a comp
 
 function urlfollow() {
@@ -48,15 +49,41 @@ function vnc()
 
 function imdb()
 {
-	local url e
-	[[ $1 == '-e' ]] && { shift; e=1 }
-	url="https://www.imdb.com/find?q=$(omz_urlencode $*)"
-	((e)) && echo $url || open $url
+	local e
+	[[ $1 == '-e' ]] && { shift; e='-e' }
+
+	url $e 'https://www.imdb.com/find?q=' "$*"
+}
+
+function url()
+{
+	local echo encode url arg c
+	zparseopts -D -M -E - e=echo -no-color=c c:=c # E=encode -encode=E
+	
+	[[ -n $1 ]] || return 10
+	url=$1
+	arg=$2
+	arg=$(omz_urlencode $arg)
+	if [[ -n $c[2] ]]; then
+		c=$C[$c[2]]
+	elif [[ -z $c ]]; then
+		c=$C[lgreen]
+	else
+		c=
+	fi
+
+	url=$url$arg
+	if [[ -n $echo ]]; then
+		echo $c$url
+	else
+		techo -c head 'Opening' $c$url
+		open $url
+	fi
 }
 
 function htmlget()
 {
-	local url output begin end tmp data opts code
+	local url output begin end tmp data opts code expr
 	zparseopts -D -M - b:=begin e:=end o:=output u=update
 	
 	url=$1
@@ -68,19 +95,26 @@ function htmlget()
 		opts+=($output)
 	fi
 
+	expr=()
 	if (($#begin)); then
-		tmp="($begin[2].*)"
-		begin='x==0 && match($0,/'$tmp'/,a){x=1; if (a[1]!="") print a[1]; next} '
+		expr+=(0 "/($begin[2].*)/" m
+			'x=1; if (m[1]!="") print m[1]; next')
 	else
-		begin='BEGIN{x=1} '
+		expr+=(BEGIN - -
+			'x=1')
 	fi
 
 	if (($#end)); then
-		tmp="(.*)$end[2]"
-		end='x==1 && match($0,/'$tmp'/,a){print a[1]; x=2} '
+		expr+=(1 "/(.*)$end[2]/" m
+			'print m[1]; x=2')
 	fi
-
-	tmp=($(curl -Ss -w "\n¬ %{http_code}" -L $url | awk ${begin}${end}'x==1{print} /^¬/{print $2}'))
+	expr+=(
+		1 - -
+			'print'
+		- '/^¬/' -
+			'print $2'
+	)
+	tmp=($(curl -Ss -w "\n¬ %{http_code}" -L $url | awkWrapper -e expr))
 	code=$tmp[-1]
 	if ((code!=200)); then
 		techo -c err "curl: http code $code"
@@ -106,23 +140,23 @@ function globo()
 	expr=(
 		BEGIN - -
 			'pat_section="^<section .*data-event-container=\"("yesterday"|"today")[0-9]+\">"'
-		0 m 'pat_section'
+		0 'pat_section' m
 			'x=1; dt=m[1]'
-		1 m '/<time .*data-start-time="([0-9]+)" data-end-time="([0-9]+)"/'
-			'dt1=m[1]; dt2=m[2]; if (now-dt2<10000  && dt1-now<10000) { x=3; print "time",dt1,dt2,(dt1<now && now<dt2) }'
-		3 m '/^<h2><label[^>]*>([^<]*)</'
+		1 '/<time .*data-start-time="([0-9]+)" data-end-time="([0-9]+)"/' m
+			'dt1=m[1]; dt2=m[2]; if (now-dt2<10000  && dt1-now<10000) { ok=1; x=3; print "time",dt1,dt2,(dt1<now && now<dt2) } else if (ok) exit'
+		3 '/^<h2><label[^>]*>([^<]*)</' m
 			'print "title",m[1]'
-		3 m '/^<p>([^<]*)</'
+		3 '/^<p>([^<]*)</' m
 			'print "summary",m[1]'
-		3 m '/<dt>([^<]+)</'
+		3 '/<dt>([^<]+)</' m
 			'print "dt",m[1]'
-		3 m '/<dd>([^<]+)</'
+		3 '/<dd>([^<]+)</' m
 			'print "dd",m[1]'
-		- - '/<\/section>/'
-			'if (x); x=0'
+		- '/<\/section>/' -
+			'x=0'
 	)
 	
-	if data=("${(@f)$(awkWrapper -v vars -e expr $file)}"); then
+	if awkWrapper -v vars -e expr -o data $file; then
 		local field isCurrent dt a c
 		(($#data)) || abort 1 'No match'
 		for tmp in $data; do
@@ -131,14 +165,14 @@ function globo()
 			tmp=$a[2,-1]
 			case $field in
 				time)
-					dt=($=tmp)
-					isCurrent=$dt[3]
+					a=($=tmp)
+					isCurrent=$a[3]
 					((isCurrent)) && c=$C[warn] || c=
-					techo -rc head $(date -d @$dt[1] '+%d/%m/%Y:'$C_$c' %H:%M to '; date -d @$dt[2] '+%H:%M')
+					techo -rc head $(date -d @$a[1] '+%d/%m/%Y:'$C_$c' %H:%M to '; date -d @$a[2] '+%H:%M')
 					;;
 				title)
 					if ((isCurrent)); then
-						techo -rc head "title: $C[ok]$tmp$C_ ($(imdb -e $tmp))"
+						techo -rc head "title: $C[ok]$tmp$C_"
 					else
 						techo -r "title: $tmp"
 					fi
@@ -152,12 +186,16 @@ function globo()
 					;;
 				dt)
 					if ((isCurrent)); then
-						techo -rn "$tmp: "
+						dt=$tmp
 					fi
 					;;
 				dd)
 					if ((isCurrent)); then
-						techo -r $tmp
+						if [[ $dt == *Original* ]]; then
+							techo -c lmagenta "$dt: $C[ok]$tmp $C[green]($(imdb -e $tmp))"
+						else
+							techo "$dt: $tmp"
+						fi
 					fi
 					;;
 			esac
@@ -165,36 +203,20 @@ function globo()
 	fi
 }
 
-function awkWrapper()
+# Added 2019-04-04 14:54
+function ipfind()
 {
-	local opts prog _vars _expr x m pat action
-	zparseopts -D -M - v:=_vars e:=_expr
+	local user=${1:-debian} net
+	net=192.168.0
+	for ip in $(seq $(($last+1)) 254); do
+		last=$ip
+		ping -W3 -c1 $net.$ip && ssh $user@$net.$ip
+		echo ret=$?
+	done
+}
 
-	if [[ -n $_vars ]]; then
-		_vars=(${(P)_vars[2]})
-		opts=('-v '$^_vars)
-		opts=($=opts)
-	fi
-
-	if [[ -n $_expr ]]; then
-		_expr=(${(P)_expr[2]})
-		for x m pat action in $_expr; do
-			if [[ $x == <-> ]]	; then
-				prog+="x==$x && "
-			elif [[ $x == 'BEGIN' ]]; then
-				prog+="BEGIN { $action }"$'\n'
-				continue
-			fi
-			
-			if [[ $m != '-' ]]; then
-				prog+="match(\$0,$pat,$m)"
-			else
-				prog+="$pat"
-			fi
-
-			prog+=" { $action }"$'\n'
-		done
-	fi
-
-	awk $opts $prog $1
+# Added 2020-01-15 19:12
+function google()
+{
+	url 'https://www.google.com?q=' "$*"
 }

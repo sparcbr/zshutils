@@ -55,4 +55,3 @@ function checkdbs()
 		run -Esp "check DB $db" sqlite3 $db 'pragma integrity_check'
 	done
 }
-

@@ -122,7 +122,7 @@ function parseSqlErrors()
 				techo -c lred -Pr "Unknown error: %F{9}$errCode%f ($sqlState)"
 			fi
 		else
-			techo -Pr "%F{9}${line}%f"
+			techo -c lred $line
 		fi
 	done
 }

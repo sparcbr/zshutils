@@ -1,0 +1,19 @@
+VERSION=1.0.1
+[[ ! -v comp ]] && typeset -g -a comp
+
+function dnslookup()
+{
+	local var tmp nserver='ns1.vultr.com'
+	zparseopts -D -M - v:=var
+	[[ -n $var ]] && { var=$var[2]; typeset -ga $var }
+	out=($(nslookup $1 $nserver | awk '/Address: [0-9.]+/{print $2}')) || return
+	if [[ -v $var ]]; then
+		set -A $var $out
+	else
+		print -r $out
+	fi
+}
+
+function ()
+{
+}

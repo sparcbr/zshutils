@@ -1,6 +1,9 @@
 VERSION=1.0.2
+#lazyload=p,k
 
 # Process handling. Stuff like pid, kill, lsof, etc...
+
+[[ -v comp ]] || typeset -g -a comp
 
 function cwdof()
 {
@@ -172,4 +175,3 @@ function procmon()
 		sleep 1
 	done
 }
-

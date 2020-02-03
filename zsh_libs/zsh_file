@@ -1,4 +1,5 @@
-VERSION=1.0.7
+VERSION=1.0.8
+#lazyload=urlfollow,urlinfo,vnc,imdb,globo,awkWrapper
 
 setopt nomultios
 
@@ -43,7 +44,7 @@ function isDir()
 			return 2
 		fi
 		[[ -z $mk ]] && return 1
-		confirm "dir $dir doesn't exist. Create" && run -S mkdir $dir
+		confirm "dir $dir doesn't exist. Create" && run -S mkdir -p $dir
 	fi
 }
 
@@ -88,6 +89,7 @@ function rename()
 {
 	local orig name dir fullpath
 	(( $# )) || usage $0
+	#@TODO is link? confirm rename link or link target
 	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
 	orig="$(getfilename "$1")"
 	dir="$(getpath $(getfullpath $1))"
@@ -123,16 +125,19 @@ function ddiff()
 				shift
 			fi
 		fi
-		if [[ -z $dir1 ]]; then
-			input -p "Dir 1" -v var || return
+		local buttons=(--okcodes '0 1' -b "Current directory [$PWD]:1")
+		if [[ -z $dir1 || -n $config ]]; then
+			var=$dir1
+			input -p "Dir 1" -v var $buttons || return
 			isDir -m $var && dir1=$var || return
 		fi
-		if [[ -z $dir2 ]]; then
-			input -p "Dir 2" -v var || return
+		if [[ -z $dir2 || -n $config ]]; then
+			var=$dir2
+			input -p "Dir 2" -v var $buttons || return
 			isDir -m $var && dir2=$var || return
 		fi
 		d1=$dir1; d2=$dir2
-		echo "dir1=$dir1\ndir2=$dir2"
+		techo "dir1: $dir1\ndir2: $dir2"
 	fi
 
 	if [[ -d $dir1 && -d $dir2 ]]; then 
@@ -156,12 +161,13 @@ function syncDirs()
 	local integer i n
 	local src targets dir data rsArgs checksum arg
 	local quiet sudo excludeFrom dry extraArgs reverse
-	local files stat name
+	local files stat name noSlash
 	typeset -a src targets rsArgs extraArgs files excludePatterns
-	zparseopts -D -M - q=quiet s=sudo i:=excludeFrom d=dry t:=targets c=checksum r=reverse
+	zparseopts -D -M - q=quiet s=sudo i:=excludeFrom d=dry \
+		c=checksum r=reverse -no-add-slash=noSlash
 
 	[[ -z "$sudo" ]] && sudo='-S'
-	[[ $# -ge 2 ]] || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
+	(($# >= 2)) || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
 	
 	n=$#
 	for arg; do
@@ -178,8 +184,10 @@ function syncDirs()
 	#if [[ $#src -eq 0 ]]; then
 	#	src=($(box get backupconfig))
 	#fi
-	if [[ -z "$targets" ]]; then
-		input "Enter target directory" -v targets || cancel
+	if ((!$#targets)); then
+		#@TODO: show current selected directories and allow addition and removal
+		local buttons=(--okcodes '0 1' -b "Current directory [$PWD]:1")
+		input --multi --dir -p 'Enter target directories' -v targets || cancel
 	fi
 
 	if [[ -n $reverse ]]; then
@@ -187,7 +195,6 @@ function syncDirs()
 		targets=($src)
 		src=($files)
 	fi
-
 
 	# # # # # # # # # #	   -t, --times           preserve modification times
 	# rsync arguments #    -O, --omit-dir-times  omit directories from --times
@@ -203,19 +210,59 @@ function syncDirs()
 	excludePatterns=(.osync_workdir 'backup*' '*.local' '.bsync*' '.git' 'node_modules')
 	rsArgs+=(--exclude=$^excludePatterns)
 	[[ -n $excludeFrom ]] && rsArgs+=(--exclude-from="${excludeFrom[2]}")
+
 	for ((n=1; n<=$#src; n++)); do
-		if [[ -d "${src[$n]}" ]]; then
-			if [[ -f "${src[$n]}/rsync.ignore" ]]; then
-				rsArgs+=(--exclude-from="${src[$n]}/rsync.ignore")
+		local isRemoteDir=0 isEmptyDir=0
+		dir=$src[$n]
+		if [[ $dir =~ (.*):(.*) ]]; then
+			local ret host=$match[1] p=$match[2]
+			ret=($(ssh $host \
+				"if [[ -d $p ]]; then
+					glob=("$p"(N/F))
+					v=\$#glob
+					if ((v)) && [[ -f $p/rsync.ignore ]]; then
+						echo -n 1i
+					else
+						echo -n \$v
+					fi
+				elif [[ -f $p ]]; then
+					echo -n f
+				fi"
+			))
+			case $ret in
+				1*)
+					isRemoteDir=1
+					((!$#noSlash)) && [[ ${dir: -1} != / ]] && src[$n]+='/'
+					if [[ $ret == '1i' ]]; then
+						#@TODO: scp $dir/rsync.ignore /tmp)
+						#rsArgs+=(--exclude-from=$fIgnore)
+					fi
+					;;
+				f) ;;
+				0)
+					confirm -c warn "Empty remote directory$C_: $C[lred]'$host:$p'. \
+						Ignore and continue" || cancel
+					src[$n]=(); ((n--))
+					;;
+				'')
+					confirm -c warn "Source $host:$p not found. Ignore and continue" || cancel
+					src[$n]=(); ((n--))
+					;;
+				*) abort 1 "Invalid response from $host: '$ret'" ;;
+			esac
+		elif [[ -d $dir ]]; then
+			if isEmptyDir $dir; then
+				confirm -c warn "Empty directory$C_: $C[lred]'$dir'. \
+					Ignore and continue" || cancel
+				src[$n]=(); ((n--))
+			else
+				((!$#noSlash)) && [[ ${dir: -1} != / ]] && { dir+='/'; src[$n]+='/' }
+				if [[ -f ${dir}rsync.ignore ]]; then
+					rsArgs+=(--exclude-from=${dir}rsync.ignore)
+				fi
 			fi
-			if isEmptyDir $src[$n]; then
-				techo -c err "Empty directory$C_: $C[lred]$src[$n]"
-				return 1
-			fi
-			[[ ${src[$n]: -1} != / ]] && src[$n]+=/
 		fi
 	done
-	
 	techo -c lcyan "Sources: ${(@qq)src}"
 	techo -c lcyan "Targets: ${(@qq)targets}"
 	# rsync arguments from command line
@@ -225,12 +272,20 @@ function syncDirs()
 	# # # # # #
 	# Targets #
 	# # # # # #
-	local nothing=1 permFlags
+	local nothing=1 permFlags ret
 	for dir in $targets; do
-		if isDir -m "$dir"; then
-			[[ "$(fstypeof $dir)" != "vfat" ]] && permFlags='-pog'
+		local host p #sshArgs
+		if [[ $dir =~ ([^:]+):(.*) ]]; then
+			host=$match[1]; p=$match[2]
+			#if [[ -n $sshCFG[$host] ]]; then
+			#	sshArgs=(ssh $sshCFG[$host])
+			#fi
+		fi
+		if isDir -m $dir; then
+			[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-pog'
+			#data="$(run $sudo rsync -ni ${sshArgs[@]} ${rsArgs[@]} $permFlags "$src[@]" $dir)"
 			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
-			if [[ $#data -gt 0 ]]; then
+			if (($#data)); then
 				nothing=0
 				echo $data
 				confirm "Do it" && # run --confirm "Do it"
@@ -293,7 +348,8 @@ function box()
 		[[ -d $base/$box ]] || abort 127
 	fi
 	cd $base/$box
-	[ -d .git ] && git status
+	[ -d .git ] && git status &
+	[[ -d android ]] && include android
 	todo -d . #@TODO mv to cd hook
 }
 
@@ -328,9 +384,10 @@ function attributeSync()
 	_sync
 }
 
+#@TODO
 function _sync() {
-	run -w "isDirty" -p "Flushing caches to disk. Please wait." sync
-	
+	#run -w "isDirty" -p "Flushing caches to disk. Please wait." sync
+	run -p "Flushing caches to disk..." sync
 	#watch -n 1 -c -t  "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
 }
 
@@ -409,4 +466,118 @@ function uniqfile()
 		name="$prefix$base$(date +"%Y%m%d-%H%m%S")$suffix"
 	fi
 	echo -n $name
+}
+
+typeset -gA awkFuncs
+awkFuncs=(
+	printArgs '(i,f) {\
+		if (i<0) i=NF+i+1; 	if (f<0) f=NF+f+1;\
+		print "NF="NF,"i="i,"f="f;
+		for (j=i ; j<f ; j++) {\
+			printf("%s%s", $j, OFS);\
+		}\
+		if (j==f) print $j; }'
+	printArray '(A,i,f){\
+		if (i<0) i=length(A)-i+1; 	if (f<0) f=length(A)-f+1;\
+		for (j=i ; j<f ; j++) {\
+			printf("%s%s", A[j], OFS);\
+		}\
+		if (j==f) print A[j]; }'
+)
+
+function awkWrapper()
+{
+	local opts prog _vars _expr _out _inc reSep
+	local _mapCols _cols _row
+	zparseopts -D -M - v:=_vars F:=reSep E=_expr e:=_expr o:=_out \
+		I:=_inc -inc:=I C:=_mapCols -mapColumns:=C c:=_cols -cols:=c
+
+	if [[ -n $_vars ]]; then
+		_vars=(${(P)_vars[2]})
+		opts=('-v '$^_vars)
+		opts=($=opts)
+	fi
+	(($#reSep)) && opts+=($reSep)
+
+	prog=''
+	if (($#_inc)); then #@TODO
+		local fname=$_inc[2]
+		prog+="function ${fname}${awkFuncs[$fname]}"$'\n'
+	fi
+
+	if (($#_expr)); then
+		if (($#_expr > 1)); then
+			_expr=(${(P)_expr[2]})
+		else
+			_expr=("$@[1,4]")
+		fi
+		local x m pat action
+		for x pat m action in $_expr; do
+			if [[ $x == <-> ]]	; then
+				prog+="x==$x"
+			elif [[ $x =~ 'BEGIN|END' ]]; then
+				prog+="$x { $action }"$'\n'
+				continue
+			elif [[ $x == 'function' ]]; then
+				prog+="function $action"$'\n'
+				continue
+			elif [[ $x != '-' ]]; then
+				prog+=$x
+			fi
+			
+			if [[ $pat != '-' ]]; then
+				if [[ $x != '-' ]]; then
+					prog+=' && '
+				fi
+
+				if [[ $m != '-' ]]; then
+					prog+="match(\$0,$pat,$m)"
+				else
+					prog+=$pat
+				fi
+			fi
+
+			prog+=" { $action }"$'\n'
+		done
+	fi
+
+	if (($#_out)); then
+		_out=$_out[2]
+		if (($#_mapCols)); then
+			local key val
+			_mapCols=$_mapCols[2]
+			typeset -gA $_out $_mapCols
+			_row=()
+			while read key val; do
+				col=${${(P)_mapCols}[$key]}
+				[[ -z $col ]] && abort 1 "Invalid column: $key"
+				_row+=($col $val)
+			done < <(awk $opts $prog $1)
+			set -A $_out $_row
+		#elif (($#assoc)); then
+		elif ((1)); then
+			typeset -ga $_out
+			_cols=$_cols[2]
+			typeset -ga $_out $_cols
+			_row=()
+			{
+				local integer i=0
+				read -A _cols 
+				#while read ... $_out; do
+					#col=${${(P)_cols}[$key]}
+					#[[ -z $col ]] && abort 1 "Invalid column: $key"
+					#_row+=($col $val)
+				#	_row+=($col $val)
+				#	((i++))
+				#done
+				read -A $_out
+			} < <(awk $opts $prog $1)
+		else
+			#save line by line to array
+			set -A $_out "${(@f)$(awk $opts $prog $1)}"
+		fi
+	else
+		# raw awk output to stdout
+		awk $opts $prog $1
+	fi
 }

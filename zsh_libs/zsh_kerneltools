@@ -1,0 +1,112 @@
+#!/bin/zsh
+#lazyload=extract_cpio_image,compress_cpio_image
+
+[[ -v comp ]] || typeset -ga comp
+
+# Added 2019-01-10 11:26:22
+function extract_cpio_image()
+{
+    local ret name mime sourceDir imgfile=$(getfullpath "$1") targetroot targetDir uncompressed tmp
+	[[ -n $imgfile ]] || abort 1 "No image given"
+	[[ -s $imgfile ]] || { abort 127 "$imgfile: not found" ; return; }
+	sourceDir=$(getpath "$imgfile")
+	name=${$(getfilename "${(L)imgfile%.img}")#u}
+    targetDir=${2:-$PWD/$name}
+    (
+		if [[ -f "$targetDir" ]]; then
+			# targetDir=${targetDir}
+			techo -c warn "A file exists in place of target dir: \"$C[warn]$targetDir$C_\""
+			return 1
+			#targetDir=$(input "Choose another path/filename" "$targetDir")
+		fi
+		
+		if [[ -d "$targetDir" ]]; then
+			isEmptyDir "$targetDir" || {
+				confirm "Dir $targetDir not empty. $C[lred]Remove files and continue" \
+					|| { cancel ; return; }
+				run -s rm -rf "$targetDir"/* || { abort $? ; return; }
+			}
+		else
+			confirm Create dir '"$targetDir"' && \
+				run -s mkdir -p "$targetDir" || { abort $? ; return; }
+		fi
+		#uncompressed="$imgfile.cpio"
+		#if [[ "$imgfile" -ot "$uncompressed" ]] && [[ -s "$uncompressed" ]] && \
+		#	! confirm -c warn "$uncompressed is newer than $imgfile\nOverwrite it"
+		#then
+		#	{ cancel ; return; }
+		#fi
+		mime=$(getmime "$imgfile")
+		tmp="$imgfile"
+		if [[ "$mime" == 'application/octet-stream' ]]; then
+			mime=$(file "$imgfile")
+			if [[ $mime =~ 'cpio archive' ]]; then
+				uncompressed="$imgfile" # already a cpio file
+				tmp=
+			elif [[ $mime =~ 'u-boot' ]]; then
+				tmp="$sourceDir/$name.img.gz"
+				[[ -f "$tmp" ]] && rm -f "$tmp"
+				run -S -p 'U-Boot image detected. Extracting ramdisk.' \
+					dd if="$imgfile" of="$tmp" bs=64c skip=1
+				mime=$(getmime "$tmp")
+			fi
+		fi
+		
+		techo cd $targetDir
+		cd $targetDir || return
+		if [[ -n "$tmp" ]]; then
+			if [[ "$mime" == 'application/gzip' ]]; then
+				run -s -p "cpio: inflating $tmp -> $PWD/" \
+					cpio -idmv < <(run zcat "$tmp") || return
+			else
+				abort 2 "$tmp is not a gzip (mime=$mime)"
+				return 1
+			fi
+		else
+			run -s -p "cpio: inflating $uncompressed -> $PWD/" \
+				cpio -idmv --file="$uncompressed" || return
+		fi
+    ) && cd $targetDir
+}
+
+function compress()
+{
+    local alg sudo
+	[[ $1 == -s ]] && { sudo=sudo ; shift; }
+	alg=$1 ; shift
+    case "$alg" in
+        gzip)
+            $sudo gzip -c < $1 > $2
+            ;;
+
+        lzo)
+            $sudo lzop $1 -o $2
+            ;;
+
+        *)
+            $sudo minigzip < $1 > $2
+            ;;
+    esac
+}
+
+function compress_cpio_image()
+{
+    local sourceDir targetImg imgName compalg ignore var
+	zparseopts -D - i:=ignore
+	sourceDir=$1 ; [[ -z $sourceDir || $sourceDir = . ]] && sourceDir=$PWD
+	targetImg=$(getfullpath "${2:-$sourceDir}.img")
+	targetDir=$(getpath $targetImg)
+	imgName=u${(C)$(getfilenoext $targetImg)}
+	compalg=${3:-mzip}
+	if [[ -n $ignore ]]; then
+		explode -v ignore $ignore[2] ':'
+		ignore=('-path ./'${^ignore})
+		ignore="( ${(j. -o .)ignore} ) -prune -o -print"
+	fi
+	
+	(techo cd $sourceDir ; cd $sourceDir && run compress -s $compalg \
+		<(cpio -ov -H newc -R root:root < <(run -s find ${(z)ignore}) ) $targetImg
+	) &&
+		run mkimage -A arm -O linux -T ramdisk \
+			-d $(getfullpath -r=$PWD $targetImg) $(getfullpath -r=$PWD $targetDir/$imgName)
+}

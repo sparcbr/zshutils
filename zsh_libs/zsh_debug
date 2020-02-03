@@ -28,9 +28,10 @@ _dbg_PS
 function _dbg_trap()
 {
 	#confirm || setopt errexit
-	(($2==0 && _dbg_flvl[$1] <= DEBUG)) && [[ -o xtrace ]] && {
+	#(($2==0 && _dbg_flvl[$1] <= DEBUG)) && [[ -o xtrace ]] && {
+	if [[ -o xtrace ]] && (((_dbg_flvl[$1] <= DEBUG))); then
 		set +x
-	}
+	fi
 	#techo $PS4 $ZSH_DEBUG_CMD
 }
 #trap '_dbg_trap $0 $LINENO' DEBUG
@@ -81,7 +82,6 @@ function _test_explode()
 	return true
 }
 
-alias dbg='debug -r'
 function debug()
 {
 	local _cmd _data _type _types keep _func debug alias run script
@@ -121,9 +121,10 @@ function debug()
 		#_data=$($_cmd "$@" 2>&1 | egrep "^\+$_cmd:|[^+]")
 		#_data=$($_cmd "$@" 2>&1) ; ret=$?
 		#(( $#_data )) && colorify -d $_cmd <<<$_data
+		#ret=$pipestatus
 		shift
 		$_cmd "$@" #|& colorify -D $_cmd
-		ret=$pipestatus[1]
+		ret=$?
 	fi
 
 	(( ! $#keep && $#_func )) && _dbg_funcOnOff 0 $_func
@@ -162,13 +163,13 @@ function array_dump()
 	  association*)
 		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
 		for key in ${(Pk)1}; do
-			techo "${(qq)key} -> ${(qqq)${(P)1}[$key]}"
+			techo -r ${(qq)key} '>' ${(qqq)${(P)1}[$key]}
 		done
 		;;
 	  array*)
 		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
-		for val in "${(qP@)1}"; do
-			techo "${(qqq)val}"
+		for val in "${(P@)1}"; do
+			techo -r ${(qqq)val}
 		done
 		;;
 	  *)

@@ -1,48 +1,17 @@
 VERSION=1.0.7
 [[ -v comp ]] || typeset -g -a comp
 alias e=echo
-alias up='xdotool key Ctrl+Shift+F type ❯ ; xdotool key F3 key F3' # find last prompt
 alias up='xdotool key Ctrl+Shift+F type ❯ ; xdotool key Shift+F3 key Shift+F3' # find last prompt
 alias op="xdg-open"
 alias open="xdg-open"
 alias vmake="make SHELL='$SHELL -x'"
-alias web="cd gp3320/app/bcm-webconf ; . venv/bin/activate ; ./webconf.py &"
 alias sv="v -s"
 alias cfg="cd $CFG"
 alias s="do_sudo"
 alias cpa="sudo cp -a"
 alias mk="make"
 alias apt="sudo apt"
-alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ignore-trailing-space --ignore-blank-lines"
 alias sys="sudo systemctl"
-alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags'
-alias pytags="ctags -R --python-kinds=-i ."
-
-function tags()
-{
-	local lang args
-	zparseopts -lang:=lang
-	if (($#)) && [[ ! -f $1 && -z $lang ]]; then
-		lang=$1
-		shift
-	elif [[ -n $lang[2] ]]; then
-		lang=$lang[2]
-	else
-		lang=$(chooser Javascript PHP Python Shell) || cancel
-	fi
-
-	#args=${@:-
-	case ${(L)lang} in
-		javascript|js)
-			type jsctags >/dev/null || npm install -g git+https://github.com/ramitos/jsctags.git
-			jtags
-			;;
-		php) phpctags -R --exclude='vendor/*' $args ;;
-		python|py) pytags ;;
-		shell|sh) ctags --language-force=Sh -R . ;;
-		*) techo -c err "Unsupported language: $lang" ;;
-	esac
-}
 
 function hg()
 {
@@ -63,23 +32,41 @@ function aptlist()
 
 function mkscript()
 {
-	local shell func name edit
+	local shell func name edit append ret=1
 	local file isLib help line data data2 _type
 	zparseopts -D -K s:=shell f:=func n:=name e=edit
 	
+	(($#func)) && func=$func[2]
 	data2="$@"
-	if [[ -n $func[2] ]]; then
-		func=$func[2]
-		_type=($(typeOf $func))
-		(($#_type))
-		if [[ "" == 'function' ]]; then
-			techo -c warn "$func() already exists"
-			vw $func
-			return
+	while ((ret)); do
+		input -p "Function name" -v func || cancel
+		if (($#func)); then
+			_type=($(typeOf $func))
+			if in_array 'function' _type; then
+				techo -c warn "$func() already exists"
+				#@TODO 
+				chooser -v tmp -f1 -p "$func() already exists" \
+					"Rename" \
+					'Append' \
+					"Edit $func()" \
+					'Cancel' || cancel
+
+				if [[ $tmp == 'Edit' ]]; then
+					vw $func && return
+					ret=0
+				elif [[ $tmp == 'Cancel' ]]; then
+					cancel
+				elif [[ $tmp == 'Rename' ]]; then
+				elif [[ $tmp == 'Append' ]]; then
+					ret=0
+					append=1
+				fi
+			else
+				ret=0
+			fi
 		fi
-		#@TODO function already exists? (c)ancel, (e)dit, (o)verwrite
-	fi
-	input -p "Function name" -v func
+	done
+
 	isLib=false
 	if [[ -n "$name" ]]; then
 		local err_exists="exists but isn't a shell script."
@@ -133,11 +120,11 @@ function mkscript()
 	if [[ ! -f "$file" ]]; then
 		# Create library
 		if isLib; then
-			data="VERSION=1.0.0\n[[ -v comp ]] || typeset -g -a comp"
+			data=$(< $ZSH_LIBS/zsh_blank)
 		else
 			# Create script
-			[[ -n "$shell" ]] && shell="/bin/"$shell[2] || shell=$SHELL
-			data="#!${shell}\n"
+			[[ -n $shell ]] && shell="/bin/"$shell[2] || shell=$SHELL
+			data="#!${shell}"
 		fi
 	fi
 
@@ -151,15 +138,15 @@ function mkscript()
 		data+=$(zindent "$data2")
 	fi
 
-	echo ${data}$'\n' >> $file
+	echo -n $data >> $file
 	$isLib && source $file && { type $func ; which $func; }
 
 	# setup file
-	[[ -x "$file" || $isLib ]] || chmod +x $file
+	[[ -x $file || $isLib ]] || chmod +x $file
 
 	# edit
-	if [[ -n "$edit" || -z "$data2" ]] || confirm "Edit file"; then
-		if [[ -n "$func" ]] && $isLib; then
+	if [[ -n $edit || -z $data2 ]] || confirm "Edit file"; then
+		if [[ -n $func ]] && $isLib; then
 			edfunc $func
 		else
 			gvim -f $file
@@ -197,7 +184,7 @@ function add_key()
 }
 
 # finds command(s) in an alias
-function inalias()
+function inAlias()
 {
 	local needsFunc ret=1 arr
 	zparseopts -D -M - f=needsFunc
@@ -249,7 +236,7 @@ function inalias()
 							return 1
 						fi
 					else
-						tmp=($(inalias $needsFunc $m)) || return 1
+						tmp=($(inAlias $needsFunc $m)) || return 1
 						f=($tmp[1])
 						break
 					fi
@@ -282,11 +269,10 @@ function inalias()
 
 function edalias()
 {
-	local linenum pat file var
-	zparseopts -D -M l:=linenum
-	[[ -n "$1" ]] || return 1
-	if [[ "$1" == '-f' ]]; then
-		shift
+	local linenum pat file var isFunc
+	zparseopts -D -M l:=linenum f=isFunc
+	[[ -n $1 ]] || return 1
+	if (($#isFunc)); then
 		pat="(function +)?$1\(\)"
 		linenum=${linenum[2]:-2}
 	else
@@ -295,7 +281,10 @@ function edalias()
 	fi
 	if (($#2)); then
 		file=$2
-		var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $file)}") || var=($file:0)
+		#var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $file)}") || var=($file:0)
+		if ! var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $file)}"); then
+			[[ $(getfilename $file) == $1 ]] && var=($file:0)
+		fi
 	else
 		var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $ZSH_LIBS $fpath)}")
 	fi
@@ -331,7 +320,11 @@ function edalias()
 			v $file
 		fi
 	else
-		techo -c err "Could not find \"$1\" alias"
+		if (($#isFunc)); then
+			techo -c err "Could not find function $1()" 
+		else
+			techo -c err "Could not find alias $1"
+		fi
 	fi
 }
 
@@ -343,10 +336,11 @@ function edfunc()
 		autoload +X $1 && edfunc $1
 		return
 	elif [[ $arg[5] != 'function' ]]; then
-		if [[ $arg[4] != 'alias' ]] || (( ! $#functions[$1] )); then
+		if [[ $arg[4] == 'alias' ]] && (($#functions[$1])); then
+			file=$functions_source[$1]
+		else
 			abort 2 "$1 is not a function:\n\t$arg"
 		fi
-		file=$functions_source[$1]
 	elif [[ -f $arg[-1] ]]; then
 		file=$arg[-1]
 	else
@@ -364,6 +358,7 @@ function edfunc()
 	fi
 	edalias ${2:+-l $2} -f "$1" "$file" 
 }
+
 comp+=("vw=exec")
 function vw()
 {
@@ -371,6 +366,10 @@ function vw()
 	array=($(explode "$1" ':')) ; name=$array[1]; linenum=$array[2]
 	array=($(type -w "$name"))
 	case "${array[2]}" in
+		none)
+			[[ -f $name ]] || abort 127 'Command not found'
+			v $name:$linenum
+			;;
 		function)
 			edfunc $name $linenum
 			;;
@@ -382,7 +381,7 @@ function vw()
 				func=$name
 			else
 				if [[ $(type -f $name) =~ "^$name is an alias for (.*)$" ]]; then
-					func=$(inalias -f $name)
+					func=$(inAlias -f $name)
 				fi
 			fi
 
@@ -394,9 +393,9 @@ function vw()
 			;;
 		command)
 			cpath=$(which "$name")
-			if [[ -f "$cpath" ]]; then
+			if [[ -f $cpath ]]; then
 				mime=$(getmime $cpath)
-				if [[ "$mime" == "application/x-sharedlib" ]]; then
+				if [[ $mime == 'application/x-sharedlib' ]]; then
 					echo "$tpath is binary executable"
 					return 1
 				fi
@@ -449,16 +448,6 @@ function v()
 	done
 }
 
-function finderror()
-{
-	errline=`tail /var/log/apache2/error.log |  grep -e "PHP \(Parse\|Fatal\|Notice\)" | tail -n1`
-	str=`echo $errline| sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/ /g'`
-	linenum=`echo $str | sed 's/.*line \([0-9]*\).*$/\1/'`
-	filename=`echo $str | sed 's/.*\(\/media\/sparc\/xdata\/[^ ]*\).*$/\1/'`
-	echo $filename
-	echo $linenum
-	#v "$filename:$linenum"
-}
 function cptree()
 {
 	local dest=$1
@@ -554,8 +543,9 @@ function send()
 function ge()
 {
 	local sudo icase in_exts ex_exts ex_dirs width prefix
-	local opts args 
+	local opts args defExDirs defExExts
 	zparseopts -D -E -M - i=icase s=sudo --exclude:=ex_exts E:=ex_dirs C::=width -cols::=C
+	
 	IFS=',;: ' read -rA in_exts <<<"$1"
 	shift
 	#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
@@ -563,8 +553,10 @@ function ge()
 		IFS=',;: ' read -rA ex_exts <<<$ex_exts[2]
 		opts+=('--exclude=*.'${^ex_exts[@]})
 	fi
+	(($#ex_dirs)) || ex_dirs=(- node_modules,android,vendor)
 	if (($#ex_dirs)); then
 		IFS=',;: ' read -rA ex_dirs <<<$ex_dirs[2]
+		techo "Excluding dirs: $ex_dirs"
 		opts+=('--exclude-dir='${^ex_dirs[@]})
 	fi
 	opts+=('--include=*.'${^in_exts[@]} --color=always $icase)
@@ -580,7 +572,7 @@ function ge()
 			return
 		fi
 	fi
-	((width=$(tput cols)-50))
+	((width=$(tput cols)+50))
 	$prefix grep -rn $opts "$@" | cut -c1-$width
 }
 
@@ -589,113 +581,6 @@ function duh()
 	local sudo
 	[[ "$1" == '-s' ]] && { shift; sudo='sudo'; }
 	$sudo du -csh "$@" | sort -h
-}
-
-# Added 2019-01-10 11:26:22
-function extract_cpio_image()
-{
-    local ret name mime sourceDir imgfile=$(getfullpath "$1") targetroot targetDir uncompressed tmp
-	[[ -n $imgfile ]] || abort 1 "No image given"
-	[[ -s $imgfile ]] || { abort 127 "$imgfile: not found" ; return; }
-	sourceDir=$(getpath "$imgfile")
-	name=${$(getfilename "${(L)imgfile%.img}")#u}
-    targetDir=${2:-$PWD/$name}
-    (
-		if [[ -f "$targetDir" ]]; then
-			# targetDir=${targetDir}
-			techo -c warn "A file exists in place of target dir: \"$C[warn]$targetDir$C_\""
-			return 1
-			#targetDir=$(input "Choose another path/filename" "$targetDir")
-		fi
-		
-		if [[ -d "$targetDir" ]]; then
-			isEmptyDir "$targetDir" || {
-				confirm "Dir $targetDir not empty. $C[lred]Remove files and continue" \
-					|| { cancel ; return; }
-				run -s rm -rf "$targetDir"/* || { abort $? ; return; }
-			}
-		else
-			confirm Create dir '"$targetDir"' && \
-				run -s mkdir -p "$targetDir" || { abort $? ; return; }
-		fi
-		#uncompressed="$imgfile.cpio"
-		#if [[ "$imgfile" -ot "$uncompressed" ]] && [[ -s "$uncompressed" ]] && \
-		#	! confirm -c warn "$uncompressed is newer than $imgfile\nOverwrite it"
-		#then
-		#	{ cancel ; return; }
-		#fi
-		mime=$(getmime "$imgfile")
-		tmp="$imgfile"
-		if [[ "$mime" == 'application/octet-stream' ]]; then
-			mime=$(file "$imgfile")
-			if [[ $mime =~ 'cpio archive' ]]; then
-				uncompressed="$imgfile" # already a cpio file
-				tmp=
-			elif [[ $mime =~ 'u-boot' ]]; then
-				tmp="$sourceDir/$name.img.gz"
-				[[ -f "$tmp" ]] && rm -f "$tmp"
-				run -S -p 'U-Boot image detected. Extracting ramdisk.' \
-					dd if="$imgfile" of="$tmp" bs=64c skip=1
-				mime=$(getmime "$tmp")
-			fi
-		fi
-		
-		techo cd $targetDir
-		cd $targetDir || return
-		if [[ -n "$tmp" ]]; then
-			if [[ "$mime" == 'application/gzip' ]]; then
-				run -s -p "cpio: inflating $tmp -> $PWD/" \
-					cpio -idmv < <(run zcat "$tmp") || return
-			else
-				abort 2 "$tmp is not a gzip (mime=$mime)"
-				return 1
-			fi
-		else
-			run -s -p "cpio: inflating $uncompressed -> $PWD/" \
-				cpio -idmv --file="$uncompressed" || return
-		fi
-    ) && cd $targetDir
-}
-function compress()
-{
-    local alg sudo
-	[[ $1 == -s ]] && { sudo=sudo ; shift; }
-	alg=$1 ; shift
-    case "$alg" in
-        "gzip")
-            $sudo gzip -c < $1 > $2
-            ;;
-
-        "lzo")
-            $sudo lzop $1 -o $2
-            ;;
-
-        *)
-            $sudo minigzip < $1 > $2
-            ;;
-    esac
-}
-
-function compress_cpio_image()
-{
-    local sourceDir targetImg imgName compalg ignore var
-	zparseopts -D - i:=ignore
-	sourceDir=$1 ; [[ -z $sourceDir || $sourceDir = . ]] && sourceDir=$PWD
-	targetImg=$(getfullpath "${2:-$sourceDir}.img")
-	targetDir=$(getpath $targetImg)
-	imgName=u${(C)$(getfilenoext $targetImg)}
-	compalg=${3:-mzip}
-	if [[ -n $ignore ]]; then
-		explode -v ignore $ignore[2] ':'
-		ignore=('-path ./'${^ignore})
-		ignore="( ${(j. -o .)ignore} ) -prune -o -print"
-	fi
-	
-	(techo cd $sourceDir ; cd $sourceDir && run compress -s $compalg \
-		<(cpio -ov -H newc -R root:root < <(run -s find ${(z)ignore}) ) $targetImg
-	) &&
-		run mkimage -A arm -O linux -T ramdisk \
-			-d $(getfullpath -r=$PWD $targetImg) $(getfullpath -r=$PWD $targetDir/$imgName)
 }
 
 # Added 2019-01-11 16:33:46
@@ -708,14 +593,6 @@ function stripcolors()
 function shpydf()
 {
     output=`pydf`; devs=`echo $output | cut -f1 -d `; labels=`sudo lsblk --noheadings -o LABEL $devs|stripcolors`; for line in $output; do i=1; echo "${labels[$i]} $line"; i++; done
-}
-
-# Added 2019-01-16 19:18:20
-# create progress bar
-function pbar()
-{
-	include -r progress_bar || return 1
-	pbar "$@"
 }
 
 # Added 2019-02-20 15:38:03
@@ -757,20 +634,16 @@ function mkcp()
 	cp "$@"
 }
 
-# Added 2019-04-04 14:54
-function ipfind()
-{
-	local user=${1:-debian} net
-	net=192.168.0
-	for ip in $(seq $(($last+1)) 254); do
-		last=$ip
-		ping -W3 -c1 $net.$ip && ssh $user@$net.$ip
-		echo ret=$?
-	done
-}
-
 # Added 2019-04-11 01:43
 function logs()
 {
-	tail {.,$(git root)}/logs/{api,debug}.txt -f &
+	run tail $(git root)/logs/{api,debug,php}.txt -f &
+}
+
+# Added 2020-01-14 21:06
+function fixtty()
+{
+	# show cursor
+	tput cnorm # or echo -en "\e[?25h"
+	confirm 'Reset terminal' && tput reset
 }

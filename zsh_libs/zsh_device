@@ -648,3 +648,12 @@ function ejectSD()
 	isSD $SDDEV || findSD -d || return 0
 	diskUnmount -e $SDDEV
 }
+
+function biosInfo()
+{
+	local serial
+	serial=$(sudo dmidecode -s system-serial-number)
+	echo serial: $serial
+	echo express: $((36#$serial))
+
+}

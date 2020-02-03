@@ -1,19 +1,23 @@
 VERSION=1.0.8
 [[ -v comp ]] || typeset -g -a comp
 
+alias _dbg_trap='[[ -o xtrace ]] && unalias _dbg_trap && include debug && _dbg_trap $0'
 function techo()
 {
-	local c args nonl print noesc ts
+	local c _topts nonl print noesc ts msg
 	_dbg_trap $0
 	zparseopts -M -D - c:=c n=nonl P=print r=noesc T=ts
-	[[ -n $nonl ]] && args=('-n')
+	[[ -n $nonl ]] && _topts=('-n')
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
 	while [[ ${1[1]} == '-' ]]; do
-		args+=("$1")
+		if [[ $1 == '-' || $1 == '--' ]]; then
+			shift
+			break
+		fi
+		_topts+=("$1")
 		shift
 	done
 	if [[ -n $c ]]; then
-		local msg
 		c=$c[2]
 		if [[ $c == <1-> ]]; then
 			msg="\e[38;5;${c}m$@$C_"
@@ -31,14 +35,15 @@ function techo()
 	[[ -n $ts ]] && { print=1; ts='%D{%s.%.}>' }
 
 	if [[ -n $print ]]; then
-		print -P $noesc $args - $ts$msg >$TTY
+		print -P $noesc $_topts - $ts$msg >$TTY
 	else
-		echo -e ${noesc:+-E} $args - $ts$msg >$TTY
+		echo -e ${noesc:+-E} $_topts - $ts$msg >$TTY
 	fi
 }
 
 function cancel() {
 	local ret=$?
+	_dbg_trap $0
 	((ret != 130)) && throw $ret
 	abort 130 "$C[warn]Cancelled $@"
 }
@@ -48,6 +53,7 @@ function abort()
 {
 	local skipErrors noexception verbose print
 	integer cod=$1
+	_dbg_trap $0
 	zparseopts -D - E=skipErrors e=noexception v:=verbose -P=print
 	verbose=${verbose[2]:-2}
 	(($#)) && shift
@@ -89,23 +95,23 @@ function implode()
 
 function explode()
 {
-	local _var _str _sep uniq _list ifs _Asep stdin _tmp
-	zparseopts -D -M - v:=_var u=uniq A:=_Asep -stdin=stdin
+	local _var _str _sep uniq _list ifs _Asep stdin _tmp awk #@TODO awkWrapper...
+	zparseopts -D -M - v:=_var u=uniq A:=_Asep -stdin=stdin -awk:=awk
 
 	[[ -n $_var[2] ]] && _var=$_var[2]
-	[[ -n $3 && $3 != <1-> ]] && abort 1 "field specifier is not a number: \$3=$3"
 
 	if [[ -n $stdin ]]; then
 		_sep=${1:- }
 		#_str=()
 		while read -r _tmp; do
 			#_str+=($_tmp)
-			explode $_tmp $_sep $3
+			explode $_tmp $_sep $2
 		done
 		return
 	else
 		_str=$1
 		_sep=${2:- }
+		[[ -n $3 && $3 != <1-> ]] && abort 1 "field specifier is not a number: \$3=$3"
 	fi
 
 	_list=(${(@ps/$_sep/)_str})
@@ -151,7 +157,7 @@ function lib_set_info()
 
 function getmime()
 {
-	file -bi $(realpath "$@") | awk -F';' '{print $1}'
+	explode "$(file -bi $(realpath "$@"))" ';' 1
 	((pipestatus[1])) && fstack
 }
 
@@ -202,7 +208,7 @@ function isZshLib()
 function isScript()
 {
 	local mime=$(getmime "$*")
-	[[ $mime = 'text/x-shellscript' || $mime == 'text/plain' && $(read -e "$*") =~ VERSION=[0-9]+(\.[0-9]+)* ]]
+	[[ $mime = 'text/x-shellscript' || $mime == 'text/plain' && $(read -e <"$*") =~ VERSION=[0-9]+(\.[0-9]+)* ]]
 }
 
 function typeOf()
@@ -334,13 +340,13 @@ function include()
 			return 1
 		fi
 
-		if (($#lazyload)); then # @TODO
+		if (($#lazyload)); then
 			local llfuncs func
 			if (($#HEADER[lazyload])); then
 				# register a autoload function for each lazy load function
 				explode -v llfuncs ${HEADER[lazyload]} ','
 				for func in $llfuncs; do
-					functions[$func]="include $name && {
+					functions[$func]="include $quiet $name && {
 						$func \"\$@\"
 					}"
 				done
@@ -362,7 +368,6 @@ function include()
 			echo EOF >&p
 			(
 				#@TODO sort errors by file before opening files
-				set -x
 				while read -p tmp; do
 					split=(${(Q)${(z)tmp}})
 					file=$split[1]; line=$split[2]; error=$split[3]; error2=$split[4]
@@ -371,9 +376,9 @@ function include()
 					#@idea run this part only on current terminal, if there is one focused.
 				done
 				if type v 2>&1 >/dev/null; then
-					#v $file:$line &
+					techo v $file:$line
 				else
-					#${EDITOR:-vim} $file +$line &
+					${EDITOR:-vim} $file +$line
 				fi
 			)
 
@@ -423,30 +428,38 @@ function inst()
 	done
 }
 
+comp+=("aptinst=apt")
+function aptinst()
+{
+	sudo apt-get install -y $@
+}
+
+
 # Added 2019-09-05 00:57
 # check if any item of array equals value
 # in_array value array_name 
 function in_array()
 {
-	local name val _var ret i
+	local name val _var ret _i
 	zparseopts -D -M - v:=_var
 
 	case $(vartype $2) in
 	association*)
-		i=${(k)${(P)2}[(re)$1]}
+		_i=${(k)${(P)2}[(re)$1]}
+		[[ -n $_i ]] || return 1
 		;;
 	array*)
-		i=${${(P)2}[(rei)$1]}
+		_i=${${(P)2}[(rei)$1]}
+		((_i <= ${(P)#2})) || return 1
 		;;
 	*)
 		techo -c err "\"$2\": not an array."
+		print ${(P)2}
 		abort 2 "not an array"
 		return 2
 	esac
-
-	((i <= ${(P)#2})) || return 1
-
-	[[ -v $_var[2] ]] && typeset -g "$_var=$i"
+	
+	(($#_var)) && typeset -g "$_var[2]=$_i"
 	return 0
 }
 
@@ -477,13 +490,6 @@ function rtrim() {
 function trim()
 {
 	echo "$(rtrim "$(ltrim "$*")")"
-}
-#@TODO_in_array() { }
-
-comp+=("aptinst=apt")
-function aptinst()
-{
-	sudo apt-get install -y $@
 }
 
 # Added 2019-09-03 19:29
@@ -532,40 +538,47 @@ comp+=("do_sudo=sudo")
 function do_sudo()
 {
 	integer glob=1
-	local args user
+	local _sopts user cmd
 	
 	include -r functions
 	zparseopts -D -M - u:=user
 
-	args=(-H $user)
+	_sopts=(-H $user)
 	(($# == 0)) && 1=/bin/zsh
 	while (($#)); do
 		case $1 in
-			command|exec|-) shift
+			command|exec|-)
+				cmd=1; shift
 				break
-				;;
-			nocorrect) shift
-				;;
-			noglob) glob=0; shift
-				;;
+			;;
+			nocorrect)
+				shift 
+			;;
+			noglob)
+				glob=0; shift
+			;;
 			*) break
-				;;
+			;;
 		esac
 	done
 
 	if (($#)); then
-		if [[ $(typeOf $1) == 'alias' ]]; then
-			local tmp=$(inalias -f $1) || return 1
-			1=$tmp
+		if [[ $(typeOf -p $1) != (command|script)* ]]; then
+			abort 1 "$1: command not found"
 		fi
+		#if [[ $(typeOf $1) == 'alias' ]]; then
+		#	abort 1 "$1 is an alias"
+			#local tmp=$(inalias -f $1) || return 1
+			#1=$tmp
+		#fi
 	else
 		1=/bin/zsh
 	fi
 
 	if ((glob)); then
-		PATH="/sbin:/usr/sbin:/usr/local/sbin:$PATH" sudo $args $~==*
+		sudo $_sopts env "PATH=$PATH" $~==*
 	else
-		PATH="/sbin:/usr/sbin:/usr/local/sbin:$PATH" sudo $args $==*
+		sudo $_sopts env "PATH=$PATH" $==*
 	fi
 }
 
@@ -574,4 +587,3 @@ function heredoc()
 {
 	IFS='\n' read -r -d '' $1 || true
 }
-

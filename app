@@ -7,6 +7,7 @@ include -qr functions
 include -qr file
 include -qr android
 include -ql debug
+include -ql network
 zparseopts -D -M - n=dryrun D::=debug d::=D i=interactive
 if [[ -n $dryrun ]] || { [[ -n $DRYRUN ]] && ((DRYRUN)) }; then
 	DRYRUN=-n
@@ -170,7 +171,7 @@ function listPkg()
 	for pkg in $pkgs; do
 		local _date=$(
 			shell dumpsys package $pkg | \
-				awk -F'=' '/lastUpdateTime/{print $2}' | \
+				awk -F'=' '/lastUpdateTime/{print $2; exit}' | \
 				head -n1 | stdbuf -o0 tr -d '\r\n'
 		)
 		sorted+=("${(f)_date} $n")
@@ -209,10 +210,13 @@ function getMainActivity()
 
 function listActivities()
 {
-	local pkg=$(choosePkg "$@")
+	local pkg
+	
+	(($#)) || return 10
+	pkg=$(choosePkg "$@") || return
 	shell dumpsys package $pkg | \
 		awk '/^Activity Resolver Table/,/^$/ { s = $0 } \
-			match(s, /([^: =]+\/[^: ]+)$/, m) { print m[1]; s="" }'
+			match(s, /([^: =]+\/[^: ]+)/, m) { print m[1]; s="" }'
 }
 
 function start()
@@ -224,7 +228,7 @@ function start()
 	elif [[ -n $2 ]]; then
 		act=$1/$2
 	else
-		chooser -H 'Start activity' -v act $(listActivities $1) || cancel
+		chooser -H 'Start activity' -v act $(listActivities $1) || return
 	fi
 	shell am start $act && sendkey WAKEUP
 }
@@ -259,25 +263,27 @@ function apkinstall()
 function getLocalApkVersion()
 {
 	local v
-	chkCmdInst aapt || return
-	v=$(aapt dump badging $1 | grep package:\ name | cut -f4,6 -d\')
-	[[ -n $v ]] && explode $v "'"
+	#'chkCmdInst aapt || return
+	aapt dump badging $1 | awkWrapper -o v -E - "package: name='([^']+)'" m 'print m[1]'
+	[[ -n $v ]] && echo $v "'"
 }
 
 function getPkgVersion()
 {
-	shell dumpsys package $1 | grep versionName
+	info $1 | grep versionName
 }
 
 function choosePkg()
 {
-	local running
+	local running pkgs
 	zparseopts -D -M - r=running
 	if [[ -n $running ]]; then
-		chooser -H 'Select package' -f1 --ifs $'\n' "$(listRunning "$@")"
+		pkgs="$(listRunning "$@")"
 	else
-		chooser -H 'Select package' -f1 --ifs $'\n' "$(listPkg -d "$@")"
+		((!$#)) && getPackageName && return 0
+		pkgs="$(listPkg -d "$@")"
 	fi
+	chooser -H 'Select package' -f1 --ifs $'\n' $pkgs 
 }
 
 function clearData()
@@ -285,6 +291,8 @@ function clearData()
 	local all arg args
 	integer ret=0
 	zparseopts -D -M - a=all
+
+	(($#)) || abort 10
 	args=($(choosePkg $all "$@"))
 	for arg in $args; do
 		if [[ "$(getext $arg)" = 'apk' ]]; then
@@ -295,7 +303,7 @@ function clearData()
 			}
 		fi
 		# run --confirm
-		shell pm clear $arg
+		shell pm clear $arg || ((ret++))
 	done
 	return $ret
 }
@@ -439,7 +447,7 @@ function getprop()
 function setting()
 {
 	local nspace nspace_m nspaces=(system secure global)
-	local setting value nspace_m
+	local setting value nspace_m action
 	integer n
 	zparseopts -D -M - g=nspace s=nspace S=nspace
 	if [[ -n $nspace ]]; then
@@ -447,7 +455,6 @@ function setting()
 	else
 		nspace=$1 ; shift
 	fi
-	typeset -Tf in_array
 	in_array -v nspace_m $nspace nspaces
 	n=$#nspace_m
 	((n)) || abort 10 namespace: ${C_}$nspaces
@@ -554,14 +561,22 @@ function processLine()
 			fi
 		;;
 		(\q|exit|quit) running=0 ;;
-		(swipeup|unlock) shell input swipe 30 600 30 300 ;;
+		(swipeup|unlock) shell input swipe 30 400 30 50 ;;
 		(swipetop) shell input swipe 30 0 30 300 ;;
 		(swipedown) shell input swipe 30 300 30 600 ;;
 		(swipeleft) shell input swipe 300 400 30 400 ;;
 		(swiperight) shell input swipe 30 400 300 400 ;;
 		(uninstallall|removeall|delall|deleteall) uninstall -a "$@" ;;
 		(uninstall|remove|rm|del(ete)?) uninstall "$@" ;;
-		(version|ver|release) getprop ro.build.version. ;;
+		(version|ver|release)
+			if pkg=$(choosePkg "$@"); then
+				getPkgVersion $pkg
+			fi
+			chooser -H 'Select apk' --file -v apk \
+				$(git root)/android/app/build/outputs/apk/**/*.apk || return
+			getLocalApkVersion $apk
+		;;
+		(androidver(sion)?|androidinfo) getprop ro.build.version. ;;
 		(edit)
 			pull "$@"
 			v -f $f
@@ -618,5 +633,19 @@ if ((interactive)); then
 		}
 	done
 fi
+
+function getPackageName()
+{
+	if [[ -f config.js ]]; then
+		local expr
+		include network
+		expr=(- "/appDomain: '[^']+'/" m 'print m[1]')
+		pkg=$(awkWrapper -e expr config.js) || return
+		[[ -n $pkg ]] || return 10
+		echo $pkg
+		return 0
+	fi
+	return 10
+}
 
 sexit $ret

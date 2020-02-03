@@ -1,0 +1,61 @@
+#!/bin/zsh
+#lazyload=pretty,tags,finderror
+alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags'
+alias pytags="ctags -R --python-kinds=-i ."
+alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ignore-trailing-space --ignore-blank-lines"
+
+[[ -v comp ]] || typeset -ga comp
+
+# Added 2019-12-19 12:43
+function pretty()
+{
+	local f files args
+	zparseopts -D -M - 
+	
+	files=$(prettier -l "$@")
+	for f in $files; do
+		
+		prettier $f > $f.pretty
+		diff -u $f $f.pretty | less
+		
+	done
+	#	input -p "Save $f.pretty to $f" && 
+	print -l $files
+}
+
+function finderror()
+{
+	errline=`tail /var/log/apache2/error.log |  grep -e "PHP \(Parse\|Fatal\|Notice\)" | tail -n1`
+	str=`echo $errline| sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/ /g'`
+	linenum=`echo $str | sed 's/.*line \([0-9]*\).*$/\1/'`
+	filename=`echo $str | sed 's/.*\(\/media\/sparc\/xdata\/[^ ]*\).*$/\1/'`
+	echo $filename
+	echo $linenum
+	#v "$filename:$linenum"
+}
+
+function tags()
+{
+	local lang args
+	zparseopts -lang:=lang
+	if (($#)) && [[ ! -f $1 && -z $lang ]]; then
+		lang=$1
+		shift
+	elif [[ -n $lang[2] ]]; then
+		lang=$lang[2]
+	else
+		lang=$(chooser Javascript PHP Python Shell) || cancel
+	fi
+
+	#args=${@:-
+	case ${(L)lang} in
+		javascript|js)
+			type jsctags >/dev/null || npm install -g git+https://github.com/ramitos/jsctags.git
+			jtags
+			;;
+		php) phpctags -R --exclude='vendor/*' $args ;;
+		python|py) pytags ;;
+		shell|sh) ctags --language-force=Sh -R . ;;
+		*) techo -c err "Unsupported language: $lang" ;;
+	esac
+}

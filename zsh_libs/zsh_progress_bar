@@ -1,4 +1,7 @@
 VERSION=1.0.2
+#lazyload=pbar
+
+[[ -v comp ]] || typeset -g -a comp
 
 # Usage:
 # Source this script

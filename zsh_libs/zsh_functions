@@ -46,23 +46,29 @@ function regex {
 }
 
 # --okcodes button codes
+# --bcb button callback - cb args: ret str buttons
 function input()
 {
-	local _var p gui z c title raw _buttons okcodes
-	local colors args str default
+	local _var p gui z c title raw _buttons okcodes tmp
+	local colors args str default gx cb ret
 	zparseopts -M -D - c:=c p:=p v:=_var g=gui z=z t:=title r=raw \
-		b:=_buttons -buttons:=b N:=okcodes -okcodes:=N D:=default
+		b:=_buttons -buttons:=b -bcb:=cb N:=okcodes -okcodes:=N D:=default
 
 	typeset -A buttons=(Cancel 130 Ok 0)
 	if (($#_buttons)); then
 		explode -A':' -v _buttons $_buttons[2] ','
 		buttons+=(${(kv)_buttons})
+		(($#cb)) && cb=cb[2]
+	fi
+
+	if (($#okcodes)); then
+		okcodes=($=okcodes[2]) #@TODO also split on comma
 	fi
 
 	colors=(-fg white -bg black)
 	p=${p[2]:-Input text}
 	title=${title[2]:-Input text}
-	if [[ -n $_var[2] ]]; then
+	if (($#_var)); then
 		_var=$_var[2]
 		typeset -g $_var
 		str=${@:-${(P)_var}}
@@ -72,53 +78,50 @@ function input()
 
 	[[ ${p: -1} != ' ' ]] && techo -n -c ${c[2]:-head} "$p$C_: " || techo -n $c $p 
 
-	if [[ -n $z ]] && type zenity>/dev/null; then
-		str=$(zenity -title "$title" --entry --text="$p" --entry-text="$str") || cancel
-		(($#str)) && techo -c warn -E $str
-	elif type gxmessage >/dev/null && [[ -z $raw ]]; then
-		{
+	{
+		if [[ -n $DISPLAY && -z $raw ]] && type gxmessage >/dev/null && ; then
+			gx=1
 			args=($colors -name name -center -ontop -wrap -buttons "$(implode -A':' buttons ',')")
 			str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")
-			ret=$?
-		} always {
-			if catch '*'; then
-				ret=$CAUGHT
-			fi
-			in_array $ret buttons || abort $ret
-			if ((ret)) && ! in_array $ret okcodes; then
-				((ret == 130)) && cancel
-				return $ret
-			fi
-		}
-		[[ -n $str ]] && techo -c warn -E $str
-	else
-		{
+			#@ is returning 1, should be ok, but empty str, but since code is 1, we can manually set str
+		else
+			print ${(k)buttons}
 			if [[ -o zle ]]; then
 				techo # newline, because vared clears the line
 				vared -e str
 			else
 				read -r str
 			fi
-			ret=$?
-		} always {
-			if catch '*'; then
-				ret=$CAUGHT
-			fi
-			in_array $ret buttons || abort $ret
-			if ((ret)) && ! in_array $ret okcodes; then
+		fi
+		ret=$?
+	} always {
+		if catch '*'; then
+			ret=$CAUGHT
+		fi
+
+		in_array -v tmp $ret buttons || abort $ret
+
+		if ((ret)); then
+			if ! in_array $ret okcodes; then
 				((ret == 130)) && cancel
 				return $ret
 			fi
-		}
+		fi
+	}
+
+	if [[ -n $cb ]]; then
+		$cb -v str $ret $str 'buttons' || return
 	fi
-	
+
 	(($#str)) || return 10
+	if ((gx && $#str)) && techo -c warn -E $str
 	
-	if [[ -n $_var ]]; then
+	if (($#_var)); then
 		typeset -g "$_var=$str"
 	else
 		echo $str
 	fi
+
 	return $ret
 }
 
@@ -146,26 +149,35 @@ function confirm()
 function chooser()
 {
 	local noSelect sep field bytes search default head foot
-	local list ifs var chosen chosenList selectors events keys
+	local list ifs var chosen chosenList selectors events keys ofs
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
 	zparseopts -D -M - c=color n:=noSelect R:=regex S:=search \
 		 v:=var D:=default s:=sep f:=field -ifs:=ifs b:=bytes E:=events \
-		 H:=head -head:=H p:=H F:=foot -foot:=F -keys:=keys
+		 H:=head -head:=H p:=H F:=foot -foot:=F -keys:=keys ofs:=ofs
+
+	if [[ -n $ofs ]]; then
+		ofs=$ofs[2]
+	fi
 
 	if (($#sep || $#field)); then
 		(($#sep && $#field)) && unset 'selectors[(I)[sf]]'
 		field=${field[2]:-1}
+		if [[ $field == '*' ]]; then
+			field=''
+			ofs=${ofs:-;}
+		fi
 		sep=${sep[2]:- }
 	fi
 
-	(($#var)) && set -A list ${(P)var[2]}
+	#@TODO
+	#(($#var)) && set -A list ${(P)var[2]}
 
 	if [[ -n $ifs ]]; then
 		explode -v list "$*" $ifs[2]
 	else
-		list+=("$@")
+		list=("$@")
 	fi
 
 	if (($#list > 1)); then
@@ -212,7 +224,12 @@ function chooser()
 			;;
 			esac
 		done
-		list+=($chosen)
+
+		if [[ $#list -gt 0 && -n $ofs ]]; then
+			list+=($ofs $chosen)
+		else
+			list+=($chosen)
+		fi
 	done
 
 	if (($#var)); then
@@ -230,6 +247,7 @@ function chkCmd()
 {
 	local cmd tmp verbose list pkgs pkg packager
 	zparseopts -D -M - v=verbose l=list p:=pkgs
+
 	(($#1)) || { techo -c lred "chkCmd: Empty command"; fstack; return 1 }
 	cmd=$1
 	if command -v $cmd >/dev/null; then
@@ -250,7 +268,7 @@ function chkCmd()
 
 	if [[ -z $pkgList && -x /usr/lib/command-not-found ]] ; then
 		pkgList=(
-			${(z)"$(
+			${(z)$(
 				/usr/lib/command-not-found --no-failure-msg ${list:+--ignore-installed} $cmd |& awk $'
 				match($0, /^sudo (apt|snap) +install (\\S+)(\\s*#\\s*version ([^ ,]+))?/, a) {
 					print a[2]" "(a[4]==""?"-":a[4])" "a[1]" -"
@@ -259,7 +277,7 @@ function chkCmd()
 				match($0, /^ *command \'(\\S+)\' from (deb|snap) (\\S+) ?(\(([^)]+)\))?$/, b) {
 					print b[3]" "(b[5]==""?"-":b[5])" "(b[2]!="deb"?b[2]:"apt")" "b[1]
 				}'
-			)"}
+			)}
 		)
 	fi
 
@@ -278,70 +296,85 @@ function chkCmd()
 
 	# pkg version packager cmd
 	for ((i=1; i<=$#pkgList; i+=4)); do
+		local expr
 		# get package version and description
 		case $pkgList[i+2] in
 		apt)
-			tmp=("${(@f)$(
-				apt-cache --no-all-versions show $pkgList[i] | awk 'x && /^\S/ { exit }
-					/^Version/ { print $2"\n"; next }
-					match($0,/^Description(-en)?:\s+(.*)/,a) { x=1; print a[2]; next }
-					x && match($0,/^\s+(.*)/,a) { print a[1] }')}"
-			) || abort
+			expr=(
+				1 '/^\S/' -
+					'exit'
+				- '/^Version/' -
+					'print $2"\n;"; next'
+				- '/^Description(-[a-z]{2}(_[A-Z]{2})?)?:\s*(.*)/' m
+					'x=1; print m[3]; next'
+				1 '/^\s/' -
+					'print substr($0, 2)'
+			)
+			apt-cache --no-all-versions show $pkgList[i] | awkWrapper -e expr -o tmp
 			;;
 		snap)
-			tmp=("${(@f)$(
-				snap info $pkgList[i] | awk '
-					function join(array, sep, start, end)
-					{
-						if (start == "") start=0
-						if (end == "") end=length(array)
-						result=array[start]
-						for (n in array) if (n > end) break
-							else if (n >= start) result=result sep array[n]
-						return result
+			expr=(
+				function - -
+				'join(array, sep, start, end,   result, n) {
+					if (start == "") start=0
+					if (end == "") end=length(array)
+					for (n in array) {
+						n=int(n)
+						if (n > end) break
+						else if (n == start) result=array[n]
+						else if (n > start) result=result sep array[n]
 					}
-					x && /^\S/ { x=0; if (d) { d=0; n++ } else if (c) c=0; if (n == 2) exit }
-					match($0,/^summary:\s*(.*)/,a) { desc[0]=a[1]; next }
-					match($0,/^description: (.*)/,a) { x=1; d=1; next }
-					/^channels:/ { x++; c=1; next }
-					x && d && match($0,/^\s+(.*)/,a) { desc[d++]=a[1]; next }
-					x && c && match($0,/^\s+([^:]+):\s+(.*)/,a) { ver[c++]=a[1]" "a[2]; next }
-					END { print join(ver,"\n",1)"\n"join(desc,"\n") }'
-				)}"
-			) || abort
+					return result
+				}'
+				'x' '/^\S/' -
+					'x=0; if (d) d=0; else if (c) exit'
+				- '/^summary:\s*(.*)/' m
+					'desc[0]=m[1]; next'
+				- '/^description: (.*)/' m
+					'x=1; d=1; next'
+				- '/^channels:/' -
+					'x=1; c=1; next'
+				'x && d' '/^\s+(.*)/' m
+					'desc[d++]=m[1]; next'
+				'x && c' '/^\s+([^:]+):\s+(.*)/' m
+					'ver[c++]=m[1]" "m[2]; next'
+				END - -
+					'print join(ver,"\n",1)"\n;\n"join(desc,"\n")'
+			)
+			snap info $pkgList[i] | awkWrapper -e expr -o tmp
 			;;
 		*)
-			techo -c lred "Unsupported packager: $C[warn]$tmp[i+2]"
+			techo -c lred "Unsupported packager: $C[warn]$pkgList[i+2]"
 			continue
 			;;
 		esac
+		
 		pkgList[i+1]=$tmp[1] # version
-		in_array -v n '' tmp || n=2 
-		desc=("${(@f)tmp[n,-1]}") # description
-		print "desc[1]="$desc[1]
+		in_array -v n ';' tmp || n=2 
+		desc=("${(@fqq)tmp[n+1,-1]}") # description
 
 		# pkg version packager cmd
 		case $pkgList[i+3] in
 			$cmd|'-')
-				lines+=($pkgList[i] "(version $pkgList[i+1])" $pkgList[i+2] $cmd "$desc[1]")
+				lines+=($pkgList[i] '(version:' $pkgList[i+1] ')' $pkgList[i+2] $cmd $desc[1] $'\n')
 				;;
 			*)
-				similar+=("Similar command:" $pkgList[i+3] "($pkgList[i+2] package: $pkgList[i] version: $pkgList[i+1])" $cmd "$desc[1]")
+				similar+=("Similar\ command:" $pkgList[i+3] '(' $pkgList[i+2] 'package:' $pkgList[i] 'version:' $pkgList[i+1] ')' $cmd $desc[1] $'\n')
 				;;
 		esac
 	done
 
 	tmp=()
-	chooser -v tmp --ifs $'\n' $lines $similar || return
+	chooser -f'*' -v tmp --ifs $'\n' $lines $similar || return
 	#chooser -v tmp --ifs $'\n' $(print -a -C 5 $lines $similar) || return
 
-	if [[ $tmp[1] == 'Similar' ]]; then
-		pkg=$tmp[6]; cmd=$tmp[5]; packager=$tmp[4]
+	if [[ $tmp[1] =~ '^Similar' ]]; then
+		pkg=$tmp[7]; cmd=$tmp[3]; packager=$tmp[5]
 	else
-		pkg=$tmp[1]; cmd=$tmp[4]; packager=$tmp[4]
+		pkg=$tmp[1]; cmd=$tmp[6]; packager=$tmp[5]
 	fi
 
-	run -s -p "Installing $pkg (provides $C[lcyan]$cmd$C_)" $packager install $pkg
+	run -s -p "Installing $pkg (command: $C[lcyan]$cmd$C_)" $packager install $pkg
 }
 
 function alert()
@@ -392,6 +425,7 @@ function run_begin()
 {
 	local ret=$? verbose run
 	zparseopts -M -D -A arr - v -verbose=v r: -run:=r
+
 	for key in ${(k)arr}; do
 		val=${arr[$key]}
 		case $key in
@@ -609,6 +643,7 @@ function colorify()
 {
 	local line data debug isPipe=0 highlight hcolor hl2 C1 Ch c
 	zparseopts -D -M - D:=debug h:=highlight -hc:=hcolor c:=c
+
 	#@broken: [ ! -p /dev/stdin ] && exit 0
 	[ -t 0 ] || isPipe=1
 	if [[ -n $highlight ]]; then
@@ -703,7 +738,7 @@ function refactor()
 	local dir=${1:-.}
 	#run -S find . -type f -name '*.php' -exec perl -pi -e "s/$search/$replace/g" {} +
 	run -S grep < <(
-		find $dir -type f -name '*.php' -print0 | xargs -0 sed "s/$search/${C[cyan]}${replace}${_C}/g"
+		find $dir -type f -name '*.php' -print0 | xargs -0 sed "s/$search/${C[cyan]}${replace}$C_/g"
 	)
 	confirm Replace || abort
 	find $dir -type f -name '*.php' -print0 | xargs -0 sed -ised "s/$search/$replace/g"
@@ -716,11 +751,12 @@ function todo()
 	local id search cmd todo todos
 	local box dir glob data baseDir=$CFG e='todo'
 	zparseopts -D -M - d:=dir -dir:=d S:=search
-	if (( ! $# )); then
-		cmd='show'
-	else
+
+	if (($#)); then
 		cmd=$1; shift
 		data=$*
+	else
+		cmd='show'
 	fi
 	if [[ $#dir[2] -ne 0 ]]; then
 		dir=$dir[2]
