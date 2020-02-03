@@ -1,0 +1,29 @@
+#!/bin/zsh
+include functions
+typeOf xinput >/dev/null || chkCmd xinput
+master=$(xinput list --id-only 'Virtual core keyboard')
+id=$(xinput list --id-only '  USB Keyboard')
+
+case $1 in
+	on|enable|1)
+		on=1
+	;;
+	off|disable|0)
+		on=0
+	;;
+	*)
+		[[ $(xinput list $id) =~ float ]] && on=1
+	;;
+esac
+
+if ((on)); then
+	xinput reattach $id $master || return
+	onIcon="$CFG/icons/keyb_on.png"
+	notify-send -i $onIcon "Enabling external keyboard" "ON - Keyboard connected !";
+	techo -c head "External keyboard $C[ok]enabled"
+else
+	xinput float $id || return
+	offIcon="$CFG/icons/keyb_off.png"
+	notify-send -i $offIcon "Disabling external keyboard" "OFF - Keyboard disconnected";
+	techo -c head "External keyboard $C[lred]disabled"
+fi

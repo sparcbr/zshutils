@@ -96,7 +96,7 @@ function debug()
 		for _type in $_types; do
 			case $_type in
 				alias)
-					local tmp=$(inalias -f $_cmd) || continue
+					local tmp=$(inAlias -f $_cmd) || continue
 					_func+=($tmp)
 					;;
 				command)
@@ -123,7 +123,11 @@ function debug()
 		#(( $#_data )) && colorify -d $_cmd <<<$_data
 		#ret=$pipestatus
 		shift
-		$_cmd "$@" #|& colorify -D $_cmd
+		if [[ -n $script ]]; then
+			DEBUG=1 $script
+		else
+			$_cmd "$@" #|& colorify -D $_cmd
+		fi
 		ret=$?
 	fi
 

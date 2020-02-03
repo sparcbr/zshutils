@@ -15,6 +15,7 @@ export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 [[ ! -v comp ]] && typeset -g -a comp
 
+comp+=('gchk=git')
 function gchk()
 {
 	git checkout "$@" && git status

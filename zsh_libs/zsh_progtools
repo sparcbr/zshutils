@@ -1,4 +1,4 @@
-#!/bin/zsh
+VERSION=1.0.0
 #lazyload=pretty,tags,finderror
 alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags'
 alias pytags="ctags -R --python-kinds=-i ."
@@ -58,4 +58,20 @@ function tags()
 		shell|sh) ctags --language-force=Sh -R . ;;
 		*) techo -c err "Unsupported language: $lang" ;;
 	esac
+}
+
+# Added 2020-01-25 21:10
+function vreplace()
+{
+	local files replace whole pattern
+	zparseopts -D -M - s:=pattern w=whole r:=replace
+
+	files="$@"
+	(($#pattern)) && pattern=$pattern[2]
+	if (($#whole)); then
+		pattern="\<$pattern\>"
+	fi
+	(($#replace)) && replace=$replace[2]
+
+	gvim "+arg | arg" "+argdo %s/\<$word\>/$replace/gce | update"
 }

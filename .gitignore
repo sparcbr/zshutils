@@ -1,0 +1,6 @@
+/tags
+!.htaccess
+!.htpasswd
+/logs/*
+/local
+*.local.php

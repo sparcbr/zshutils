@@ -158,10 +158,10 @@ function ddiff()
 # Added 2019-05-03 16:50
 function syncDirs()
 {
-	local integer i n
+	integer i n
 	local src targets dir data rsArgs checksum arg
 	local quiet sudo excludeFrom dry extraArgs reverse
-	local files stat name noSlash
+	local files stat name noSlash sshCFG
 	typeset -a src targets rsArgs extraArgs files excludePatterns
 	zparseopts -D -M - q=quiet s=sudo i:=excludeFrom d=dry \
 		c=checksum r=reverse -no-add-slash=noSlash
@@ -212,10 +212,17 @@ function syncDirs()
 	[[ -n $excludeFrom ]] && rsArgs+=(--exclude-from="${excludeFrom[2]}")
 
 	for ((n=1; n<=$#src; n++)); do
-		local isRemoteDir=0 isEmptyDir=0
+		local isEmptyDir=0
+
 		dir=$src[$n]
-		if [[ $dir =~ (.*):(.*) ]]; then
+		if [[ $dir =~ ([^:]+):(.*) ]]; then
 			local ret host=$match[1] p=$match[2]
+
+			#include -q network
+			#if [[ -n $sshCFG[$host] ]]; then
+			#	sshArgs=(ssh $sshCFG[$host])
+			#fi
+
 			ret=($(ssh $host \
 				"if [[ -d $p ]]; then
 					glob=("$p"(N/F))
@@ -231,7 +238,6 @@ function syncDirs()
 			))
 			case $ret in
 				1*)
-					isRemoteDir=1
 					((!$#noSlash)) && [[ ${dir: -1} != / ]] && src[$n]+='/'
 					if [[ $ret == '1i' ]]; then
 						#@TODO: scp $dir/rsync.ignore /tmp)
@@ -240,8 +246,8 @@ function syncDirs()
 					;;
 				f) ;;
 				0)
-					confirm -c warn "Empty remote directory$C_: $C[lred]'$host:$p'. \
-						Ignore and continue" || cancel
+					confirm -c warn "@TODO Empty remote directory$C_: $C[lred]'$host:$p'. \
+						Create dir" || cancel
 					src[$n]=(); ((n--))
 					;;
 				'')
@@ -490,7 +496,7 @@ function awkWrapper()
 	local opts prog _vars _expr _out _inc reSep
 	local _mapCols _cols _row
 	zparseopts -D -M - v:=_vars F:=reSep E=_expr e:=_expr o:=_out \
-		I:=_inc -inc:=I C:=_mapCols -mapColumns:=C c:=_cols -cols:=c
+		I:=_inc -inc:=I C:=_mapCols -mapColumns:=C # c:=_cols -cols:=c
 
 	if [[ -n $_vars ]]; then
 		_vars=(${(P)_vars[2]})
@@ -554,15 +560,14 @@ function awkWrapper()
 				_row+=($col $val)
 			done < <(awk $opts $prog $1)
 			set -A $_out $_row
-		#elif (($#assoc)); then
-		elif ((1)); then
-			typeset -ga $_out
+		elif (($#_cols)); then
 			_cols=$_cols[2]
 			typeset -ga $_out $_cols
 			_row=()
 			{
-				local integer i=0
-				read -A _cols 
+				integer i=0
+				read -A $_cols
+				IFS=$'' read -d '' -A $_out
 				#while read ... $_out; do
 					#col=${${(P)_cols}[$key]}
 					#[[ -z $col ]] && abort 1 "Invalid column: $key"
@@ -570,7 +575,6 @@ function awkWrapper()
 				#	_row+=($col $val)
 				#	((i++))
 				#done
-				read -A $_out
 			} < <(awk $opts $prog $1)
 		else
 			#save line by line to array

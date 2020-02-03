@@ -264,8 +264,8 @@ function getLocalApkVersion()
 {
 	local v
 	#'chkCmdInst aapt || return
-	aapt dump badging $1 | awkWrapper -o v -E - "package: name='([^']+)'" m 'print m[1]'
-	[[ -n $v ]] && echo $v "'"
+	run aapt dump badging $1 | awkWrapper -o v -E - - "/package: (.*)/" m 'print m[1]; exit'
+	[[ -n $v ]] && echo $v
 }
 
 function getPkgVersion()
@@ -462,13 +462,13 @@ function setting()
 	setting=$1
 	value=$2
 	if [[ -n $value ]]; then
-		oper='put'
+		action='put'
 	elif [[ -n $setting ]]; then
-		oper='get'
+		action='get'
 	else
-		oper='list'
+		action='list'
 	fi
-	shell settings put $nspace $setting $value
+	shell settings $action $nspace $setting $value
 }
 
 function screenshot()
@@ -514,6 +514,9 @@ function processLine()
 			if match_array -c -v tmp --array $1 options; then
 				setting g policy_control $setting
 			fi
+		;;
+		(apkinfo) 
+			getLocalApkVersion $(git root)/android/app/build/outputs/apk/**/*.apk || return
 		;;
 		(info) pkg=$(choosePkg "$@") && info $pkg ;;
 		(install|inst)
@@ -638,7 +641,6 @@ function getPackageName()
 {
 	if [[ -f config.js ]]; then
 		local expr
-		include network
 		expr=(- "/appDomain: '[^']+'/" m 'print m[1]')
 		pkg=$(awkWrapper -e expr config.js) || return
 		[[ -n $pkg ]] || return 10

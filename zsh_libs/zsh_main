@@ -355,8 +355,11 @@ function include()
 			return 0
 		fi
 
-		#[[ -o interactive ]] && 
-		techo -P -r "Including %F{11}$name%f ("${lpath/$ZSH_LIBS/"\\$"ZSH_LIBS}") [%F{2}$VERSION%f]"
+		# [[ -o interactive ]] && 
+		if ((verbose)); then
+			techo -P -r "Including %F{11}$name%f ("${lpath/$ZSH_LIBS/"\\$"ZSH_LIBS}") [%F{2}$VERSION%f]"
+		fi
+
 		coproc parseErrors
 		if source $lpath 2>&p; then
 			lib_set_info $name $VERSION "$lpath" $required "$mtime"
@@ -420,7 +423,7 @@ function inst()
 	if (($#)); then
 		cmd=("$@")
 	else
-		#@TODO findcmd(use inalias)
+		#@TODO findcmd(use inAlias)
 		cmd=(${$(fc -ln -1)[1]})
 	fi
 	for cmd in $cmd; do
@@ -568,7 +571,7 @@ function do_sudo()
 		fi
 		#if [[ $(typeOf $1) == 'alias' ]]; then
 		#	abort 1 "$1 is an alias"
-			#local tmp=$(inalias -f $1) || return 1
+			#local tmp=$(inAlias -f $1) || return 1
 			#1=$tmp
 		#fi
 	else

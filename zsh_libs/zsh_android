@@ -1,22 +1,9 @@
 VERSION=1.0.3
 type getfullpath 2>&1 >/dev/null || include file
-export ANDROID_SDK_ROOT=$(getfullpath "$HOME/androidSDK")
+export ANDROID_SDK_ROOT=$(getfullpath $HOME/Android/Sdk)
 export ANDROID_HOME=$ANDROID_SDK_ROOT
-export ANDROID_PLATFORM_TOOLS="$ANDROID_SDK_ROOT/platform-tools"
-path+=($ANDROID_HOME $ANDROID_PLATFORM_TOOLS)
-
-if ! type aapt 2>&1 >/dev/null; then
-	() {
-		local aapt=($ANDROID_HOME/build-tools/*/aapt(*On))
-		if [[ $#aapt -gt 0 ]]; then
-			ln -s $aapt[1] $HOME/bin/aapt
-			return
-		else
-			include package
-			aptinst aapt
-		fi
-	}
-fi
+export ANDROID_PLATFORM_TOOLS=$ANDROID_SDK_ROOT/platform-tools
+path+=($ANDROID_HOME/emulator $ANDROID_HOME/tools $ANDROID_HOME/tools/bin $ANDROID_PLATFORM_TOOLS)
 
 # Get package name from apk file
 function getPkg()

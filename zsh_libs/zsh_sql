@@ -30,8 +30,10 @@ function dbtstamp()
 # sql [-d dbname] [-f file.sql] SELECT ...
 function sql()
 {
-	local file name sql nodb verbose user pass silent host
-	zparseopts -D - f:=file d:=name n=nodb v=verbose u:=user p:=pass s=silent -ssh:=host
+	local file name sql nodb verbose user pass silent host ret _out opts
+	zparseopts -D - f:=file d:=name n=nodb v=verbose u:=user p:=pass s=silent \
+		-ssh:=host o:=_out
+
 	if [[ -n $file ]]; then
 		file=$file[2]
 		# [[ $file size greater than X lines ]] && 
@@ -41,11 +43,17 @@ function sql()
 	else
 		sql="$*"
 	fi
-
-	typeset -Tf parseSqlErrors
+	#typeset -Tf parseSqlErrors
+	opts=($silent)
 	coproc parseSqlErrors
 	if [[ -n $host ]]; then
-		ssh $host[2] "noglob sql ${(qqq)sql}" 2>&p
+
+		if (($#_out)); then
+			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p | \
+				awkWrapper -F '\\t' --inc printFields -E - - - - 'printFields(1,-1)'
+		else
+			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p
+		fi
 	else
 		[[ -n $nodb ]] || usedb $name[2]
 		if [[ -n $db ]]; then
@@ -55,27 +63,50 @@ function sql()
 			user=${user[2]:-$sqlUser[root]}
 			pass=${pass[2]:-$sqlPass[$user]}
 		fi
-		mysql $silent ${user:+-u$user} ${pass:+-p"$pass"} -e "$sql" $db 2>&p
+		opts+=(${user:+-u$user} ${pass:+-p"$pass"})
+		if (($#_out)); then
+			integer i=1
+			{
+				while IFS=$'\t' read -A $_out$i; do
+					((i++))
+				done
+			} < <(mysql $opts -e $sql $db) 2>&p
+			unset $_out$i
+			#mysql $opts -e $sql $db 2>&p | IFS=$'\t' read -A $_out[2]
+				#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
+		else
+			mysql $opts -e $sql $db 2>&p
+		fi
 	fi
+	ret=$?
 	echo EOF >&p
+	
+	((ret)) || return 0
 	{
-		local tmp split errCode sqlState line msg
+		local tmp i split errCode sqlState line msg m
 		#@TODO sort errors by file before opening files
-		while read -p errCode sqlState line tmp msg; do
+		m=()
+		while read -p errCode sqlState line tmp; do
+			if [[ $errCode == '-' ]]; then
+				continue
+			fi
 			split=(${(Q)${(z)tmp}})
-			#m=$split[1]; sqlState=$split[2]; line=$split[3]
+			if in_array -v i - '-' split; then # after '-' is the msg
+				m=($split[1,i-1])
+				msg=$split[i+1,-1]
+			fi
 			techo -c lred  "ERROR $errCode ($sqlState) at line $line: $C[warn]$msg$C_"
 			#@TODO this is going to run once per terminal. Wanted: once total.
 			#@idea run this part only on current terminal, if there is one focused.
 		done
-		if type v 2>&1 >/dev/null; then
+		#if type v 2>&1 >/dev/null; then
 			#v $file:$line &
-		else
+		#else
 			#${EDITOR:-vim} $file +$line &
-		fi
+		#fi
 	}
 
-	#ERROR 1452 (23000) at line 1: Cannot add or update a child row: a foreign key constraint fails (`idiomus`.`#sql-426_49`, CONSTRAINT `#sql-426_49_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`))
+	return $ret
 }
 
 function parseSqlErrors()
@@ -83,19 +114,31 @@ function parseSqlErrors()
 	local line
 	while read line; do
 		[[ $line == 'EOF' ]] && return
-		techo line=${(q)line}
 		if [[ $line =~ $'^ERROR ([0-9]{4}) \\(([0-9A-Z]{5})\\) at line ([0-9]+): (.*)' ]]; then
-			local rx msg errCode sqlState msgFormat
+			local msg rx errCode sqlState msgFormat
 			msg=$match[4]
 			errCode=$match[1]
 			sqlState=$match[2]
 			line=$match[3]
-
+			
+			# More info:
+			#  https://www.ppgia.pucpr.br/pt/arquivos/techdocs/mysql/error-handling.html
+			#  https://mariadb.com/kb/en/mariadb-error-codes/
+			#  sql/share/errmsg-utf8.txt
 			case $errCode in
+			1062) 
+				#uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
+				msgFormat="Duplicate entry '(.*)' for key '(.*)'"
+				;;
 			1064)
-				msgFormat="near '(.*)'" ;;
-				# ".* error.* near '(.*)'" ;;
-				# "(Unknown) (column) '(\w+)' in '.+" ;;
+				msgFormat="near '(.*)'"
+				msgNew="Syntax error near (.*)"
+				techo "msg: $msg"
+				;;
+			#1452)
+			#	msgFormat="Cannot add or update a child row: a foreign key constraint fails (`¬tbl¬`.`#¬sql¬`, CONSTRAINT `#¬fk¬` FOREIGN KEY (`¬col¬`) REFERENCES `¬tbl¬` (`¬col¬`))"
+			#	;;
+	#ERROR 1452 (23000) at line 1: Cannot add or update a child row: a foreign key constraint fails (`idiomus`.`#sql-426_49`, CONSTRAINT `#sql-426_49_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`))
 			*)
 				if msgFormat=${"$(perror $errCode)"##*: }; then
 					rx=(
@@ -103,26 +146,29 @@ function parseSqlErrors()
 						'%-#.#[0-9]#[sM]' '(.*)'
 					)
 					msgFormat=${msgFormat//${~rx[1]}/$rx[2]}
-					msgFormat=${msgFormat//${~rx[3]}/$rx[4]}
+					msgFormat='^'${msgFormat//${~rx[3]}/$rx[4]}
 				else
-					techo -Pr "Unknown error: %F{9}$errCode%f ($sqlState)"
+					techo -c lred "Unknown error: $C[]$errCode$C_ ($sqlState)"
 					continue
 				fi
 				;;
 			esac
 
+				techo "msg: $msg"
 			if [[ $msg =~ $msgFormat ]]; then
-				techo -c lred -r "format: $msgFormat"
-				techo -c lred -r "match: ($match)"
+				techo "format: $msgFormat"
+				techo -c lred "match: ($match)"
+				techo "msg: $msg"
 				print -Pr $errCode $sqlState $line ${(@qqq)match} - $msg
 			else
-				techo -c lred -r "Error message format doesn't match line"
-				techo -c lred -r $msgFormat
-				techo -c lred -r $msg
-				techo -c lred -Pr "Unknown error: %F{9}$errCode%f ($sqlState)"
+				techo -c lred "$C[warn]$errCode$C_ ($sqlState)\n" \
+					"Message format doesn't match line"
+				techo "format: $msgFormat"
+				print -Pr $errCode $sqlState $line - $msg
 			fi
 		else
 			techo -c lred $line
+			print -Pr - -
 		fi
 	done
 }

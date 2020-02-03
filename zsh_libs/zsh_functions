@@ -150,12 +150,14 @@ function chooser()
 {
 	local noSelect sep field bytes search default head foot
 	local list ifs var chosen chosenList selectors events keys ofs
+	local filter file
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
 	zparseopts -D -M - c=color n:=noSelect R:=regex S:=search \
 		 v:=var D:=default s:=sep f:=field -ifs:=ifs b:=bytes E:=events \
-		 H:=head -head:=H p:=H F:=foot -foot:=F -keys:=keys ofs:=ofs
+		 H:=head -head:=H p:=H F:=foot -foot:=F -keys:=keys ofs:=ofs \
+		 -file=file -filter:=filter
 
 	if [[ -n $ofs ]]; then
 		ofs=$ofs[2]
@@ -247,7 +249,6 @@ function chkCmd()
 {
 	local cmd tmp verbose list pkgs pkg packager
 	zparseopts -D -M - v=verbose l=list p:=pkgs
-
 	(($#1)) || { techo -c lred "chkCmd: Empty command"; fstack; return 1 }
 	cmd=$1
 	if command -v $cmd >/dev/null; then
@@ -425,7 +426,6 @@ function run_begin()
 {
 	local ret=$? verbose run
 	zparseopts -M -D -A arr - v -verbose=v r: -run:=r
-
 	for key in ${(k)arr}; do
 		val=${arr[$key]}
 		case $key in
@@ -628,7 +628,7 @@ function group()
 	zparseopts -D -M - g:=opt
 
 	[[ -n $opt ]] && num=$opt[2]
-	while IFS='' read -r line; do
+	while read -r line; do
 		echo $line
 		((++i % num == 0)) && echo ――――――――――――――――――――――――
 	done
@@ -643,7 +643,6 @@ function colorify()
 {
 	local line data debug isPipe=0 highlight hcolor hl2 C1 Ch c
 	zparseopts -D -M - D:=debug h:=highlight -hc:=hcolor c:=c
-
 	#@broken: [ ! -p /dev/stdin ] && exit 0
 	[ -t 0 ] || isPipe=1
 	if [[ -n $highlight ]]; then
@@ -665,7 +664,7 @@ function colorify()
 		[[ $C1 == $Ch ]] && Ch=$C[lred]
 		hl2=$Ch$highlight$C1
 		if ((isPipe)); then
-			while IFS='' read -r line; do
+			while read -r line; do
 				if [[ -n $highlight ]]; then
 					echo "$C1${line//$highlight/$hl2}$C_"
 				else
@@ -686,8 +685,9 @@ function colorify()
 		local a cmd
 		if [[ -n $debug ]]; then
 			cmd=$debug[2]
-			# @TODO dbg_ps
-			while IFS='' read line; do
+			# @TODO IFS='' ??
+			# while IFS='' read line; do 
+			while read line; do 
 				if [[ $line =~ ^\\+([0-9]?)\<?$cmd:([0-9]+)\>\ (.*) ]]; then
 					techo -c lcyan $cmd:$match[2] $C_$match[3]
 				elif [[ $line =~ ^\\+([0-9]?)\<?([[:alnum:]]+):([0-9]+)\>\ (.*) ]]; then
@@ -751,12 +751,11 @@ function todo()
 	local id search cmd todo todos
 	local box dir glob data baseDir=$CFG e='todo'
 	zparseopts -D -M - d:=dir -dir:=d S:=search
-
-	if (($#)); then
+	if (( ! $# )); then
+		cmd='show'
+	else
 		cmd=$1; shift
 		data=$*
-	else
-		cmd='show'
 	fi
 	if [[ $#dir[2] -ne 0 ]]; then
 		dir=$dir[2]
