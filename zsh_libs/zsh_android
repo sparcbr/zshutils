@@ -1,4 +1,5 @@
-VERSION=1.0.3
+VERSION=1.0.0
+
 type getfullpath 2>&1 >/dev/null || include file
 export ANDROID_SDK_ROOT=$(getfullpath $HOME/Android/Sdk)
 export ANDROID_HOME=$ANDROID_SDK_ROOT

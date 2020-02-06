@@ -46,7 +46,7 @@ function _dbg_funcOnOff()
 {
 	integer lvl=$1
 	shift
-	[[ -v _dbg_flvl ]] || { techo -c err not defined: _dbg_flvl; return 1 }
+	[[ -v _dbg_flvl ]] || { techo -c err "_dbg_flvl undefined"; return 1 }
 	if (($#)); then
 		_dbg_flvl[$1]=$lvl
 		#(($2>DEBUG)) && typeset -tf $1 || typeset -Tf $1
@@ -167,7 +167,7 @@ function array_dump()
 	  association*)
 		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
 		for key in ${(Pk)1}; do
-			techo -r ${(qq)key} '>' ${(qqq)${(P)1}[$key]}
+			techo -r ${(qq)key} '=>' ${(qqq)${(P)1}[$key]}
 		done
 		;;
 	  array*)

@@ -5,7 +5,7 @@ setopt nomultios
 
 function getfilename()
 {
-	echo "${1:t}"
+	echo "${@:t}"
 }
 
 function getfullpath()
@@ -350,11 +350,11 @@ function box()
 		box=$search
 	else
 		local list=($base/*(-/om))
-		box=$(chooser ${=1:+-S $1} $list:t) || cancel
-		[[ -d $base/$box ]] || abort 127
+		box=$(chooser ${=1:+-S $search} $list:t) || cancel
+		[[ -d $base/$box ]] || abort 127 "Invalid box: $base/$box"
 	fi
 	cd $base/$box
-	[ -d .git ] && git status &
+	[[ -d .git ]] && git status &
 	[[ -d android ]] && include android
 	todo -d . #@TODO mv to cd hook
 }
@@ -494,7 +494,7 @@ awkFuncs=(
 function awkWrapper()
 {
 	local opts prog _vars _expr _out _inc reSep
-	local _mapCols _cols _row
+	local _mapCols _cols
 	zparseopts -D -M - v:=_vars F:=reSep E=_expr e:=_expr o:=_out \
 		I:=_inc -inc:=I C:=_mapCols -mapColumns:=C # c:=_cols -cols:=c
 
@@ -552,14 +552,15 @@ function awkWrapper()
 		if (($#_mapCols)); then
 			local key val
 			_mapCols=$_mapCols[2]
-			typeset -gA $_out $_mapCols
-			_row=()
+			typeset -g $_out $_mapCols
+			typeset -A _row
 			while read key val; do
+				(($#key)) || break
 				col=${${(P)_mapCols}[$key]}
 				[[ -z $col ]] && abort 1 "Invalid column: $key"
 				_row+=($col $val)
 			done < <(awk $opts $prog $1)
-			set -A $_out $_row
+			set -A $_out ${(kv)_row}
 		elif (($#_cols)); then
 			_cols=$_cols[2]
 			typeset -ga $_out $_cols

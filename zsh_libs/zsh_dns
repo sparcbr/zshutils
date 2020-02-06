@@ -1,4 +1,6 @@
 VERSION=1.0.1
+#lazyload=dnslookup
+
 [[ ! -v comp ]] && typeset -g -a comp
 
 function dnslookup()
@@ -12,8 +14,4 @@ function dnslookup()
 	else
 		print -r $out
 	fi
-}
-
-function ()
-{
 }

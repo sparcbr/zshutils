@@ -1,5 +1,5 @@
-VERSION=1.0.4
-#lazyload=sql,tableshow,tablelist
+VERSION=1.0.5
+#lazyload=sql,gettable,tableshow,tablelist,sqlError,usedb,dblist,dbtstamp,dbsize,sqldbdump
 alias sql="noglob sql"
 alias sqlmaq="noglob sql --ssh maquina"
 
@@ -39,8 +39,9 @@ function sql()
 
 	opts=($silent)
 	coproc parseSqlErrors
-	if [[ -n $host ]]; then
-
+	if [[ -n $host ]]; then # remote
+		OPT_CHK file -f for remote
+		#(($#file)) && file=$file[2]
 		if (($#_out)); then
 			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p | \
 				awkWrapper -F '\\t' --inc printFields -E - - - - 'printFields(1,-1)'
@@ -74,8 +75,7 @@ function sql()
 					((i--))
 				fi
 			} < <(mysql $opts -e $sql $db) 2>&p
-			unset $_out$i
-			#mysql $opts -e $sql $db 2>&p | IFS=$'\t' read -A $_out[2]
+			#mysql $opts -e $sql $db 2>&p | IFS=$'\t\t' read -A $_out[2]
 				#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
 			ret=$?
 			if ((i)); then
@@ -109,7 +109,8 @@ function sql()
 		m=()
 		if read -p errCode sqlState line tmp; then
 			if [[ $errCode == '-' ]]; then
-				abort -E SQLEX 9 "SQL Error: $tmp"
+				#@TODO
+				DEBUG=9 abort --ex SQLEX_UNKNOWN 99 - ${sqlState:--} ${line:--} $tmp
 			fi
 			split=(${(Q)${(z)tmp}})
 			if in_array -v i - '-' split; then # after '-' is the msg
@@ -231,9 +232,10 @@ function isdb()
 
 function usedb()
 {
-	#@TODO
-	#${${dbname:-$(proj get dbname)}}
-	[[ $1 == '-s' ]] && { db= ; shift }
+	if [[ ${1:0:1} == '-' ]]; then
+		local search s
+		zparseopts -D -M - S:=search s:=s ; OPT_CHK s '-s(changed to -S)'
+	fi
 	if (($#)); then
 		isdb $1 && db=$1 || {
 			if [[ -o interactive ]]; then

@@ -460,11 +460,11 @@ function run()
 {
 	local ret cmd fullcmd logfile watch cmdPrefix
 	local sudo trysudo dryrun verbose color alert print
-	local cmdinst workdir skipErrors okcodes debug noEx
+	local cmdinst workdir okcodes debug noEx
 
 	if [[ ${1:0:1} == - ]]; then
 		zparseopts -M -D - v:=verbose c:=color a=alert p:=print e=noEx A=noAbort \
-			s=sudo S=trysudo n=dryrun I:=cmdinst -cd:=workdir E=skipErrors \
+			s=sudo S=trysudo n=dryrun I:=cmdinst -cd:=workdir \
 			l:=logfile w:=watch N:=okcodes -ok-exit-codes:=N D:=debug
 		OPT_CHK noAbort -A
 
@@ -567,7 +567,7 @@ function run()
 			fi
 			((verbose)) && techo "$print $FAIL ($data)"
 			[[ -n $alert ]] && error "$print error: $data"
-			abort $noAbort $noEx $skipErrors $ret
+			abort $noEx $ret
 			return
 		fi
 	}
@@ -578,7 +578,7 @@ function run()
 	else
 		((verbose)) && techo "$print $FAIL"
 		[[ -n $alert ]] && error "$print error: ret=$ret"
-		abort $noAbort $noEx $skipErrors $ret
+		abort $noEx $ret
 	fi
 	return $ret
 }

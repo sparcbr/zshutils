@@ -40,7 +40,7 @@ function p()
 		(($#tty[1] > 2)) || tty[2]=($TTY)
 	fi
 
-	(($#cmd)) && cmd=(-C "$(getfilename $cmd[2])")
+	(($#cmd)) && cmd=(-C "$(getfilename $=cmd[2])")
 	if [[ -z $pid && $1 == [0-9]## ]]; then
 		pid=(-p $1)
 		shift

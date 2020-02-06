@@ -124,15 +124,16 @@ function ggrep() #@TODO
 
 function commit() #@TODO
 {
-	local m args
-	zparseopts -D -M - m:=m
+	local m args amend
+	zparseopts -D -M - m:=m A=amend -amend=A
+	[[ $amend[1] == '-A' ]] && amend='--amend'
 	#@TODO check for empty changes
 	if [[ -n "$1" && ${1:0:1} != - ]]; then
 		m=(-m "$*")
 	else
 		args="$@"
 	fi
-	git commit $m $args
+	git commit $amend $m $args
 }
 
 function croot()
