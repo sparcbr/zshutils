@@ -2,7 +2,6 @@ VERSION=1.0.4
 #lazyload=sql,tableshow,tablelist
 alias sql="noglob sql"
 alias sqlmaq="noglob sql --ssh maquina"
-#head
 
 # databases data dir
 DB_DATA_DIR=/var/lib/mysql
@@ -21,7 +20,7 @@ typeset -gA sqlUser=(
 # usage: dbtstamp dbname
 function dbtstamp()
 {
-	usedb $1
+	usedb "$@"
 	sudo ls -lrt --time-style=+"%Y-%m-%d %H:%M:%S" $DB_DATA_DIR/$db/ | \
 		awk '{print $6,$7,$8}' | sort --numeric-sort
 }
@@ -31,19 +30,13 @@ function dbtstamp()
 function sql()
 {
 	local file name sql nodb verbose user pass silent host ret _out opts
-	zparseopts -D - f:=file d:=name n=nodb v=verbose u:=user p:=pass s=silent \
-		-ssh:=host o:=_out
+	local _colsOut _cols
+	integer i
+	zparseopts -D -M - f:=file d:=name n=nodb v=verbose u:=user p:=pass s=silent \
+		-ssh:=host o:=_out c:=_colsOut -columns:=c
 
-	if [[ -n $file ]]; then
-		file=$file[2]
-		# [[ $file size greater than X lines ]] && 
-			#  run mysqlimport -u $user -p$pass ql $db
-			#  return
-		sql=$(<$file)
-	else
-		sql="$*"
-	fi
-	#typeset -Tf parseSqlErrors
+	sql="$*"
+
 	opts=($silent)
 	coproc parseSqlErrors
 	if [[ -n $host ]]; then
@@ -54,6 +47,7 @@ function sql()
 		else
 			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p
 		fi
+		ret=$?
 	else
 		[[ -n $nodb ]] || usedb $name[2]
 		if [[ -n $db ]]; then
@@ -65,57 +59,116 @@ function sql()
 		fi
 		opts+=(${user:+-u$user} ${pass:+-p"$pass"})
 		if (($#_out)); then
-			integer i=1
+			i=1
+			_out=$_out[2]
 			{
-				while IFS=$'\t' read -A $_out$i; do
-					((i++))
-				done
+				# column names
+				if IFS=$'\t\t' read -A _cols; then
+					# read rows into associative arrays: row1, row2, ..., rowN
+					#	with column names as keys
+					typeset -ga $_out$i
+					while IFS=$'\t\t' read -A $_out$i; do
+						((i++)); typeset -ga $_out$i
+					done
+					unset $_out$i
+					((i--))
+				fi
 			} < <(mysql $opts -e $sql $db) 2>&p
 			unset $_out$i
 			#mysql $opts -e $sql $db 2>&p | IFS=$'\t' read -A $_out[2]
 				#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
+			ret=$?
+			if ((i)); then
+				if (($#_colsOut)); then
+					_colsOut=$_colsOut[2]
+					typeset -gA $_colsOut
+					integer colN=1
+					for col in $_cols; do
+						typeset -g "${_colsOut}[$col]=$colN"
+						((colN++))
+					done
+				fi
+			fi
 		else
-			mysql $opts -e $sql $db 2>&p
+			if (($#file)); then
+				mysql $opts $db 2>&p < $file[2]
+			else
+				mysql $opts -e $sql $db 2>&p
+			fi
+			ret=$?
 		fi
 	fi
-	ret=$?
 	echo EOF >&p
-	
+
 	((ret)) || return 0
+
+	# Error handling
 	{
-		local tmp i split errCode sqlState line msg m
+		local tmp split errCode sqlState line msg m Ex='SQLEX'
 		#@TODO sort errors by file before opening files
 		m=()
-		while read -p errCode sqlState line tmp; do
+		if read -p errCode sqlState line tmp; then
 			if [[ $errCode == '-' ]]; then
-				continue
+				abort -E SQLEX 9 "SQL Error: $tmp"
 			fi
 			split=(${(Q)${(z)tmp}})
 			if in_array -v i - '-' split; then # after '-' is the msg
 				m=($split[1,i-1])
 				msg=$split[i+1,-1]
 			fi
-			techo -c lred  "ERROR $errCode ($sqlState) at line $line: $C[warn]$msg$C_"
+			sqlError -v $errCode $sqlState $line $m
+			if ((sqlState == 23000)); then
+				Ex='SQLEX_CONSTRAINT'
+				ret=1
+			else
+				ret=2
+			fi
 			#@TODO this is going to run once per terminal. Wanted: once total.
 			#@idea run this part only on current terminal, if there is one focused.
-		done
-		#if type v 2>&1 >/dev/null; then
-			#v $file:$line &
-		#else
-			#${EDITOR:-vim} $file +$line &
-		#fi
+		else
+			techo $errCode $sqlState $line $tmp
+			DEBUG=9 abort 99 'Unknown error'
+		fi
+		abort --ex $Ex $ret "$errCode $sqlState $line $m" # - $msg"
 	}
+}
 
-	return $ret
+function sqlError()
+{
+	local msg='' _v=0
+	if [[ $1 == '-v' ]]; then
+		local cod=$2 state=$3 line=$4
+		shift 4
+		_v=1
+		msg="ERROR $cod ($state)$C_ at line $line: "
+	else
+		cod=$1; shift
+	fi
+
+	case $cod in
+		1049) msg+="Can't connect to database $C[warn]'$1'$C_"
+		;;
+		1062) msg+="Duplicate entry $C[warn]'$1'$C_ for key $C[warn]'$2'$C_"
+		;;
+		1064) msg+="Syntax error near $C[warn]'$@'"
+		;;
+		1452) msg+="$C[warn]$2.$4$C_ REFERENCES $C[warn]$5.$6$C_ CONSTRAINT $C[warn]$3$C_"
+		;;
+		*) printf $C[lred]$msg"$(perror -s $cod)$C_\n" "$@"
+			return
+		;;
+	esac
+	echo -n $C[lred]$msg$C_
 }
 
 function parseSqlErrors()
 {
-	local line
-	while read line; do
-		[[ $line == 'EOF' ]] && return
-		if [[ $line =~ $'^ERROR ([0-9]{4}) \\(([0-9A-Z]{5})\\) at line ([0-9]+): (.*)' ]]; then
-			local msg rx errCode sqlState msgFormat
+	_dbg_trap $0
+	local data
+	while read data; do
+		[[ $data == 'EOF' ]] && return
+		if [[ $data =~ $'^ERROR ([0-9]{4}) \\(([0-9A-Z]{5})\\) at line ([0-9]+): (.*)' ]]; then
+			local msg rx errCode sqlState msgFormat line
 			msg=$match[4]
 			errCode=$match[1]
 			sqlState=$match[2]
@@ -132,13 +185,14 @@ function parseSqlErrors()
 				;;
 			1064)
 				msgFormat="near '(.*)'"
-				msgNew="Syntax error near (.*)"
 				techo "msg: $msg"
 				;;
-			#1452)
+			1452)
+				msgFormat="^[^(]+\\(\`([^\`]+)\`.\`([^\`]+)\`, CONSTRAINT \`([^\`]+)\` FOREIGN KEY \\(\`([^\`]+)\`\\) REFERENCES \`([^\`]+)\` \\(\`([^\`]+)\`"
 			#	msgFormat="Cannot add or update a child row: a foreign key constraint fails (`¬tbl¬`.`#¬sql¬`, CONSTRAINT `#¬fk¬` FOREIGN KEY (`¬col¬`) REFERENCES `¬tbl¬` (`¬col¬`))"
 			#	;;
 	#ERROR 1452 (23000) at line 1: Cannot add or update a child row: a foreign key constraint fails (`idiomus`.`#sql-426_49`, CONSTRAINT `#sql-426_49_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`))
+				;;
 			*)
 				if msgFormat=${"$(perror $errCode)"##*: }; then
 					rx=(
@@ -148,17 +202,13 @@ function parseSqlErrors()
 					msgFormat=${msgFormat//${~rx[1]}/$rx[2]}
 					msgFormat='^'${msgFormat//${~rx[3]}/$rx[4]}
 				else
-					techo -c lred "Unknown error: $C[]$errCode$C_ ($sqlState)"
+					techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState)"
 					continue
 				fi
 				;;
 			esac
 
-				techo "msg: $msg"
 			if [[ $msg =~ $msgFormat ]]; then
-				techo "format: $msgFormat"
-				techo -c lred "match: ($match)"
-				techo "msg: $msg"
 				print -Pr $errCode $sqlState $line ${(@qqq)match} - $msg
 			else
 				techo -c lred "$C[warn]$errCode$C_ ($sqlState)\n" \
@@ -167,10 +217,11 @@ function parseSqlErrors()
 				print -Pr $errCode $sqlState $line - $msg
 			fi
 		else
-			techo -c lred $line
-			print -Pr - -
+			techo -c lred $data
+			print -Pr - - - - - $data
 		fi
 	done
+	techo 'parseErrors ended'
 }
 
 function isdb()
@@ -184,9 +235,18 @@ function usedb()
 	#${${dbname:-$(proj get dbname)}}
 	[[ $1 == '-s' ]] && { db= ; shift }
 	if (($#)); then
-		isdb $1 && db=$1 || abort 127 "$1: database not found"
-	elif [[ -z $db ]]; then
-		db=$(chooser ${DBNAME:+-D$DBNAME} $(dblist))
+		isdb $1 && db=$1 || {
+			if [[ -o interactive ]]; then
+				(($#search)) || search=(-S $1)
+			else
+				abort --ex SQLEX_DBERROR 127 1049 42000 1 $1
+			fi
+		}
+	fi
+	if [[ -z $db ]]; then
+		#@TODO
+		#${dbname:-$(box get dbname)}
+		db=$(chooser ${DBNAME:+-D$DBNAME} $search $(dblist))
 	fi
 }
 

@@ -1,4 +1,4 @@
-#!/bin/zsh
+VERSION=1.0.0
 #lazyload=extract_cpio_image,compress_cpio_image
 
 [[ -v comp ]] || typeset -ga comp

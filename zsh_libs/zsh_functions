@@ -466,6 +466,7 @@ function run()
 		zparseopts -M -D - v:=verbose c:=color a=alert p:=print e=noEx A=noAbort \
 			s=sudo S=trysudo n=dryrun I:=cmdinst -cd:=workdir E=skipErrors \
 			l:=logfile w:=watch N:=okcodes -ok-exit-codes:=N D:=debug
+		OPT_CHK noAbort -A
 
 		[[ $1 == - ]] && shift
 		[[ ${1:0:1} == - ]] && { abort 2 "Invalid command: $1"; return }
@@ -795,7 +796,7 @@ function todo()
 		sqlite3 -batch test.db
 		;;
 	*)
-		techo -c err "$cmd: invalid command"
+		techo -c err "Invalid command: $cmd"
 		usage
 	esac
 
