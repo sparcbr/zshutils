@@ -48,6 +48,27 @@ function cancel() {
 	abort 130 "$C[warn]Cancelled $@"
 }
 
+() {
+	typeset -gA ExTree Ex
+	ExTree=(Ex -
+	  IoEx Ex
+		FileIoEx IoEx
+	  SqlEx Ex
+		  ConstraintSqlEx SqlEx
+	)
+	local e #p
+	for e in ${(k)ExTree}; do Ex[$e]="(#m)*$e(_*)#"; done
+	# integer i len
+	# for e p in ${(kv)spec}; do
+	#  	if [[ $p != '-' ]]; then
+	# 		exMask[$e]=$e$exMask[$p]  [IoEx]=IoEx
+	#  	else
+	# 		exMask[$e]=$e'(_[A-Z]##)#'
+	#  	fi
+	# done
+	# for e in ${(k)spec}; do exMask[$e]='(#m)'$exMask[$e]; done
+}
+
 function abort()
 {
 	integer last=$?
@@ -495,7 +516,8 @@ function match_array()
 # finds command(s) in an alias
 function inAlias()
 {
-	local needsFunc ret=1 arr
+	_dbg_trap $0
+	local needsFunc ret=1 arr ; integer cmd
 	zparseopts -D -M - f=needsFunc
 	if [[ $(type -f $1) =~ "^$1 is an alias for (.*)$" ]]; then
 		local f m _type prefix=(run do_sudo) bins

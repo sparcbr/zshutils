@@ -41,7 +41,7 @@ function mkscript()
 	while ((ret)); do
 		input -p "Function name" -v func || cancel
 		if (($#func)); then
-			_type=($(typeOf $func))
+			_type=($(typeOf -a $func))
 			if in_array 'function' _type; then
 				techo -c warn "$func() already exists"
 				#@TODO 
@@ -54,13 +54,15 @@ function mkscript()
 				if [[ $tmp == 'Edit' ]]; then
 					vw $func && return
 					ret=0
-				elif [[ $tmp == 'Cancel' ]]; then
-					cancel
-				elif [[ $tmp == 'Rename' ]]; then
 				elif [[ $tmp == 'Append' ]]; then
 					ret=0
 					append=1
+				elif [[ $tmp == 'Cancel' ]]; then
+					cancel
+				elif [[ $tmp == 'Rename' ]]; then
 				fi
+			elif in_array 'command' _type; then
+				techo @TODO warn command $func exists
 			else
 				ret=0
 			fi

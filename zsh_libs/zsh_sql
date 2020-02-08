@@ -29,16 +29,22 @@ function dbtstamp()
 # sql [-d dbname] [-f file.sql] SELECT ...
 function sql()
 {
-	local file name sql nodb verbose user pass silent host ret _out opts
-	local _colsOut _cols
-	integer i
+	local file name nodb verbose user pass silent host ret _out opts
+	local _colsOut _cols p _idVar
+	integer i _id
+	typeset -g sql
 	zparseopts -D -M - f:=file d:=name n=nodb v=verbose u:=user p:=pass s=silent \
-		-ssh:=host o:=_out c:=_colsOut -columns:=c
+		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar
 
 	sql="$*"
 
 	opts=($silent)
-	coproc parseSqlErrors
+	if (($#file)); then
+		[[ -f $file[2] ]] || abort --ex FileIoEx_NotFound 127 $(getfullpath $file[2])
+	fi
+
+	coproc parseSqlErrors; p=$!
+
 	if [[ -n $host ]]; then # remote
 		OPT_CHK file -f for remote
 		#(($#file)) && file=$file[2]
@@ -62,6 +68,7 @@ function sql()
 		if (($#_out)); then
 			i=1
 			_out=$_out[2]
+			#@TODO: no error handling: redirect stderr to null
 			{
 				# column names
 				if IFS=$'\t\t' read -A _cols; then
@@ -90,40 +97,62 @@ function sql()
 				fi
 			fi
 		else
+			#@TODO: no error handling: redirect stderr to null
 			if (($#file)); then
-				mysql $opts $db 2>&p < $file[2]
+				if [[ -f $file[2] ]]; then
+					(($#verbose)) && techo -c head mysql ${(qq)opts} ${(qq)sql} $db '<' $file[2]
+					mysql $opts $sql $db 2>&p < $file[2]
+				else
+					techo -c err "File not found$C_: $file[2]"
+					false
+				fi
 			else
-				mysql $opts -e $sql $db 2>&p
+				if (($#_idVar)); then
+					# sql+="; SELECT ROW_COUNT(), LAST_INSERT_ID()"
+					sql+="; SELECT LAST_INSERT_ID()"
+					(($#verbose)) && techo -c head mysql ${(qq)opts} -s -e ${(qq)sql} $db
+					_id=$(mysql $opts -s -e $sql $db) 2>&p
+				else
+					(($#verbose)) && techo -c head mysql ${(qq)opts} -e ${(qq)sql} $db
+					mysql $opts -e $sql $db 2>&p
+				fi
 			fi
 			ret=$?
 		fi
 	fi
-	echo EOF >&p
+	echo EOF >&p ; wait $p
 
-	((ret)) || return 0
+	if ((ret==0)); then
+		if (($#_idVar)); then
+			typeset -g "${_idVar[2]}=$_id"
+		fi
+		return 0
+	fi
 
 	# Error handling
+	#@TODO: noException mode
+	#@TODO: if no error handling mode: just return or throw ret
 	{
-		local tmp split errCode sqlState line msg m Ex='SQLEX'
+		local tmp split errCode sqlState line msg m Ex='SqlEx'
 		#@TODO sort errors by file before opening files
 		m=()
 		if read -p errCode sqlState line tmp; then
 			if [[ $errCode == '-' ]]; then
 				#@TODO
-				DEBUG=9 abort --ex SQLEX_UNKNOWN 99 - ${sqlState:--} ${line:--} $tmp
+				DEBUG=9 abort --ex SqlEx_Unknown 99 - ${sqlState:--} ${line:--} $tmp
 			fi
 			split=(${(Q)${(z)tmp}})
 			if in_array -v i - '-' split; then # after '-' is the msg
 				m=($split[1,i-1])
-				msg=$split[i+1,-1]
+				#@ msg=$split[i+1,-1]
 			fi
-			sqlError -v $errCode $sqlState $line $m
-			if ((sqlState == 23000)); then
-				Ex='SQLEX_CONSTRAINT'
+			if [[ $sqlState == '23000' ]]; then
+				Ex='ConstraintSqlEx'
 				ret=1
 			else
 				ret=2
 			fi
+			(($#verbose)) && sqlError -v $errCode $sqlState $line $m
 			#@TODO this is going to run once per terminal. Wanted: once total.
 			#@idea run this part only on current terminal, if there is one focused.
 		else
@@ -134,34 +163,40 @@ function sql()
 	}
 }
 
+# Pretty print error messages.
+# @opt? -v(verbose) Print error codes
+# @param int $1 cod
+# @param string $2 state
+# @param line $3 int
+# @print message
 function sqlError()
 {
-	local msg='' _v=0
-	if [[ $1 == '-v' ]]; then
-		local cod=$2 state=$3 line=$4
-		shift 4
-		_v=1
-		msg="ERROR $cod ($state)$C_ at line $line: "
-	else
-		cod=$1; shift
-	fi
-
+	local msg='' _v=0 cod state line
+	[[ $1 == '-v' ]] && { shift; _v=1 }
+	cod=$1; state=$2; line=$3; shift 3
+	((_v)) && msg="SQL Error $cod ($state)$C_ at line $line: "
 	case $cod in
 		1049) msg+="Can't connect to database $C[warn]'$1'$C_"
 		;;
-		1062) msg+="Duplicate entry $C[warn]'$1'$C_ for key $C[warn]'$2'$C_"
+		1062) #uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
+			msg+="Duplicate entry $C[warn]'$1'$C_ for key $C[warn]'$2'"
 		;;
 		1064) msg+="Syntax error near $C[warn]'$@'"
 		;;
-		1452) msg+="$C[warn]$2.$4$C_ REFERENCES $C[warn]$5.$6$C_ CONSTRAINT $C[warn]$3$C_"
+		1452) msg+="Constraint violation $C[warn]$3$C_: $C[warn]$2.$4$C_ REFERENCES $C[warn]$5.$6"
 		;;
-		*) printf $C[lred]$msg"$(perror -s $cod)$C_\n" "$@"
+		*) local _args=($C[warn]$^@$C_)
+			printf $C[lred]$msg"$(perror -s $cod)$C_\n" $_args
 			return
 		;;
 	esac
-	echo -n $C[lred]$msg$C_
+	echo $C[lred]$msg$C_
 }
 
+# Parses error string and returns error codes and relevant arguments.
+# For most errors uses perror string format and reverse printf using regexp.
+#
+# @print errCode sqlState line arguments -
 function parseSqlErrors()
 {
 	_dbg_trap $0
@@ -186,7 +221,6 @@ function parseSqlErrors()
 				;;
 			1064)
 				msgFormat="near '(.*)'"
-				techo "msg: $msg"
 				;;
 			1452)
 				msgFormat="^[^(]+\\(\`([^\`]+)\`.\`([^\`]+)\`, CONSTRAINT \`([^\`]+)\` FOREIGN KEY \\(\`([^\`]+)\`\\) REFERENCES \`([^\`]+)\` \\(\`([^\`]+)\`"
@@ -195,13 +229,16 @@ function parseSqlErrors()
 	#ERROR 1452 (23000) at line 1: Cannot add or update a child row: a foreign key constraint fails (`idiomus`.`#sql-426_49`, CONSTRAINT `#sql-426_49_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`))
 				;;
 			*)
-				if msgFormat=${"$(perror $errCode)"##*: }; then
+				if msgFormat=${"$(perror $errCode)"#*: }; then
+					msgFormat=${msgFormat//(#m)[()]/'\'$MATCH}
 					rx=(
-						'%(l#[du])'       '(-?[0-9]+)'
+						'%l#[du]'       '(-?[0-9]+)'
 						'%-#.#[0-9]#[sM]' '(.*)'
+						'\).' ')\.'
 					)
 					msgFormat=${msgFormat//${~rx[1]}/$rx[2]}
-					msgFormat='^'${msgFormat//${~rx[3]}/$rx[4]}
+					msgFormat=${msgFormat//${~rx[3]}/$rx[4]}
+					msgFormat='^'${msgFormat//${~rx[5]}/$rx[6]}
 				else
 					techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState)"
 					continue
@@ -222,7 +259,6 @@ function parseSqlErrors()
 			print -Pr - - - - - $data
 		fi
 	done
-	techo 'parseErrors ended'
 }
 
 function isdb()

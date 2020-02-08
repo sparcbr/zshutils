@@ -283,11 +283,8 @@ function syncDirs()
 		local host p #sshArgs
 		if [[ $dir =~ ([^:]+):(.*) ]]; then
 			host=$match[1]; p=$match[2]
-			#if [[ -n $sshCFG[$host] ]]; then
-			#	sshArgs=(ssh $sshCFG[$host])
-			#fi
-		fi
-		if isDir -m $dir; then
+			# ????
+		elif isDir -m $dir; then
 			[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-pog'
 			#data="$(run $sudo rsync -ni ${sshArgs[@]} ${rsArgs[@]} $permFlags "$src[@]" $dir)"
 			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
