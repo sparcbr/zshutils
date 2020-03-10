@@ -43,24 +43,45 @@ function mkscript()
 		if (($#func)); then
 			_type=($(typeOf -a $func))
 			if in_array 'function' _type; then
-				techo -c warn "$func() already exists"
-				#@TODO 
-				chooser -v tmp -f1 -p "$func() already exists" \
-					"Rename" \
-					'Append' \
-					"Edit $func()" \
-					'Cancel' || cancel
-
-				if [[ $tmp == 'Edit' ]]; then
-					vw $func && return
-					ret=0
-				elif [[ $tmp == 'Append' ]]; then
-					ret=0
-					append=1
-				elif [[ $tmp == 'Cancel' ]]; then
-					cancel
-				elif [[ $tmp == 'Rename' ]]; then
+				local tmp=$functions_source[$func] options
+				options=(Rename Append "Edit $func()" Cancel)
+				if [[ -z $tmp ]]; then
+					if explode -v tmp $functions[$func] $'\n' 1 && \
+						[[ $tmp == *'include '(#b)([a-zA-Z]##)" && {" ]]
+					then
+						tmp=zsh_$match[1]
+					else
+						tmp='anonymous'
+						options=(Rename 'Use it' Cancel)
+					fi
 				fi
+				#if [[ $arg[4] == 'autoload' ]]; then
+				#	autoload +X $1 && edfunc $1
+				#	return
+
+				techo -c warn "$func() already exists ($tmp)"
+				chooser -v tmp -f1 -p "$func() already exists ($tmp)" $options || cancel
+
+				case $tmp in
+					Edit)
+						vw $func && return
+						ret=0
+						;;
+					Append)
+						ret=0
+						append=1
+						;;
+					Cancel)
+						cancel
+						;;
+					Rename)
+						;;
+					Use)
+						data2="$functions[$func]"
+						ret=0
+						;;
+					*) abort -D-1 9 "Unknown option '$tmp'" ;;
+				esac
 			elif in_array 'command' _type; then
 				techo @TODO warn command $func exists
 			else
@@ -69,16 +90,15 @@ function mkscript()
 		fi
 	done
 
-	isLib=false
+	isLib=0
 	if [[ -n "$name" ]]; then
 		local err_exists="exists but isn't a shell script."
 		name=$name[2]
-		file=$(getpath $name)
-        if [[ "$file" != "." ]]; then # full path given
-			if [[ -d "$name" ]]; then
+        if [[ $(getpath $name) != '.' || $name == ./* ]]; then # full path given
+			if [[ -d $name ]]; then
 				echo "$name is a directory"
 				return 1
-			elif [[ -f "$name" ]] && ! isScript $name; then
+			elif [[ -f $name ]] && ! isScript $name; then
 				echo "$name $err_exists"
 				return 1
 			fi
@@ -88,26 +108,26 @@ function mkscript()
 			type=${cmdtype[1]}
 			file=${cmdtype[2]}
 			name=${name#zsh_*}
-			if [[ "$type" != "script" ]]; then
+			if [[ $type != "script" ]]; then
 				if [[ -f "$ZSH_LIBS/zsh_$name" ]]; then # is it a lib?
 					file="$ZSH_LIBS/zsh_$name"
-					isLib=true
+					isLib=1
 				elif [[ "$type" != 'none' ]]; then
 					echo "$file $err_exists"
 					return 1
 				else
 					file="$ZSH_LIBS/zsh_$name"
-					isLib=true
+					isLib=1
 				fi
 			fi
 		fi
 	else
-		isLib=true
+		isLib=1
 		file="$(chooser $ZSH_LIBS/zsh_*(-N) "New zsh library" "Browse full path")" || cancel
 		if [[ "$file" == "New zsh library" ]]; then
-			file=$(input -p "Enter new library name" 'zsh_') || cancel
+			input -v file -p "Enter new library name" 'zsh_' || cancel
 		elif [[ "$file" == "Browse full path" ]]; then
-			file=$(chooser -p "Choose path of zsh library" --dir) || cancel
+			chooser -v file -p "Choose path of zsh library" --dir || cancel
 		fi
 
 		name=$(getfilename $file)
@@ -121,7 +141,7 @@ function mkscript()
 
 	if [[ ! -f "$file" ]]; then
 		# Create library
-		if isLib; then
+		if ((isLib)); then
 			data=$(< $ZSH_LIBS/zsh_blank)
 		else
 			# Create script
@@ -133,7 +153,7 @@ function mkscript()
 	# add data
 	# TODO: append to function in case of existing function
 	data+="\n# Added "$(date "+%F %R")"\n"
-    if [[ -n "$func" ]]; then
+    if [[ -n $func ]]; then
 		data+=$(zindent $func "$data2")
 	else
 		line=$(wc -l $file)
@@ -141,14 +161,14 @@ function mkscript()
 	fi
 
 	echo -n $data >> $file
-	$isLib && source $file && { type $func ; which $func; }
+	((isLib)) && source $file && { type $func ; which $func; }
 
 	# setup file
-	[[ -x $file || $isLib ]] || chmod +x $file
+	[[ -x $file || $isLib -eq 1 ]] || chmod +x $file
 
 	# edit
 	if [[ -n $edit || -z $data2 ]] || confirm "Edit file"; then
-		if [[ -n $func ]] && $isLib; then
+		if (($#func && isLib)); then
 			edfunc $func
 		else
 			gvim -f $file
@@ -204,7 +224,7 @@ function edalias()
 			[[ $(getfilename $file) == $1 ]] && var=($file:0)
 		fi
 	else
-		var=("${(@f)$(egrep -rHn "^([^#]* )?$pat" $ZSH_LIBS $fpath)}")
+		var=("${(@f)$(egrep -rHn --exclude tags "^([^#]* )?$pat" $ZSH_LIBS $fpath)}")
 	fi
 	
 	if [[ -n $var[1] ]]; then
@@ -298,7 +318,7 @@ function vw()
 				(( $#linenum )) && { edfunc $name $linenum ; return }
 				func=$name
 			else
-				if [[ $(type -f $name) =~ "^$name is an alias for (.*)$" ]]; then
+				if [[ $(type $name) =~ "^$name is an alias for (.*)$" ]]; then
 					func=$(inAlias -f $name)
 				fi
 			fi

@@ -126,7 +126,14 @@ function debug()
 		if [[ -n $script ]]; then
 			DEBUG=1 $script
 		else
-			$_cmd "$@" #|& colorify -D $_cmd
+			{
+				$_cmd "$@" #|& colorify -D $_cmd
+			} always {
+				if catch '*'; then
+					techo "CAUGHT: $CAUGHT"
+					return 1
+				fi
+			}
 		fi
 		ret=$?
 	fi
@@ -163,17 +170,18 @@ function fstack()
 function array_dump()
 {
 	local key val
+	[[ -v $1 ]] || abort 127 'Not a variable'
 	case "$(vartype $1)" in
 	  association*)
 		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
 		for key in ${(Pk)1}; do
-			techo -r ${(qq)key} '=>' ${(qqq)${(P)1}[$key]}
+			techo -r ${(q)key} '=>' ${(q)${(P)1}[$key]}
 		done
 		;;
 	  array*)
 		techo -c head "dump of \"$1\" (size: ${(P)#1}):"
 		for val in "${(P@)1}"; do
-			techo -r ${(qqq)val}
+			techo -r ${(q)val}
 		done
 		;;
 	  *)

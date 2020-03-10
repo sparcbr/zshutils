@@ -1,5 +1,7 @@
 VERSION=1.0.8
-#lazyload=urlfollow,urlinfo,vnc,imdb,globo,awkWrapper
+#lazyload=syncDirs,urlfollow,urlinfo,vnc,imdb,globo,awkWrapper,getfullpath,getpath,getext,getfilename,isDir,isEmptyDir,box,ddiff
+
+[[ -v comp ]] || typeset -ga comp
 
 setopt nomultios
 
@@ -156,15 +158,16 @@ function ddiff()
 }
 
 # Added 2019-05-03 16:50
+comp+=("syncDirs=rsync")
 function syncDirs()
 {
 	integer i n
-	local src targets dir data rsArgs checksum arg
+	local src targets dir data rsArgs checksum arg noDelete
 	local quiet sudo excludeFrom dry extraArgs reverse
 	local files stat name noSlash sshCFG
 	typeset -a src targets rsArgs extraArgs files excludePatterns
 	zparseopts -D -M - q=quiet s=sudo i:=excludeFrom d=dry \
-		c=checksum r=reverse -no-add-slash=noSlash
+		c=checksum r=reverse -no-add-slash=noSlash -no-delete=noDelete
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	(($# >= 2)) || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
@@ -211,11 +214,12 @@ function syncDirs()
 	rsArgs+=(--exclude=$^excludePatterns)
 	[[ -n $excludeFrom ]] && rsArgs+=(--exclude-from="${excludeFrom[2]}")
 
+	# analyse sources
 	for ((n=1; n<=$#src; n++)); do
 		local isEmptyDir=0
 
 		dir=$src[$n]
-		if [[ $dir =~ ([^:]+):(.*) ]]; then
+		if [[ $dir =~ ([^:]+):(.*) ]]; then		 # remote
 			local ret host=$match[1] p=$match[2]
 
 			#include -q network
@@ -237,14 +241,14 @@ function syncDirs()
 				fi"
 			))
 			case $ret in
-				1*)
+				1*) # dir
 					((!$#noSlash)) && [[ ${dir: -1} != / ]] && src[$n]+='/'
 					if [[ $ret == '1i' ]]; then
 						#@TODO: scp $dir/rsync.ignore /tmp)
 						#rsArgs+=(--exclude-from=$fIgnore)
 					fi
 					;;
-				f) ;;
+				f) ;; # file
 				0)
 					confirm -c warn "@TODO Empty remote directory$C_: $C[lred]'$host:$p'. \
 						Create dir" || cancel
@@ -278,44 +282,59 @@ function syncDirs()
 	# # # # # #
 	# Targets #
 	# # # # # #
-	local nothing=1 permFlags ret
+	local nothing=1 permFlags ret host p
 	for dir in $targets; do
-		local host p #sshArgs
+		host=''; p=''  #sshArgs
 		if [[ $dir =~ ([^:]+):(.*) ]]; then
 			host=$match[1]; p=$match[2]
-			# ????
-		elif isDir -m $dir; then
-			[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-pog'
+		elif ! isDir -m $dir; then
+			techo -c warn "Skipping $dir"
+			continue
+		fi
+
+		if ((1)); then
+			permFlags=''
+			if (($#host)); then # remote
+				permFlags='-p' # og'
+			else
+				[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-p' #og'
+			fi
 			#data="$(run $sudo rsync -ni ${sshArgs[@]} ${rsArgs[@]} $permFlags "$src[@]" $dir)"
 			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
 			if (($#data)); then
 				nothing=0
 				echo $data
-				confirm "Do it" && # run --confirm "Do it"
+				if confirm "Do it"; then
 					run $sudo rsync --info=PROGRESS2 $rsArgs $permFlags $src $dir || abort
-				_sync
+				else
+					cancel
+				fi
+
+				# @TODO((!isRemote && !noSync)) && _sync
 			fi
 
-			# # # # # # #
-			# Deletions #
-			# # # # # # #
-			data="$(run $sudo rsync -ni --delete --existing --ignore-existing \
-				-JO ${rsArgs[@]} $src[@] $dir)" || abort
+			if ((!$#noDelete)); then
+				# # # # # # #
+				# Deletions #
+				# # # # # # #  @TODO: -J (omit-link-times) does not work on old rsync
+				data="$(run $sudo rsync -ni --delete --existing --ignore-existing \
+					-O ${rsArgs[@]} $src[@] $dir)" || abort
 
-			if [[ -n "$data" ]]; then
-				nothing=0
-				techo -c warn "Deletions:"
-				n=0
-				echo $data | while read stat name; do
-					echo "$dir/$name ${C[red]}❌$C_"
-					files+=($dir/$name)
-					((n++))
-				done
-				confirm -c warn "Delete these $n files" || continue
-				#@TODO rm $(chooser "$files[@]")
-				run $sudo rsync --delete --existing --ignore-existing \
-					--info=PROGRESS2 $rsArgs $src $dir || abort
-				_sync
+				if [[ -n "$data" ]]; then
+					nothing=0
+					techo -c warn "Deletions:"
+					n=0
+					echo $data | while read stat name; do
+						echo "$dir/$name ${C[red]}❌$C_"
+						files+=($dir/$name)
+						((n++))
+					done
+					confirm -c warn "Delete these $n files" || continue
+					#@TODO rm $(chooser "$files[@]")
+					run $sudo rsync --delete --existing --ignore-existing \
+						--info=PROGRESS2 $rsArgs $src $dir || abort
+					_sync
+				fi
 			fi
 		fi
 	done
@@ -323,37 +342,81 @@ function syncDirs()
 	return 0
 }
 
-# Added 2019-01-22 18:07:09 @TODO
-function syncIhm()
-{
-	( cd $HOME/PeD/android && {
-		syncDirs -c -i $CFG/android.ignore $TREADMILL \
-			$CLOUD_APPS/Treadmill,/m/home/inbramed/android/Treadmill
-		syncDirs -c -i $CFG/android.ignore $CICLOERGOMETER \
-			$CLOUD_APPS/Cicloergometer,/m/home/inbramed/android/Cicloergometer
-	  }
-	)
-}
-
 # Added 2019-02-20 09:23:39 @TODO
 function box()
 {
-	local box base=$HOME/repos search=$1
-	#zparseopts -D -M - S:=search
+	local box base=$HOME/repos cmd search list
+	#zparseopts -D -M - 
 	include functions
+	include -l network
 	#include boxes
-	#box start
-	if [[ -n $search && -d $base/$search ]]; then
-		box=$search
+
+	if (($#)); then
+		cmd=$1 ; shift ; box="$*"
 	else
-		local list=($base/*(-/om))
-		box=$(chooser ${=1:+-S $search} $list:t) || cancel
-		[[ -d $base/$box ]] || abort 127 "Invalid box: $base/$box"
+		cmd='search'
+		box="$@"
 	fi
-	cd $base/$box
-	[[ -d .git ]] && git status &
-	[[ -d android ]] && include android
-	todo -d . #@TODO mv to cd hook
+
+	while ((1)); do
+		case $cmd in
+			new)
+				if [[ -z $box ]]; then
+					input -v box -p 'Enter git url or name to search' || cancel
+				fi
+				gclone $box #&& BOX=$box
+				return
+				#mkdir $base/$box
+			;;
+			open)
+				if [[ $box == '.' ]]; then
+					 box=$BOX
+				fi
+				cd $base/$box || return
+				BOX=$box
+				[[ -d .git ]] && git status &
+				[[ -d android ]] && include android
+				todo -d . #@TODO mv to cd hook
+				return 0
+			;;
+			start|run)
+				#@TODO
+				if [[ -z $box ]]; then
+					[[ -n $BOX ]] || abort 10
+					box=$BOX
+				else
+					#@TODO: glob search name, if count==1 box=result
+					result=($base/(#i)*${box}*)
+					(($#result)) || abort 10
+					chooser -v box $result:t || cancel
+				fi
+				if [[ -d $base/$box/node_modules ]]; then
+					(cd $base/$box/node_modules ; npm start &)
+				fi
+				return
+			;;
+			list|search)
+				search=$box
+				if [[ -n $search && -d $base/$search ]]; then
+					cmd='open'; box=$search
+					continue
+				fi
+
+				list=($base/*(-/om))
+				box=$(chooser -f1 ${=box:+-S $search} $list:t 'New box') || cancel
+				if [[ $box == 'New' ]]; then
+					cmd='new' ; box=''
+				elif [[ -d $base/$box ]]; then
+					cmd='open'
+				fi
+			;;
+			*)
+				box=$cmd
+				cmd='search'
+				#abort -v5 1 "Invalid command: $C[warn]$cmd$C_. Commands: open, list/search, new, start"
+			;;
+		esac
+	done
 }
 
 
@@ -475,7 +538,6 @@ typeset -gA awkFuncs
 awkFuncs=(
 	printArgs '(i,f) {\
 		if (i<0) i=NF+i+1; 	if (f<0) f=NF+f+1;\
-		print "NF="NF,"i="i,"f="f;
 		for (j=i ; j<f ; j++) {\
 			printf("%s%s", $j, OFS);\
 		}\
@@ -505,13 +567,14 @@ function awkWrapper()
 	prog=''
 	if (($#_inc)); then #@TODO
 		local fname=$_inc[2]
+		((${+awkFuncs[$fname]})) || abort 127 "Undefined function $C[warn]$fname"
 		prog+="function ${fname}${awkFuncs[$fname]}"$'\n'
 	fi
 
 	if (($#_expr)); then
-		if (($#_expr > 1)); then
+		if (($#_expr > 1)); then	# -e varname
 			_expr=(${(P)_expr[2]})
-		else
+		else						# -E
 			_expr=("$@[1,4]")
 		fi
 		local x m pat action

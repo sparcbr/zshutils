@@ -9,23 +9,60 @@ alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ign
 # Added 2019-12-19 12:43
 function pretty()
 {
-	local f files args
-	zparseopts -D -M - 
-	
-	files=$(prettier -l "$@")
+	local F Fname f files args prettyF tmpBasePath basePath baseName _s
+	#zparseopts -D -M - 
+	basePath=$(git root)
+	files=($(prettier -l "$@"))
 	for f in $files; do
-		
-		prettier $f > $f.pretty
-		diff -u $f $f.pretty | less
-		
+		F=$(getfullpath -r $basePath $f)
+		if [[ ${F:0:1} == '/' ]]; then
+			#F=$(getfullpath -r . $f)
+			techo TODO skipped $f
+			continue
+		fi
+		baseName=$(basename $basePath)
+		tmpBasePath=$TMP/$baseName
+		prettyF=$tmpBasePath/$F.pretty
+		if [[ ! -f $prettyF || $f -nt $prettyF ]]; then
+			techo "$f => \$TMP/$baseName/$F.pretty"
+			dir=$(getpath $prettyF)
+			[[ -d $dir ]] || mkdir -p $dir
+			if prettier $f > $prettyF; then
+				local _s=($(stat -L --printf='%s. ' $f $prettyF))
+				if ((_s[2]==0)); then
+
+				fi
+				if ((_s[1]/_s[2]>1.1)); then
+					confirm "$prettyF seems corrupted. Skip" && continue
+				fi
+			else
+				techo "($?) Prettier failed."
+				continue
+			fi
+		fi
+		if ! cmp --quiet $f $prettyF; then
+			diff -u $f $prettyF | head -n 20
+			local _opt
+			if chooser -f1 -v _opt "Save changes to $F" 'Meld files'; then
+				case $_opt in
+					Meld)
+						meld $f $prettyF
+						;;
+					Save)
+						 cp $prettyF $f
+						;;
+					*)
+						;;
+				esac
+				cmp --quiet $f $prettyF && touch $prettyF
+			fi
+		fi
 	done
-	#	input -p "Save $f.pretty to $f" && 
-	print -l $files
 }
 
 function finderror()
 {
-	errline=`tail /var/log/apache2/error.log |  grep -e "PHP \(Parse\|Fatal\|Notice\)" | tail -n1`
+	errline=`tail /var/log/apache2/error.log |  grep -e "PHP \(Parse\|Fatal\|Warning\|Notice\)" | tail -n1`
 	str=`echo $errline| sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/ /g'`
 	linenum=`echo $str | sed 's/.*line \([0-9]*\).*$/\1/'`
 	filename=`echo $str | sed 's/.*\(\/media\/sparc\/xdata\/[^ ]*\).*$/\1/'`
@@ -36,8 +73,9 @@ function finderror()
 
 function tags()
 {
-	local lang args
-	zparseopts -lang:=lang
+	local lang args excludePatterns exclude
+	zparseopts -lang:=lang -exclude:=exclude
+
 	if (($#)) && [[ ! -f $1 && -z $lang ]]; then
 		lang=$1
 		shift
@@ -46,17 +84,30 @@ function tags()
 	else
 		lang=$(chooser Javascript PHP Python Shell) || cancel
 	fi
+	
+	explode -v excludePatterns "${(@)exclude[2]}" ','
 
-	#args=${@:-
+	args=("$@")
 	case ${(L)lang} in
 		javascript|js)
 			type jsctags >/dev/null || npm install -g git+https://github.com/ramitos/jsctags.git
 			jtags
 			;;
-		php) phpctags -R --exclude='vendor/*' $args ;;
-		python|py) pytags ;;
-		shell|sh) ctags --language-force=Sh -R . ;;
-		*) techo -c err "Unsupported language: $lang" ;;
+		php)
+			excludePatterns+=('vendor/*')
+			#@TODO box
+			(($#args)) || args=(v? *.php)
+			phpctags -R --exclude=$^excludePatterns $args
+			;;
+		python|py)
+			pytags
+			;;
+		shell|sh)
+			ctags --language-force=Sh -R "${(@)args:-.}"
+			;;
+		*)
+			techo -c err "Unsupported language: $lang"
+			;;
 	esac
 }
 

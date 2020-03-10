@@ -37,19 +37,20 @@ function techo()
 	if [[ -n $print ]]; then
 		print -P $noesc $_topts - $ts$msg >$TTY
 	else
-		echo -e ${noesc:+-E} $_topts - $ts$msg >$TTY
+		echo ${noesc:+-E} $_topts - $ts$msg >$TTY
 	fi
 }
 
 function cancel() {
-	local ret=$?
+	local _ret=$?
 	_dbg_trap $0
-	((ret != 130)) && throw $ret
 	abort 130 "$C[warn]Cancelled $@"
+	# $((ret != 130)) && throw $ret
+	abort 130 "$C[warn]Cancelled (ret=$_ret) $@"
 }
 
 () {
-	typeset -gA ExTree Ex
+	typeset -gA ExTree # Ex
 	ExTree=(Ex -
 	  IoEx Ex
 		FileIoEx IoEx
@@ -57,7 +58,10 @@ function cancel() {
 		  ConstraintSqlEx SqlEx
 	)
 	local e #p
-	for e in ${(k)ExTree}; do Ex[$e]="(#m)*$e(_*)#"; done
+	for e in ${(k)ExTree}; do
+		#Ex[$e]="(#m)*$e(_(#b)(*))#"
+		typeset -g "$e=(#m)*$e(_(#b)(*))#"
+	done
 	# integer i len
 	# for e p in ${(kv)spec}; do
 	#  	if [[ $p != '-' ]]; then
@@ -69,6 +73,21 @@ function cancel() {
 	# for e in ${(k)spec}; do exMask[$e]='(#m)'$exMask[$e]; done
 }
 
+function throw()
+{
+	typeset -g EXCEPTION=$1
+	typeset -ga ExArgs=("$@[2,-1]")
+	readonly THROW
+	if (( TRY_BLOCK_ERROR == 0 )); then
+	  # We are throwing an exception from the middle of an always-block.
+	  # We can do this by restoring the error status from the try-block.
+	  (( TRY_BLOCK_ERROR = 1 ))
+	fi
+
+	# Raise an error, but don't show an error message.
+	THROW= 2>/dev/null
+}
+
 function abort()
 {
 	integer last=$?
@@ -76,22 +95,32 @@ function abort()
 	integer cod
 	zparseopts -D - -ex:=_EX_TYPE e=noexception v:=verbose D:=dbglvl
 
-	(($#_EX_TYPE)) && _EX=$_EX_TYPE[2]
-	(($#)) && { cod=$1; shift } || { techo -c lred 'abort(): missing argument'; cod=$last }
+	if (($#_EX_TYPE)); then
+		_EX=$_EX_TYPE[2]
+		if ((!$+ExTree[${_EX%%_*}])); then
+			techo -c lred "Invalid Exception: ${_EX%%_*}"
+			fstack 1
+			throw $_EX $cod "$@"
+		fi
+	fi
 	verbose=${verbose[2]:-2}
-	((DEBUG>=DBG_LVL+dbglvl[2]+1)) && fstack 1
+	if (($#)); then
+		cod=$1; shift
+		((DEBUG>=DBG_LVL+dbglvl[2]+1)) && fstack 1
+	else
+		cod=$last
+		fstack 1
+	fi
 	[[ -n $ABORT ]] && $ABORT $_EX_TYPE $cod "$@"
-	((verbose+cod>=2)) && techo -c lred -r - ${_EX:-ERROR} $cod: "$@"
+	((verbose+cod>=4)) && techo -c lred -r - ${_EX:-ERROR} $cod: "${@}"
 
 	#@TODO $ZSH_EVAL_CONTEXT =~ toplevel* , does not seem to work
 	((EXIT)) && [[ ! -o interactive ]] && exit $cod
 
 	if (($#_EX)); then
-		autoload throw
-		throw "$_EX $cod $@"
+		throw $_EX $cod "$@"
 	elif [[ -z $noexception ]]; then
-		autoload throw
-		throw "$cod $@"
+		throw $cod "$@"
 	fi
 	return $cod
 }
@@ -247,54 +276,54 @@ function typeOf()
 	local name ret tpath all result
 	local integer i=2
 	zparseopts -D -M - a=all p=p
+
 	name=$1
-	if [[ ! -f $name ]]; then
-		ret=($(which -w $all $p $name))
 
-		for ((i=2 ; $+ret[i] ; i+=2)); do
-			type=$ret[i]
-
-			if [[ $type == 'none' ]]; then
-				echo 'none'
-				return 1
-			fi
-
-			if [[ $type == 'command' ]]; then
-				tpath=$(which -p $name)
-				isScript $tpath && type='script'
-			fi
-
-			result+=($type:$tpath)
-		done
-		echo ${(z)${(@u)result//:/ }}
+	if [[ $(getpath $name) != '.' || $name == ./* ]]; then # full path given
+		tpath=$(getfullpath $name)
+		if isScript $tpath; then
+			type='script'
+		elif [[ -x $tpath ]]; then
+			type='command'
+		else
+			echo 'none'
+			return 1
+		fi
+		
+		echo $type $tpath
 		return 0
 	fi
-	
-	tpath=$name
-	
-	if isScript $tpath; then
-		type='script'
-	elif [[ -x $tpath ]]; then
-		type='command'
-	else
-		echo 'none'
-		return 1
-	fi
-	
-	echo $type $tpath
-	return 0
+
+	ret=($(which -w $all $p $name))
+
+	for ((i=2 ; $+ret[i] ; i+=2)); do
+		type=$ret[i]
+
+		if [[ $type == 'none' ]]; then
+			echo 'none'
+			return 1
+		fi
+
+		if [[ $type == 'command' ]]; then
+			tpath=$(which -p $name)
+			isScript $tpath && type='script'
+		fi
+
+		result+=($type:$tpath)
+	done
+	echo ${(z)${(@u)result//:/ }}
 }
 
 function zindent()
 {
-	local f
+	integer f
 	[[ $# -gt 1 ]] && {
 		f=1
 		echo "function $1()\n{"
 		shift
 	}
 	echo "$@" | sed -E 's/^([^{}])/\t\1/g'
-	[[ -n $f ]] && echo "}"
+	((f)) && echo "}"
 }
 
 function parseErrors()
@@ -693,7 +722,7 @@ function libmonitor()
 		fi
 		((lastt = t))
 		killall -HUP zsh
-	done < <(inotifywait -m -q -e modify -r --format '%e %f %T' --timefmt '%s' $ZSH_LIBS || echo "exit $?")
+	done < <(inotifywait -m -q -e modify -r --format '%e %f %T' --timefmt '%s' "${(z)ZSH_LIBS:P}" || echo "exit $?")
 	return $name
 }
 

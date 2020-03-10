@@ -5,7 +5,7 @@ if [ -z "$ZSH_MAIN_INFO" ] || [ -z "$ZSH_LIBS" ]; then
 fi
 include -qr functions
 include -qr file
-include -qr android
+include -r android
 include -ql debug
 include -ql network
 zparseopts -D -M - n=dryrun D::=debug d::=D i=interactive
@@ -77,7 +77,9 @@ function adb()
 	coproc parseADBErrors
 	#run $DRYRUN command adb $devOpts "$@" 2>&p & pid=$!
 	#run -c 0 $DRYRUN command adb $devOpts "$@" 2>&p
-	while ! run -Ae $DRYRUN command adb $devOpts "$@" 2>&p; do
+	
+	# while ! run -Ae $DRYRUN command adb $devOpts "$@" 2>&p; do
+	while ! command adb $devOpts "$@" 2>&p; do
 	#@TODO sort errors by file before opening files
 		while read -p line; do
 			split=(${(z)line})
@@ -264,7 +266,7 @@ function getLocalApkVersion()
 {
 	local v
 	#'chkCmdInst aapt || return
-	run aapt dump badging $1 | awkWrapper -o v -E - - "/package: (.*)/" m 'print m[1]; exit'
+	aapt dump badging $1 | awkWrapper -o v -E - - "/package: (.*)/" m 'print m[1]; exit'
 	[[ -n $v ]] && echo $v
 }
 
@@ -526,6 +528,7 @@ function processLine()
 			fi
 			apkinstall $1
 		;;
+		(port|redirect) adb reverse tcp:8081 tcp:8081 ;;
 		(keyb|hidekeyb|hidekeyboard) sendkey 111 ;;
 		(key|sendkey) sendkey "$@" ;;
 		(logcat) logcat "$@" ;;

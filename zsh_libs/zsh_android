@@ -1,10 +1,21 @@
 VERSION=1.0.0
 
-type getfullpath 2>&1 >/dev/null || include file
-export ANDROID_SDK_ROOT=$(getfullpath $HOME/Android/Sdk)
+export ANDROID_SDK_ROOT=$(getfullpath $HOME/androidSDK)
+if ! [[ -d $ANDROID_SDK_ROOT && -d $ANDROID_SDK_ROOT/tools ]]; then
+	echo "Android SDK not found"
+	return 1
+fi
 export ANDROID_HOME=$ANDROID_SDK_ROOT
 export ANDROID_PLATFORM_TOOLS=$ANDROID_SDK_ROOT/platform-tools
 path+=($ANDROID_HOME/emulator $ANDROID_HOME/tools $ANDROID_HOME/tools/bin $ANDROID_PLATFORM_TOOLS)
+
+tmp=($ANDROID_HOME/build-tools/*(/On[1]))
+export ANDROID_BUILD_TOOLS=$tmp
+if [[ -d $ANDROID_BUILD_TOOLS ]]; then
+	alias aapt=$ANDROID_BUILD_TOOLS/aapt
+else
+	echo 'Build tools dir not found'
+fi
 
 # Get package name from apk file
 function getPkg()
@@ -17,10 +28,6 @@ return
 #APPS="${ANDROID_APPS:-$HOME/PeD/android}"
 #[ -d "$APPS" ] || APPS="$HOME/apps"
 #ANDROID_APPS="$APPS"
-SEAGATE_INBRAMED=/seagate
-SEAGATE_APPS=$SEAGATE_INBRAMED/android
-CLOUD_INBRAMED=$CLOUD/data/Inbramed
-CLOUD_APPS=$CLOUD_INBRAMED/android
 export ANDROID_APPS APPS CLOUD_APPS CLOUD_INBRAMED
 
 #export TREADMILL=$APPS/Treadmill
@@ -28,13 +35,6 @@ export ANDROID_APPS APPS CLOUD_APPS CLOUD_INBRAMED
 #export TREADMILL_IMG=$TREADMILL_RES/drawable
 #export TREADMILL_LAYOUT=$TREADMILL_RES/layout
 #export TREADMILL_JAVA="$(echo $TREADMILL/app/src/main/java/**/treadmill)"
-#
-#export CICLOERGOMETER=$APPS/Cicloergometer
-#export CICLOERGOMETER_RES=$CICLOERGOMETER/app/src/main/res
-#export CICLOERGOMETER_IMG=$CICLOERGOMETER_RES/drawable
-#export CICLOERGOMETER_LAYOUT=$CICLOERGOMETER_RES/layout
-#export CICLOERGOMETER_JAVA="$(echo $CICLOERGOMETER/app/src/main/java/**/cicloergometer)"
-#export CHIPSEE_JB=$HOME/images/Chipsee-BBB-JB-42-Source-20140413/device/ti/beagleboneblack
 
 # Added 2019-06-10 17:59
 function checkdbs()

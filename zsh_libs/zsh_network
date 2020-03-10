@@ -11,14 +11,15 @@ function urlinfo()
 {
 	local schemes=(ssh git https http ftp ftps file)
 	local getscheme getuser getport gethost getpath getquery
-	local userpat hostpat pathpat querypat argpat out
+	local userpat hostpat pathpat querypat argpat out var
 	userpat='[[:alnum:]]+'
 	hostpat='[[:alnum:]][-.[:alnum:]]*\.[[:alpha:]]+'
 	pathpat='~?[-_./[:alnum:]]+'
 	argpat='[^&]+'
 	querypat="$argpat(&$argpat)*"
 	out=()
-	zparseopts -D -M - s=getscheme h=gethost u=getuser p=getpath q=getquery a=getall
+	zparseopts -D -M - v:=var \
+		s=getscheme h=gethost u=getuser p=getpath q=getquery a=getall
 
 	if [[ $1 =~ (${(j.|.)schemes})'://'($~userpat'@')?($~hostpat)(':'[0-9]+)?('/'$~pathpat)?('\?'$~querypat)? ]]; then
 		(($#getscheme)) && out+=($match[1])
@@ -37,14 +38,8 @@ function urlinfo()
 	else
 		return 1
 	fi
-	echo -n ${(q)out}
+	[[ -v $var[2] ]] && set -A $var[2] "${(@)out}" || echo -n ${(q)out}
 	return 0
-}
-
-# Added 2019-09-16 14:25
-function vnc()
-{
-	run x0vncserver -rfbport 5555
 }
 
 function imdb()
@@ -219,4 +214,10 @@ function ipfind()
 function google()
 {
 	url 'https://www.google.com?q=' "$*"
+}
+
+# Added 2020-03-07 00:57
+function vnc()
+{
+	DISPLAY=:0 x0vncserver -rfbport 5555 -rfbauth ~/.vnc/passwd
 }

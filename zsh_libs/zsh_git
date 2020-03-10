@@ -318,7 +318,7 @@ function listbranch()
 
 	(($#merged)) && opts+=($merged) || opts+=(--no-merged origin/master) 
 	
-	git branch --sort=committerdate --format='%(HEAD) %(color:yellow)%(refname:short)%(color:reset) - %(color:red)%(objectname:short)%(color:reset) - %(contents:subject) - %(authorname) (%(color:green)%(committerdate:relative)%(color:reset))' --color=always $opts
+	git --no-pager branch --sort=committerdate --format='%(HEAD) %(color:yellow)%(refname:short)%(color:reset) - %(color:red)%(objectname:short)%(color:reset) - %(contents:subject) - %(authorname) (%(color:green)%(committerdate:relative)%(color:reset))' --color=always $opts "$@"
 }
 function gremote()
 {

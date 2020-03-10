@@ -20,19 +20,19 @@ COLORS=(
 
 typeset -gA C
 C=(
-	head "\e[${COLORS[lblue]}m"
-	err "\e[1;${COLORS[bgred]}m"
-	red "\e[${COLORS[red]}m"
-	lred "\e[${COLORS[lred]}m"
-	ok "\e[${COLORS[lgreen]}m"
-	warn "\e[${COLORS[lyellow]}m"
+	head "[${COLORS[lblue]}m"
+	err "[1;${COLORS[bgred]}m"
+	red "[${COLORS[red]}m"
+	lred "[${COLORS[lred]}m"
+	ok "[${COLORS[lgreen]}m"
+	warn "[${COLORS[lyellow]}m"
 )
-C_="\e[0m"
+C_="[0m"
 
 function colorSet()
 {
 	local c=$COLORS[${2:-$1}]
-	[ -n "$c" ] && C[$1]="\e[${c}m" || return 1
+	[ -n "$c" ] && C[$1]="[${c}m" || return 1
 }
 
 CANCEL=" [${C[warn]}CANCEL$C_]"
@@ -85,7 +85,7 @@ function input()
 			str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")
 			#@ is returning 1, should be ok, but empty str, but since code is 1, we can manually set str
 		else
-			print ${(k)buttons}
+			print "\n$title\n"${(k)buttons}": "
 			if [[ -o zle ]]; then
 				techo # newline, because vared clears the line
 				vared -e str
@@ -357,7 +357,7 @@ function chkCmd()
 		# pkg version packager cmd
 		case $pkgList[i+3] in
 			$cmd|'-')
-				lines+=($pkgList[i] '(version:' $pkgList[i+1] ')' $pkgList[i+2] $cmd $desc[1] $'\n')
+				lines+=($pkgList[i] "(version: ${(qq)pkgList[i+1]})" $pkgList[i+2] $cmd $desc[1] $'\n')
 				;;
 			*)
 				similar+=("Similar\ command:" $pkgList[i+3] '(' $pkgList[i+2] 'package:' $pkgList[i] 'version:' $pkgList[i+1] ')' $cmd $desc[1] $'\n')
@@ -372,7 +372,7 @@ function chkCmd()
 	if [[ $tmp[1] =~ '^Similar' ]]; then
 		pkg=$tmp[7]; cmd=$tmp[3]; packager=$tmp[5]
 	else
-		pkg=$tmp[1]; cmd=$tmp[6]; packager=$tmp[5]
+		pkg=$tmp[1]; cmd=$tmp[6]; packager=$tmp[9]
 	fi
 
 	run -s -p "Installing $pkg (command: $C[lcyan]$cmd$C_)" $packager install $pkg
@@ -636,7 +636,7 @@ function group()
 }
 function color()
 {
-	{ "$@" 2>&1 1>&3 | sed $'s,.*,\e[91m&\e[0m,' 1>&2 } 3>&1
+	{ "$@" 2>&1 1>&3 | sed $'s,.*,[91m&[0m,' 1>&2 } 3>&1
 	return $pipestatus[1]
 }
 
@@ -770,13 +770,13 @@ function todo()
 	todos=($~glob(-N))
 	case $cmd in
 	add)
-		todo=$(chooser $search -f1 $todos:t "New todo" "Browse full path") || cancel
+		chooser -v todo $search -f1 $todos:t "New todo" "Browse full path" || cancel
 		if [[ $todo == 'New' ]]; then
-			todo=$(input -p 'Enter todo id') || cancel
+			input -v todo -p 'Enter todo id' || cancel
 			[[ ${todo:0:1} != / ]] && todo=$dir/$todo
 			[[ $(getext $todo) == $e ]] || todo=$todo.$e
 		elif [[ "$todo" == "Browse full path" ]]; then
-			todo=$(chooser --file -p "Choose path of todo") || cancel
+			chooser -v todo --file -p "Choose path of todo" || cancel
 			[[ ${todo:0:1} != / ]] && todo=$dir/$todo
 			# @todo
 			#dir=$(getfilename $todo)
@@ -786,7 +786,7 @@ function todo()
 		;;
 	show)
 		(($#todos)) || return 10
-		todo=$(chooser $search $todos:t) || cancel
+		chooser -v todo $search $todos:t || cancel
 		id=$(noext $(getfilename $todo) $e)
 		run -p "Todo: $id" show $todo
 		#for todo in $~glob(-N); do
@@ -836,4 +836,10 @@ function pizza()
 function kcmd()
 {
 	qdbus $KONSOLE_DBUS_SERVICE $KONSOLE_DBUS_SESSION "$@"
+}
+
+# Added 2020-03-06 13:18
+function in()
+{
+	( cd "$1" && shift && "$@" )
 }
