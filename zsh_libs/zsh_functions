@@ -125,14 +125,22 @@ function input()
 	return $ret
 }
 
+function clearBuffer()
+{
+	while read -t 0 -k -r a; do : ; done # clear buffer
+}
+
 function confirm()
 {
 	local ret a c
 	if [[ "$1" != -c ]]; then
 		c=(-c lcyan)
 	fi
-	while read -t 0 -k -r a; do : ; done # clear buffer
+
+	clearBuffer
+
 	[[ -n $a ]] && echo
+
 	techo -n $c "$@" "(y/N)? "
 	if [[ -n "$BASH" ]]; then
 		while [[ "$a" != 'y' ]] && [[ "$a" != 'n' ]]; do
@@ -140,7 +148,7 @@ function confirm()
 		done
 		return $ret
 	fi
-	read -q -r "a"
+	read -q -r a
 	ret=$?
 	echo
 	return $ret
@@ -150,14 +158,14 @@ function chooser()
 {
 	local noSelect sep field bytes search default head foot
 	local list ifs var chosen chosenList selectors events keys ofs
-	local filter file
+	local filter file simple opt
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
 	zparseopts -D -M - c=color n:=noSelect R:=regex S:=search \
 		 v:=var D:=default s:=sep f:=field -ifs:=ifs b:=bytes E:=events \
 		 H:=head -head:=H p:=H F:=foot -foot:=F -keys:=keys ofs:=ofs \
-		 -file=file -filter:=filter
+		 -file=file -filter:=filter -simple=simple
 
 	if [[ -n $ofs ]]; then
 		ofs=$ofs[2]
@@ -176,6 +184,10 @@ function chooser()
 	#@TODO
 	#(($#var)) && set -A list ${(P)var[2]}
 
+	if (($#simple)); then
+		typeset -A list
+	fi
+
 	if [[ -n $ifs ]]; then
 		explode -v list "$*" $ifs[2]
 	else
@@ -185,14 +197,33 @@ function chooser()
 	if (($#list > 1)); then
 		{
 			[[ -n $default[2] ]] && default=($default[2])
-			explode -v chosenList "$(
-				NLIST_SET_SEARCH_TO=$search[2] \
-				ZSHSELECT_START_IN_SEARCH_MODE=1 \
-				ZSHSELECT_NONSELECTABLE=$noSelect[2] \
-				ZSHSELECT_ENABLE_EVENTS=$events[2] \
-				ZSHSELECT_HEAD=$head[2] ZSHSELECT_FOOT=$foot[2] \
-				zsh-select $default ${list:|default} || throw $?
-			)" $'\n'
+
+			if (($#simple)); then
+				chosenList=()
+				local val
+				chosenList=()
+				for opt val in "${(@kv)list}"; do
+					techo "$C[ok]$opt$C_) $val"
+				done
+
+				while read -k -r -s opt; do
+					if (($+list[${(U)opt}])); then
+						# selection matches an option
+						chosenList+=($list[$opt])
+						break
+					fi
+				done
+			else
+				explode -v chosenList "$(
+					NLIST_SET_SEARCH_TO=$search[2] \
+					ZSHSELECT_START_IN_SEARCH_MODE=1 \
+					ZSHSELECT_NONSELECTABLE=$noSelect[2] \
+					ZSHSELECT_ENABLE_EVENTS=$events[2] \
+					ZSHSELECT_HEAD=$head[2] ZSHSELECT_FOOT=$foot[2] \
+					zsh-select $default ${list:|default} || throw $?
+				)" $'\n'
+			fi
+
 		} always {
 			if catch '*'; then
 				return $CAUGHT
@@ -204,10 +235,8 @@ function chooser()
 
 	(($#chosenList)) || return 10
 
-	list=()
+	typeset -a list=()
 	for chosen in $chosenList; do
-		local opt
-
 		for opt in $selectors; do
 			case $opt in
 			R)

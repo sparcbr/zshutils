@@ -1,5 +1,5 @@
 VERSION=1.0.0
-#lazyload=chartoint,inttochar,tobytes.tohex,hextochar
+#lazyload=chartoint,inttochar,toBytes,tohex,hextochar
 
 function tobin()
 {
@@ -18,7 +18,7 @@ function tohex()
 
 function chartoint()
 {
-    local i=`printf %3d \'"$1"`
+	local i=$(printf %3d \'"$1")
     #printf %d \'"$1""\n"
     printf "$i 0x%2x %s\n" $i $(tobin $i)
 
@@ -50,6 +50,7 @@ function chartoint()
     #   
     # What is this sorcery?
 }
+
 function hextochar()
 {
     local i str
@@ -64,7 +65,7 @@ function inttochar()
     [[ $(ishex $1) ]] && hextochar $1 || printf "\\$(printf %o $1)"
 }
 
-function toBytes()
+function tobytes()
 {
 	integer factor=1
 	

@@ -13,6 +13,8 @@ alias mk="make"
 alias apt="sudo apt"
 alias sys="sudo systemctl"
 
+[[ -z $VIM && $SHELL == '/bin/zsh' ]] || return
+
 function hg()
 {
 	local match fopt gopt ic range

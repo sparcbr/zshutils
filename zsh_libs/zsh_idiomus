@@ -1,0 +1,54 @@
+VERSION=1.0.0
+#lazyload=
+
+[[ -v comp ]] || typeset -ga comp
+
+function listAudio()
+{
+	trap 'throw 130' INT 
+
+	sql -v -o row 'SELECT review_id,version,sequence,profile,review_version_id, T.status,rough_freq,mean_amp FROM review_track_stats S INNER JOIN review_version As V USING (review_id, version) INNER JOIN review_track T using (review_version_id,sequence)  WHERE T.status!="processing" AND S.status="unchecked"  ORDER BY mid_amp DESC limit 15'
+	while sqlFetch row; do
+	{
+		checkAudio "${(@)row[1,5]}"
+		loop=0
+	} always {
+		catch '130' && confirm $'\nExit' && { trap - INT; cancel }
+	}
+	done
+
+	trap - INT
+}
+
+# Added 2020-02-10 18:12
+function checkAudio()
+{
+	integer loop=1 bad=0
+	trap 'throw 130' INT 
+
+	reviewId=$1
+	version=$2
+	sequence=$3
+	profile=$4
+	versionId=$5 
+	while ((loop)); do
+		{
+			f="rdata/reviews/$1/v$2/tracks/$3$4.mp3" 
+			[[ -f $f ]] || abort --ex FileIoEx_NotFound 9 $f
+			mpg123 --stereo $f
+			confirm 'Mark as bad quality' && bad=1
+			loop=0
+		} always {
+			catch '130' && confirm $'\nExit' && { trap - INT; cancel }
+		}
+	done
+
+	if ((bad)); then
+		techo "Marking $f as bad"
+		sql -v "UPDATE review_track SET status='processing' WHERE review_version_id=$versionId AND sequence=$sequence"
+	fi
+	((bad)) && _status='bad' || _status='ok'
+	sql -v "UPDATE review_track_stats SET status='$_status' WHERE review_id=$reviewId AND version=$version AND sequence=$sequence"
+
+	trap - INT
+}

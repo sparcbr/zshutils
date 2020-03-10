@@ -1,0 +1,29 @@
+#compdef in
+#
+# a zsh completion definition for a shell function `in':
+#
+#   in () { ( cd "$1" && shift && "$@" ); }
+#
+# usage: in <dir> <command> [args...]
+
+_arguments \
+       ':directory: _path_files -/'  \
+       ':complete command name:->cmd'  \
+       '*::arguments:->args'
+
+if [[ -n $state ]]; then
+    local cwd="$(pwd -L)" ret dir
+    case $state in
+        (cmd)
+            dir=${~words[2]}
+            cd "$dir" && _command_names
+            ;;
+        (args)
+            dir=${~words[1]}
+            cd "$dir" && _normal
+            ;;
+    esac
+    ret="$?"
+    cd -L "$cwd"
+    return $ret
+fi

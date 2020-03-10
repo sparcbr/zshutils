@@ -19,6 +19,8 @@ function cwdof()
 	done
 }
 
+[[ "$(typeOf p)" == 'alias' ]] && unalias p
+
 comp+=(p=ps)
 function p()
 {

@@ -331,17 +331,31 @@ function gremote()
 # Added 2019-09-03 19:04
 function gclone()
 {
-	local repo
+	local repo dir
+
 	include -r network
+	repo=$1 ; dir=$2
 	cd $HOME/repos
-	for repo; do
-		if [[ -n "$(urlinfo -s $repo)" ]] || repo="$(github -e $repo)"; then
-			git clone $repo
+
+	{ [[ -n "$(urlinfo -s $repo)" ]] || repo="$(github -e $repo)" } || return
+
+	while ((1)); do
+		if [[ -z $dir ]]; then
+			dir=${repo##*/}
+			dir=${dir%%.git}
+			if [[ -d $dir ]]; then
+				local name=()
+				urlinfo -v name -p $repo
+				dir=${${name[1]#/*}/\//_}
+			fi
+			input -p $repo -t 'Clone into dir' -v dir $dir || return
 		fi
+		if git clone $repo $dir && [[ -d $dir ]] && cd $dir; then
+			return 0
+		fi
+		techo -c lred Error cloning $repo
+		confirm 'Try again' || return 1
 	done
-	repo=${repo##*/}
-	repo=${repo%%.git}
-	[[ -d $repo ]] && cd $repo
 }
 
 function gpr()

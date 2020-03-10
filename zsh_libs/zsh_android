@@ -17,6 +17,8 @@ else
 	echo 'Build tools dir not found'
 fi
 
+alias gcloud='source $HOME/google-cloud-sdk/completion.zsh.inc; path+=($HOME/google-cloud-sdk/bin); unalias gcloud'
+
 # Get package name from apk file
 function getPkg()
 {

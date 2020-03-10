@@ -402,7 +402,8 @@ function box()
 					continue
 				fi
 
-				list=($base/*(-/om))
+				list=($base/*(-/omN))
+				[[ -z $list ]] && return 10
 				box=$(chooser -f1 ${=box:+-S $search} $list:t 'New box') || cancel
 				if [[ $box == 'New' ]]; then
 					cmd='new' ; box=''
