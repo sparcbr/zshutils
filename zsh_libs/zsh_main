@@ -1,7 +1,9 @@
 VERSION=1.0.8
 [[ -v comp ]] || typeset -g -a comp
 
-alias _dbg_trap='[[ -o xtrace ]] && unalias _dbg_trap && include debug && _dbg_trap $0'
+#alias _dbg_trap='[[ -o xtrace ]] && { unalias _dbg_trap; include debug && _dbg_trap $0 }'
+function _dbg_trap() { set +x }
+
 function techo()
 {
 	local c _topts nonl print noesc ts msg
@@ -20,7 +22,7 @@ function techo()
 	if [[ -n $c ]]; then
 		c=$c[2]
 		if [[ $c == <1-> ]]; then
-			msg="\e[38;5;${c}m$@$C_"
+			msg="[38;5;${c}m$@$C_"
 		else
 			if [[ -v C[$c] ]] || { type colorSet >/dev/null && colorSet $c }; then
 				msg="${C[$c]}${@}$C_"
@@ -46,7 +48,7 @@ function cancel() {
 	_dbg_trap $0
 	abort 130 "$C[warn]Cancelled $@"
 	# $((ret != 130)) && throw $ret
-	abort 130 "$C[warn]Cancelled (ret=$_ret) $@"
+	#abort 130 "$C[warn]Cancelled (ret=$_ret) $@"
 }
 
 () {
@@ -153,6 +155,7 @@ function implode()
 
 function explode()
 {
+	_dbg_trap $0
 	local _var _str _sep uniq _list ifs _Asep stdin _tmp awk #@TODO awkWrapper...
 	zparseopts -D -M - v:=_var u=uniq A:=_Asep -stdin=stdin -awk:=awk
 
@@ -446,7 +449,8 @@ function include()
 
 			if ((required)); then
 				techo -P "[%K{1}%F{15}FAIL%f%k] %F{9}Required %F{11}zsh_$name%F{9} not loaded%f"
-				[[ -o interactive ]] || abort 2
+				#@TODO[[ -o interactive ]] || abort 2
+				abort 2
 				return 2
 			fi
 			techo -P "[%K{1}%F{15}FAIL%f%k] %F{11}zsh_$name%F{9} not loaded%f"
@@ -502,6 +506,7 @@ function aptinst()
 # in_array value array_name 
 function in_array()
 {
+	_dbg_trap $0
 	local name val _var ret _i
 	zparseopts -D -M - v:=_var
 
@@ -528,6 +533,7 @@ function in_array()
 #TODO call this within chooser
 function match_array()
 {
+	_dbg_trap $0
 	local _var field choose sep
 	zparseopts -D -M - v:=_var f:=field c=choose s:=sep
 	[[ -v $_var[2] ]] || return 1
@@ -630,6 +636,7 @@ function inAlias()
 comp+=("do_sudo=sudo")
 function do_sudo()
 {
+	_dbg_trap $0
 	integer glob=1
 	local _sopts user cmd
 	
@@ -678,7 +685,7 @@ function do_sudo()
 # Added 2019-11-18 19:33
 function heredoc()
 {
-	IFS='\n' read -r -d '' $1 || true
+	IFS=$'\n' read -r -d '' $1 || true
 }
 
 function OPT_CHK()

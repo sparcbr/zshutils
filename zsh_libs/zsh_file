@@ -347,7 +347,7 @@ function box()
 {
 	local box base=$HOME/repos cmd search list
 	#zparseopts -D -M - 
-	include functions
+	include -r functions
 	include -l network
 	#include boxes
 
@@ -441,7 +441,7 @@ function attributeSync()
 	rsArgs=(${@:--u})
 	while read stats name skip; do
 		#echo stat=$stats name=$name ;
-		[[ $stats == skipping ]] 
+		#[[ $stats == skipping ]] 
 		[[ $stats[5] == t ]] && $dry sudo touch --reference "$dir1/$name" $dir2/$name
 		[[ $stats[6] == p ]] && $dry sudo chmod --reference "$dir1/$name" $dir2/$name
 		if [[ $stats[7] == o || $stats[8] == g ]] && [[ $stats != skipping ]]; then
@@ -488,11 +488,11 @@ function fordir() #TODO
 # Added 2019-06-07 17:27
 function fordo() #TODO
 {
-	e FIXME
+	techo FIXME
 	local v cmd
 	cmd=$1; shift
 	for v; do
-		run "$cmd" "$v"
+		run - $=cmd $v
 	done
 }
 
@@ -553,6 +553,7 @@ awkFuncs=(
 
 function awkWrapper()
 {
+	_dbg_trap $0
 	local opts prog _vars _expr _out _inc reSep
 	local _mapCols _cols
 	zparseopts -D -M - v:=_vars F:=reSep E=_expr e:=_expr o:=_out \
