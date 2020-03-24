@@ -32,6 +32,18 @@ function aptlist()
 	zgrep 'install ' /var/log/dpkg.log* | sort | cut -f1,2,4,6 -d' ' | less
 }
 
+function zindent()
+{
+	integer f
+	[[ $# -gt 1 ]] && {
+		f=1
+		echo "function $1()\n{"
+		shift
+	}
+	echo "$@" | sed -E 's/^([^{}])/\t\1/g'
+	((f)) && echo "}"
+}
+
 function mkscript()
 {
 	local shell func name edit append ret=1
@@ -173,7 +185,7 @@ function mkscript()
 		if (($#func && isLib)); then
 			edfunc $func
 		else
-			gvim -f $file
+			v -f $file
 		fi
 	fi
 }
@@ -336,10 +348,10 @@ function vw()
 			if [[ -f $cpath ]]; then
 				mime=$(getmime $cpath)
 				if [[ $mime == 'application/x-sharedlib' ]]; then
-					echo "$tpath is binary executable"
+					echo "$cpath is binary executable"
 					return 1
 				fi
-				gvim $cpath ${linenum:++$linenum}
+				v $cpath ${linenum:++$linenum}
 			else
 				echo Invalid path \"$cpath\"
 			fi
@@ -351,13 +363,21 @@ function vw()
 # file1:l4 file2:l66 
 function v()
 {
-	local opts sudo arg args skip
+	local opts sudo arg args skip vim
+	typeset -aU
+	if [[ -n $DISPLAY ]]; then
+		vim=gvim
+	else
+		vim=vim
+	fi
 	while (($#)); do
 		if [[ ${1:0:1} == '-' ]]; then
 			case $1 in
-				-s) sudo='sudo'
+				-s) sudo=(sudo -H)
 					;;
 				-#) opts+=('+/^\s*[^#]')
+					;;
+				-f) [[ -n $DISPLAY ]] && opts+=(-f)
 					;;
 				-) opts+=(-u NONE -N)
 					;;
@@ -381,9 +401,9 @@ function v()
 			elif ((linenum)); then
 				pos=+$linenum
 			fi
-			$sudo gvim $opts $pos $file
+			$sudo $vim $opts $pos $file
 		else
-			$sudo gvim $opts $arg
+			$sudo $vim $opts $arg
 		fi
 	done
 }

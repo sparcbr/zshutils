@@ -8,9 +8,31 @@
 # - ZSHSELECT_START_IN_SEARCH_MODE
 # - ZSHSELECT_NONSELECTABLE
 # - ZSHSELECT_ENABLE_EVENTS: edit
+# - ZSHSELECT_CURRENT_IDX: initial NLIST_CURRENT_IDX
+# - ZSHSELECT_MULTI: allow multiple 
+# - ZSHSELECT_MULTI_CHAR: mark char (default: X) 
+# - ZSHSELECT_SELECTED: selected elements index
+# - ZSHSELECT_SAVE_IDX: output list of selected index as a space separated 
+#	                    list string as the last line
 
 emulate -LR zsh
 setopt extendedglob
+
+((DEBUG)) && DBGTTY=${DBGTTY:-$TTY}
+decho() {
+	((DEBUG)) && echo "$@" >$DBGTTY
+}
+
+# In multi-select mode add this offset in X to inner window
+integer ZSHSELECT_MULTI ZSHSELECT_SAVE_IDX NLIST_MULTI_OFFSET
+if ((ZSHSELECT_MULTI)); then
+	NLIST_MULTI_BOX='[ ]'
+	((NLIST_MULTI_OFFSET=$#NLIST_MULTI_BOX-1))
+	[[ -n $ZSHSELECT_MULTI_CHAR ]] || ZSHSELECT_MULTI_CHAR='X'
+	[[ -n $ZSHSELECT_MULTI_CHAR_OFFSET ]] || ZSHSELECT_MULTI_CHAR_OFFSET=2
+fi
+
+((ZSHSELECT_CURRENT_IDX)) || ZSHSELECT_CURRENT_IDX=1
 
 # Indexes of non-selectable elements (space-separated, since we can't use environment arrays)
 local -a NLIST_NONSELECTABLE_ELEMENTS
@@ -48,7 +70,21 @@ local active_text=reverse
 
 NLIST_START_IN_SEARCH_MODE=1
 [[ "$ZSHSELECT_START_IN_SEARCH_MODE" = <-> ]] && NLIST_START_IN_SEARCH_MODE="$ZSHSELECT_START_IN_SEARCH_MODE"
-NLIST_ENABLED_EVENTS=(${(U)ZSHSELECT_ENABLE_EVENTS})
+
+# Map keys to events: events can be words like EDIT, SELECT, or an integer.
+# Integers specify the selection (toggle in multi mode) of an element by index.
+local -A KEY_MASK
+local -aU NLIST_ENABLED_EVENTS
+for key_mask event in $ZSHSELECT_ENABLE_EVENTS; do
+	if [[ $event == <-> ]]; then
+		if [[ ${NLIST_NONSELECTABLE_ELEMENTS[(r)$event]} != $event ]]; then
+			KEY_MASK+=($key_mask $event)
+		fi
+	else
+		KEY_MASK+=($key_mask ${(U)event})
+		NLIST_ENABLED_EVENTS+=(${(U)event}) # Events are automatically enabled.
+	fi
+done
 #######################################################################################
 
 _sellist_has_terminfo=0
@@ -114,10 +150,6 @@ _sellist_rotate_buffer() {
     buffer="${(j: :)words}$space"
 }
 
-decho () {
-	(( $+DEBUG )) && echo "$@" >$TTY
-}
-
 _sellist_find_next_element() {
 	integer i step=$1 current=${2:-$current_idx} last=${3:-$last_element}
 
@@ -162,6 +194,23 @@ _sellist_find_previous_element() {
 	(( step == 1 || $# > 1 )) && return false
 
 	_sellist_find_next_element 1 $first $current
+}
+
+_sellist_toggle_element() {
+	integer b
+	((b=1-NLIST_SELECTED_ELEMENTS[$1]))
+	NLIST_SELECTED_ELEMENTS[$1]=$b
+
+	# no need for code below for now, while the list is always redrawn anyway
+
+	# zcurses move main $(($1+1-NLIST_FROM_WHAT_IDX_LIST_IS_SHOWN)) $ZSHSELECT_MULTI_CHAR_OFFSET
+	# if ((b)); then
+	# 	decho select $1
+	# 	zcurses string main $ZSHSELECT_MULTI_CHAR
+	# else
+	# 	decho deselect $1
+	# 	zcurses string main ''
+	# fi
 }
 
 sel-list-input() {
@@ -221,8 +270,12 @@ sel-list-input() {
             if [[ "$NLIST_SEARCH_BUFFER" != "" || "$NLIST_IS_UNIQ_MODE" -eq 1 ||
                 ${NLIST_NONSELECTABLE_ELEMENTS[(r)$current_idx]} != $current_idx ]]
             then
-                # Save current element in the result variable
-                reply=( $current_idx "SELECT" )
+				if ((ZSHSELECT_MULTI && ZSHSELECT_MULTI_ENTER_TOGGLE)); then
+					_sellist_toggle_element $current_idx
+				else
+					# Save current element in the result variable
+					reply=( $current_idx "SELECT" )
+				fi
             fi
             ;;
         (H|'?')
@@ -320,6 +373,9 @@ sel-list-input() {
         ($'\C-A')
             _sellist_rotate_buffer
             ;;
+		($'\0')
+			((ZSHSELECT_MULTI)) && _sellist_toggle_element $current_idx
+			;;
         (*)
             ;;
     esac
@@ -451,6 +507,9 @@ sel-list-input() {
         ($'\C-A')
             _sellist_rotate_buffer
             ;;
+		($'\0')
+			((ZSHSELECT_MULTI)) && _sellist_toggle_element $current_idx
+			;;
         (*)
             if [[ $#key == 1 && $((#key)) -lt 31 ]]; then
                 # ignore all other control keys
@@ -710,6 +769,20 @@ _sellist_colorify_disp_list() {
     fi
 }
 
+calc_size() {
+	#term_height="$LINES"
+	#term_width="$COLUMNS"
+	local IFS=' '
+	local tmp=($(stty size))
+	term_height=$tmp[1]
+	term_width=$tmp[2]
+	inner_height=term_height-3
+	inner_width=term_width-3-NLIST_MULTI_OFFSET
+	page_height=inner_height
+	page_width=inner_width
+	decho "LINES=$LINES COLUMNS=$COLUMNS inner_height=$inner_height inner_width=$inner_width"
+}
+
 #
 # Main sel-list code
 #
@@ -728,17 +801,11 @@ REPLY="-1"
 typeset -ga reply
 reply=()
 
-integer term_height="$LINES"
-integer term_width="$COLUMNS"
-if [[ "$term_height" -lt 1 || "$term_width" -lt 1 ]]; then
-    local stty_out=$( stty size )
-    term_height="${stty_out% *}"
-    term_width="${stty_out#* }"
-fi
-integer inner_height=term_height-3
-integer inner_width=term_width-3
-integer page_height=inner_height
-integer page_width=inner_width
+integer term_height term_width
+integer inner_height inner_width
+integer page_height page_width
+
+calc_size
 
 typeset -a list disp_list
 integer first_element=1
@@ -776,10 +843,10 @@ nthemes=${#themes}
 # Ability to remember the list between calls
 if [[ -z "$NLIST_REMEMBER_STATE" || "$NLIST_REMEMBER_STATE" -eq 0 || "$NLIST_REMEMBER_STATE" -eq 2 ]]; then
     NLIST_FROM_WHAT_IDX_LIST_IS_SHOWN=1
-    NLIST_CURRENT_IDX=1
+    NLIST_CURRENT_IDX=$ZSHSELECT_CURRENT_IDX
     NLIST_IS_SEARCH_MODE=0
     NLIST_SEARCH_BUFFER=""
-    NLIST_TEXT_OFFSET=0
+	NLIST_TEXT_OFFSET=0
     NLIST_IS_UNIQ_MODE=0
     NLIST_IS_F_MODE=0
 
@@ -813,7 +880,7 @@ zcurses init
 zcurses delwin main 2>/dev/null
 zcurses delwin inner 2>/dev/null
 zcurses addwin main "$term_height" "$term_width" 0 0
-zcurses addwin inner "$inner_height" "$inner_width" 1 2
+zcurses addwin inner "$inner_height" "$inner_width" 1 $((2+NLIST_MULTI_OFFSET))
 # From sel-list.conf
 [ "$colorpair" = "" ] && colorpair="white/black"
 [ "$border" = "0" ] || border="1"
@@ -1024,6 +1091,35 @@ while (( 1 )); do
             "$disp_list[@]"
     fi
 
+	# Draw selected marks (multi)
+	if ((ZSHSELECT_MULTI)); then
+		local checked_box=$NLIST_MULTI_BOX
+		checked_box[$ZSHSELECT_MULTI_CHAR_OFFSET]=$ZSHSELECT_MULTI_CHAR
+		for ((i=1 ; i<=$#disp_list; i++)); do
+			((idx=NLIST_FROM_WHAT_IDX_LIST_IS_SHOWN+i-1))
+			zcurses 'move' 'main' $i 0
+			if [[ $NLIST_NONSELECTABLE_ELEMENTS[(r)$idx] != $idx ]]; then
+				if ((NLIST_SELECTED_ELEMENTS[$idx])); then
+					box[$ZSHSELECT_MULTI_CHAR_OFFSET]=$ZSHSELECT_MULTI_CHAR
+					zcurses 'string' 'main' $checked_box
+					decho 'select' $idx
+				else
+					box[$ZSHSELECT_MULTI_CHAR_OFFSET]=' '
+					zcurses 'string' 'main' $NLIST_MULTI_BOX
+					decho 'deselect' $idx
+				fi
+			else
+				zcurses 'string' 'main' $NLIST_MULTI_BOX
+				decho 'NS' $idx
+			fi
+		done
+		for (( ; i<=$page_height; i++)); do
+			zcurses 'move' 'main' $i 0
+			zcurses 'string' 'main' $NLIST_MULTI_BOX
+			decho '   ' $idx
+		done
+	fi
+
     local status_msg_strlen
     local keywordmsg=""
     if [ "$keywordisfresh" = "1" ]; then
@@ -1059,7 +1155,7 @@ while (( 1 )); do
 
     local top_msg=${ZSHSELECT_HEAD:-" ${(C)ZSH_NAME} $ZSH_VERSION, $USER "}
     #zcurses move main 0 $(( term_width / 2 - $#top_msg / 2 ))
-    zcurses move main 0 0
+    zcurses move main 0 1
     zcurses string main $top_msg
 
     zcurses refresh main inner
@@ -1197,6 +1293,14 @@ else
     else
         exec </dev/tty
     fi
+fi
+
+local -a NLIST_SELECTED_ELEMENTS
+if (($#ZSHSELECT_SELECTED)); then
+	ZSHSELECT_SELECTED=($=ZSHSELECT_SELECTED)
+	for ((idx=1; idx<=$#list; idx++)); do
+		((ZSHSELECT_SELECTED[(re)$idx])) && NLIST_SELECTED_ELEMENTS[$idx]=1
+	done
 fi
 
 sel-list "${list[@]}"

@@ -162,12 +162,13 @@ comp+=("syncDirs=rsync")
 function syncDirs()
 {
 	integer i n
-	local src targets dir data rsArgs checksum arg noDelete
-	local quiet sudo excludeFrom dry extraArgs reverse
-	local files stat name noSlash sshCFG
-	typeset -a src targets rsArgs extraArgs files excludePatterns
-	zparseopts -D -M - q=quiet s=sudo i:=excludeFrom d=dry \
-		c=checksum r=reverse -no-add-slash=noSlash -no-delete=noDelete
+	local dir data checksum arg noDelete
+	local quiet sudo excludeFrom exclude dry reverse
+	local stat name noSlash sshCFG
+	typeset -aU src targets rsArgs extraArgs files excludePatterns
+	zparseopts -D -M - q=quiet s=sudo d=dry \
+		c=checksum r=reverse -no-add-slash=noSlash -no-delete=noDelete \
+		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	(($# >= 2)) || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
@@ -403,8 +404,8 @@ function box()
 				fi
 
 				list=($base/*(-/omN))
-				[[ -z $list ]] && return 10
-				box=$(chooser -f1 ${=box:+-S $search} $list:t 'New box') || cancel
+				(($#list)) || return 10
+				chooser -v box -f1 ${=box:+-S $search} $list:t 'New box' || cancel
 				if [[ $box == 'New' ]]; then
 					cmd='new' ; box=''
 				elif [[ -d $base/$box ]]; then

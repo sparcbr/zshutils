@@ -6,10 +6,11 @@ function _dbg_trap() { set +x }
 
 function techo()
 {
-	local c _topts nonl print noesc ts msg
+	local c _O _topts nonl print noesc ts msg
 	_dbg_trap $0
-	zparseopts -M -D - c:=c n=nonl P=print r=noesc T=ts
-	[[ -n $nonl ]] && _topts=('-n')
+	zparseopts -M -D - c:=c n=nonl P=print r=noesc -O:=_O T=ts
+	_topts=($=_O[2])
+	[[ -n $nonl ]] && _topts+=('-n')
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
 	while [[ ${1[1]} == '-' ]]; do
 		if [[ $1 == '-' || $1 == '--' ]]; then
@@ -114,7 +115,7 @@ function abort()
 		fstack 1
 	fi
 	[[ -n $ABORT ]] && $ABORT $_EX_TYPE $cod "$@"
-	((verbose+cod>=4)) && techo -c lred -r - ${_EX:-ERROR} $cod: "${@}"
+	((verbose+cod>=4)) && techo -c lred -r ${_EX:-ERROR} $cod: "${@}"
 
 	#@TODO $ZSH_EVAL_CONTEXT =~ toplevel* , does not seem to work
 	((EXIT)) && [[ ! -o interactive ]] && exit $cod
@@ -315,18 +316,6 @@ function typeOf()
 		result+=($type:$tpath)
 	done
 	echo ${(z)${(@u)result//:/ }}
-}
-
-function zindent()
-{
-	integer f
-	[[ $# -gt 1 ]] && {
-		f=1
-		echo "function $1()\n{"
-		shift
-	}
-	echo "$@" | sed -E 's/^([^{}])/\t\1/g'
-	((f)) && echo "}"
 }
 
 function parseErrors()
@@ -717,7 +706,7 @@ function libmonitor()
 		if (($#pids > 1)); then
 			command kill ${pids:0:-1}
 		fi
-		((ts <= lastts)) && [[ $name == $lastname ]] && continue
+		((ts <= lastts + 0.5)) && [[ $name == $lastname ]] && continue
 		techo -c warn "$evt $name $ts"
 		((lastts = ts))
 		t=$(date '+%s.%3N')

@@ -160,9 +160,11 @@ function fstack()
 		# techo "${file##*/}:$func:$line $*"
 		#print -l -- funcfiletrace $funcfiletrace - funcsourcetrace $funcsourcetrace - funcstack $funcstack - functrace $functrace
 		local integer n=$#functrace i=${1:-0}
-		[[ $functrace[$n] = $SHELL:* ]] && ((n--))
+		# By default, command line entries are hidden.
+		# Comment next line to always show command line entry.
+		[[ $functrace[$n] == $SHELL:* ]] && ((n>1 && n--))
 		for ((i++; i<=n; i++)); do
-			techo -c warn $functrace[$i] $_C in $C[lgray]$funcfiletrace[$i]
+			techo -c lred $functrace[$i] $_C in $C[warn]$funcfiletrace[$i]
 		done
 	fi
 }
@@ -178,13 +180,13 @@ function array_dump()
 	  association*)
 		techo -c head "dump of \"$1\" ($_type size: ${(P)#1}):"
 		for key in ${(Pk)1}; do
-			techo -r ${(q)key} '=>' ${(q)${(P)1}[$key]}
+			techo -r - ${(q)key} '=>' ${(q)${(P)1}[$key]}
 		done
 		;;
 	  array*)
 		techo -c head "dump of \"$1\" ($_type size: ${(P)#1}):"
 		for val in "${(P@)1}"; do
-			techo -r ${(q)val}
+			techo -r - ${(q)val}
 		done
 		;;
 	  *)

@@ -50,9 +50,9 @@ function regex {
 function input()
 {
 	local _var p gui z c title raw _buttons okcodes tmp
-	local colors args str default gx cb ret
+	local colors args str current gx cb ret
 	zparseopts -M -D - c:=c p:=p v:=_var g=gui z=z t:=title r=raw \
-		b:=_buttons -buttons:=b -bcb:=cb N:=okcodes -okcodes:=N D:=default
+		b:=_buttons -buttons:=b -bcb:=cb N:=okcodes -okcodes:=N D:=current
 
 	typeset -A buttons=(Cancel 130 Ok 0)
 	if (($#_buttons)); then
@@ -148,28 +148,50 @@ function confirm()
 		done
 		return $ret
 	fi
-	read -q -r a
-	ret=$?
+	readkey -q; ret=$?
 	echo
 	return $ret
 }
 
+function readkey()
+{
+	local _k1 _k2 _k3
+	function _cancel() { throw 130 }
+	trap '_cancel' SIGINT
+	{
+		KEY=''
+		read -krs "$@" KEY || return $?
+		read -krs -t 0.0001 _k1 && read -krs -t 0.0001 _k2 && read -krs -t 0.0001 _k3
+		KEY+="$_k1$_k2$_k3"
+		((DEBUG)) && techo -r - "${(q)KEY}"
+		return 0
+	} always {
+		ret=$?
+		if catch '*'; then
+			((CAUGHT==130)) && { KEY="130"; return 0 }
+			throw $CAUGHT
+		fi
+	}
+	return $?
+}
+
 function chooser()
 {
-	local noSelect sep field bytes search default head foot
-	local list ifs var chosen chosenList selectors events keys ofs
-	local filter file simple opt
+	local noSelect sep field bytes search current head foot
+	local list var chosen chosenList selectors ofs
+	local file opt _opts selected selected_idx list_keys events
+	integer multi i
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
-	zparseopts -D -M - c=color n:=noSelect R:=regex S:=search \
-		 v:=var D:=default s:=sep f:=field -ifs:=ifs b:=bytes E:=events \
-		 H:=head -head:=H p:=H F:=foot -foot:=F -keys:=keys ofs:=ofs \
-		 -file=file -filter:=filter -simple=simple
+	zparseopts -D -M -A _opts - n:=noSelect R:=regex S:=search \
+		 I: -save-index:=I v:=var D:=current s:=sep f:=field -ifs: b:=bytes \
+		 H:=head -head:=H p:=H F:=foot -foot:=F ofs:=ofs \
+		 -file -simple -multi -use-keys -selected: E:=events -events:=E
 
-	if [[ -n $ofs ]]; then
-		ofs=$ofs[2]
-	fi
+	multi=$+_opts[--multi]
+
+	[[ -n $ofs ]] && ofs=$ofs[2]
 
 	if (($#sep || $#field)); then
 		(($#sep && $#field)) && unset 'selectors[(I)[sf]]'
@@ -181,49 +203,212 @@ function chooser()
 		sep=${sep[2]:- }
 	fi
 
-	#@TODO
-	#(($#var)) && set -A list ${(P)var[2]}
-
-	if (($#simple)); then
-		typeset -A list
-	fi
-
-	if [[ -n $ifs ]]; then
-		explode -v list "$*" $ifs[2]
+	typeset -A list_keys
+	if (($+_opts[--use-keys])); then # keyboard shortcuts
+		if (($+_opts[--ifs])); then 
+			abort 2 'Not implemented --use-keys option together with --ifs'
+		fi
+		
+		(($# % 2)) && abort 1 "Odd number of options with --use-keys"
+		for ((i=1; i<=$#; )); do
+			# keys are globs and value is element index
+			list_keys+=("$@[i++]" $((i/2)))
+			# element values
+			list+=("$@[i++]")
+		done
 	else
-		list=("$@")
+		if (($+_opts[--ifs])); then 
+			explode -v list "$*" $_opts[--ifs]
+		else
+			list=("$@")
+		fi
 	fi
 
 	if (($#list > 1)); then
+		chosenList=()
 		{
-			[[ -n $default[2] ]] && default=($default[2])
+			integer b current_key=1
+			selected=()
+			if (($+_opts[--selected])); then
+				selected_idx=($=_opts[--selected])
 
-			if (($#simple)); then
-				chosenList=()
-				local val
-				chosenList=()
-				for opt val in "${(@kv)list}"; do
-					techo "$C[ok]$opt$C_) $val"
-				done
-
-				while read -k -r -s opt; do
-					if (($+list[${(U)opt}])); then
-						# selection matches an option
-						chosenList+=($list[$opt])
-						break
+				for ((i=1; i<=$#selected_idx; i++)); do
+					# make sure all index are integers
+					if [[ $selected_idx[i] != <-> ]] ; then
+						tmp=$list[(i)${selected_idx[i]}]
+						[[ $tmp -le $#selected_idx ]] && selected_idx[i]=($tmp)
 					fi
 				done
+			fi
+
+			if [[ -n $current[2] ]]; then
+				current=$current[2]
+				in_array -v current_key $current list
+			fi
+
+			if (($+_opts[--simple])); then
+				# # # # # # # # # # #
+				# simple  selection # 
+				# # # # # # # # # # #
+				local sel_box
+				integer loop=1
+
+				for i in $selected_idx; do
+					selected[i]=1
+				done
+
+				((multi)) && sel_box=' [ ]'
+
+				(($#list >= 10)) && include -qr conversion
+
+				for ((i=1; i<=$#list; i++)); do
+					if [[ -z ${(k)list_keys[(r)$i]} ]]; then
+						if ((i <= 9)); then
+							opt=$i # number
+						else
+							opt=$(inttochar $i + 55) # letter
+						fi
+						list_keys+=($opt $i)
+					fi
+				done
+				((multi)) && list_keys+=(' ' 'check')
+				if (($#events)); then
+					list_keys+=($events[2])
+				fi
+
+				UP=$'\e[A'
+				DOWN=$'\e[B'
+				while ((loop)); do
+					# draw list
+					techo -c head $head[2]
+					for ((i=1; i<=$#list; i++)); do
+						opt=${(k)list_keys[(r)$i]}
+						if ((multi)); then
+							if ((selected[$i])); then
+								sel_box[3]='✔'
+							else
+								sel_box[3]=' '
+							fi
+						fi
+						if ((i == current_key)); then
+							techo "⮕ $C[ok]$opt$C_)$sel_box $list[i]"
+						else
+							techo "  $C[ok]$opt$C_)$sel_box $list[i]"
+						fi
+					done
+
+					# Input handling
+					while readkey; do
+						case $KEY in
+							$'\n')
+								if ((multi)); then
+									# Accept and finish
+									loop=0
+									break
+								elif ((current_key)); then
+									# Select and finish
+									selected_idx=($current_key)
+									loop=0
+									break
+								fi
+							;;
+							$UP)
+								if ((current_key>1)); then
+									((current_key--))
+									break
+								else
+									current_key=$#list
+									break
+								fi
+							;;
+							$DOWN)
+								if ((current_key<$#list)); then
+									((current_key++))
+									break
+								elif ((current_key==0)); then
+									((current_key++))
+								else
+									current_key=1
+									break
+								fi
+							;;
+							$LEFT)
+							;;
+							$~RIGHT)
+							;;
+							*)
+								# Verify whether KEY matches one of options
+								event=$list_keys[(k)${(U)KEY}]
+								[[ -n $event ]] || continue
+								if [[ $event == <-> ]]; then
+									i=$event
+								elif ((multi)); then
+									i=0
+									if [[ $event == 'check' ]]; then
+										if ((current_key)); then
+											i=$current_key
+										fi
+									else
+										loop=0
+										break
+									fi
+								else
+									# Select and finish
+									selected_idx=($current_key)
+									loop=0
+									break
+								fi
+
+								if ((i)); then
+									if ((multi)); then
+										# Toggle selection
+										((b=1-selected[$i]))
+										selected[i]=$b
+									else
+										# Select and finish
+										selected_idx=($i)
+										loop=0
+									fi
+									break
+								fi
+							;;
+						esac
+					done
+				done
+
+				if ((multi)); then
+					# check selection
+					for ((i=1; i<=$#selected; i++)); do
+						if ((selected[i])); then
+							chosenList+=($list[i])
+							(($+_opts[-I])) && selected_idx+=($i)
+						fi
+					done
+				else
+					chosenList+=($list[$selected_idx])
+				fi
 			else
-				explode -v chosenList "$(
+				# # # # # #
+				# ncurses #
+				# # # # # #
+				tmp="$(
+					ZSHSELECT_CURRENT_IDX=$current_key \
 					NLIST_SET_SEARCH_TO=$search[2] \
 					ZSHSELECT_START_IN_SEARCH_MODE=1 \
 					ZSHSELECT_NONSELECTABLE=$noSelect[2] \
 					ZSHSELECT_ENABLE_EVENTS=$events[2] \
 					ZSHSELECT_HEAD=$head[2] ZSHSELECT_FOOT=$foot[2] \
-					zsh-select $default ${list:|default} || throw $?
-				)" $'\n'
+					ZSHSELECT_SELECTED=$selected_idx \
+					ZSHSELECT_MULTI=$multi \
+					ZSHSELECT_SAVE_IDX=$+_opts[-I] \
+					zsh-select "${(@)list}"
+				)" || throw $?
+				explode -v chosenList $tmp $'\n'
+				if (($+_opts[-I])); then
+					explode -v selected_idx $chosenList[$#chosenList] ' '
+					chosenList[$#chosenList]=()
+				fi
 			fi
-
 		} always {
 			if catch '*'; then
 				return $CAUGHT
@@ -231,11 +416,13 @@ function chooser()
 		}
 	else
 		chosenList=($list)
+		selected_idx=1
 	fi
 
 	(($#chosenList)) || return 10
 
 	typeset -a list=()
+	# Filter output
 	for chosen in $chosenList; do
 		for opt in $selectors; do
 			case $opt in
@@ -256,7 +443,7 @@ function chooser()
 			esac
 		done
 
-		if [[ $#list -gt 0 && -n $ofs ]]; then
+		if [[ -n $ofs && $#list -gt 0 ]]; then
 			list+=($ofs $chosen)
 		else
 			list+=($chosen)
@@ -269,6 +456,16 @@ function chooser()
 		print -r -- $list
 	fi
 
+	# Save index
+	if (($+_opts[-I])); then
+		if ((multi)); then
+			typeset -ga
+			set -A $_opts[-I] $selected_idx
+		else
+			#typeset "$_opts[-I]=${selected[(i)1]}"
+			typeset -gi "$_opts[-I]=$selected_idx"
+		fi
+	fi
 	#[[ ! -t 1 || -z $var ]] && print -r $list
 	return 0
 }
@@ -311,7 +508,7 @@ function chkCmd()
 		)
 	fi
 
-	if ((!$#pkgList)); then
+	if ((! $#pkgList)); then
 		# order: 1º (pkg == cmd) 2º cmdpath in $path 3º cmdpath ~ bin
 		# pkg cmdpath
 		pkgList=($(apt-file find "/$cmd$" |\
@@ -319,7 +516,7 @@ function chkCmd()
 		))
 	fi
 
-	if ((!$#pkgList)); then
+	if ((! $#pkgList)); then
 		techo -c warn "No packages found to install command $cmd"
 		return 10
 	fi
@@ -414,11 +611,11 @@ function alert()
 		icon="error"
 		title="Error"
 		shift
-		((!NOSND)) && sndplay error
+		((! NOSND)) && sndplay error
 	else
 		icon="trophy-gold"
 		title="Success"
-		((!NOSND)) && sndplay success
+		((! NOSND)) && sndplay success
 	fi
 	vflash
 	notify-send --icon=$icon "$title" "$*"
