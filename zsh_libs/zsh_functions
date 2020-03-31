@@ -1,4 +1,4 @@
-VERSION=1.0.8
+VERSION=1.0.9
 #lazyload=run,input,chooser,confirm,todo,chkCmd,pizza
 
 #@TODO check i it's the top shell, and i it is, don't exit, just return: [[ $- =~ m ]] || EXIT=1
@@ -85,9 +85,10 @@ function input()
 			str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")
 			#@ is returning 1, should be ok, but empty str, but since code is 1, we can manually set str
 		else
-			print "\n$title\n"${(k)buttons}": "
+			#print "\n$title\n"${(k)buttons}": "
+			print "$p: "
 			if [[ -o zle ]]; then
-				techo # newline, because vared clears the line
+				#techo # newline, because vared clears the line
 				vared -e str
 			else
 				read -r str
@@ -95,9 +96,7 @@ function input()
 		fi
 		ret=$?
 	} always {
-		if catch '*'; then
-			ret=$CAUGHT
-		fi
+		if catch '*'; then ret=$CAUGHT; fi
 
 		in_array -v tmp $ret buttons || abort $ret
 
@@ -139,8 +138,6 @@ function confirm()
 
 	clearBuffer
 
-	[[ -n $a ]] && echo
-
 	techo -n $c "$@" "(y/N)? "
 	if [[ -n "$BASH" ]]; then
 		while [[ "$a" != 'y' ]] && [[ "$a" != 'n' ]]; do
@@ -148,21 +145,32 @@ function confirm()
 		done
 		return $ret
 	fi
-	readkey -q; ret=$?
+	readkey -C -q; ret=$?
 	echo
 	return $ret
 }
 
 function readkey()
 {
-	local _k1 _k2 _k3
+	local _k1 _k2 _k3 _k4 _k5 _k6 _k7 # _k8 _k9
+	
 	function _cancel() { throw 130 }
-	trap '_cancel' SIGINT
+
 	{
 		KEY=''
+		trap '_cancel' SIGINT
+
+		if [[ $1 == '-C' ]]; then
+			shift
+			clearBuffer
+		fi
+
 		read -krs "$@" KEY || return $?
-		read -krs -t 0.0001 _k1 && read -krs -t 0.0001 _k2 && read -krs -t 0.0001 _k3
-		KEY+="$_k1$_k2$_k3"
+		read -krs -t 0.0001 _k1 && read -krs -t 0.0001 _k2 && read -krs -t 0.0001 _k3 &&
+			read -krs -t 0.0001 _k4 && read -krs -t 0.0001 _k5 && read -krs -t 0.0001 _k6 &&
+			read -krs -t 0.0001 _k7 # && read -krs -t 0.0001 _k2 && read -krs -t 0.0001 _k3 &&
+
+		KEY+="$_k1$_k2$_k3$_k4$_k5$_k6$_k7"
 		((DEBUG)) && techo -r - "${(q)KEY}"
 		return 0
 	} always {
@@ -178,18 +186,27 @@ function readkey()
 function chooser()
 {
 	local noSelect sep field bytes search current head foot
-	local list var chosen chosenList selectors ofs
+	local _olist chosen chosenList selectors ofs
 	local file opt _opts selected selected_idx list_keys events
-	integer multi i
+	integer multi i j
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
-	zparseopts -D -M -A _opts - n:=noSelect R:=regex S:=search \
-		 I: -save-index:=I v:=var D:=current s:=sep f:=field -ifs: b:=bytes \
-		 H:=head -head:=H p:=H F:=foot -foot:=F ofs:=ofs \
-		 -file -simple -multi -use-keys -selected: E:=events -events:=E
+	zparseopts -D -M -A _opts - n:=noSelect S: \
+		 I: -save-index:=I v: D:=current -ifs: \
+		 s:=sep f:=field R:=regex b:=bytes ofs:=ofs \
+		 H:=head -head:=H p:=H F:=foot -foot:=F \
+		 -simple -multi -use-keys -selected: E:=events -events:=E \
+		 -file -files -dir 
 
+	ACTION=''
 	multi=$+_opts[--multi]
+	if (($+_opts[--dir])); then
+	elif (($+_opts[--files])); then
+		multi=1
+		_opts[--file]=1
+	fi
+	search=$_opts[-S]
 
 	[[ -n $ofs ]] && ofs=$ofs[2]
 
@@ -204,30 +221,53 @@ function chooser()
 	fi
 
 	typeset -A list_keys
-	if (($+_opts[--use-keys])); then # keyboard shortcuts
-		if (($+_opts[--ifs])); then 
-			abort 2 'Not implemented --use-keys option together with --ifs'
-		fi
-		
-		(($# % 2)) && abort 1 "Odd number of options with --use-keys"
-		for ((i=1; i<=$#; )); do
-			# keys are globs and value is element index
-			list_keys+=("$@[i++]" $((i/2)))
-			# element values
-			list+=("$@[i++]")
-		done
-	else
-		if (($+_opts[--ifs])); then 
-			explode -v list "$*" $_opts[--ifs]
+	if (($+_opts[--file] || $+_opts[--dir])); then
+		local out="$TMPDIR/ranger.out" ropts=()
+		if (($+_opts[--dir])); then
+			ropts+=(--choosedir $out --show-only-dirs)
+		elif ((multi)); then
+			ropts+=(--choosefiles $out)
 		else
-			list=("$@")
+			ropts+=(--choosefile $out)
+		fi
+			#--list-tagged-files=tag
+		if (($+_opts[--selected])); then
+			ropts+=(--selectfile "$=_opts[--selected]")
+		fi
+		ranger "$ropts[@]" "$@" || DEBUG=1 abort $? 'ranger error'
+		explode -v chosenList "$(<$out)" $'\n' 
+	else
+		if (($+_opts[--use-keys])); then # keyboard shortcuts
+			if (($+_opts[--ifs])); then 
+				abort 2 'Not implemented --use-keys option together with --ifs'
+			fi
+			
+			(($# % 2)) && abort 1 "Odd number of options with --use-keys"
+			_olist=()
+			for ((i=1; i<=$#; )); do
+				local glob="$@[i++]"
+				if [[ -n $glob ]]; then
+					# keys are globs and value is element index
+					list_keys+=("$glob" $((i/2)))
+				fi
+				# element values
+				_olist+=("$@[i++]")
+			done
+		else
+			if (($+_opts[--ifs])); then 
+				explode -v _olist "$*" $_opts[--ifs]
+			else
+				_olist=("$@")
+			fi
 		fi
 	fi
 
-	if (($#list > 1)); then
+	if (($+_opts[--file])); then
+
+	elif (($#_olist > 1)); then
 		chosenList=()
 		{
-			integer b current_key=1
+			integer current_key=1
 			selected=()
 			if (($+_opts[--selected])); then
 				selected_idx=($=_opts[--selected])
@@ -235,7 +275,7 @@ function chooser()
 				for ((i=1; i<=$#selected_idx; i++)); do
 					# make sure all index are integers
 					if [[ $selected_idx[i] != <-> ]] ; then
-						tmp=$list[(i)${selected_idx[i]}]
+						tmp=$_olist[(i)${selected_idx[i]}]
 						[[ $tmp -le $#selected_idx ]] && selected_idx[i]=($tmp)
 					fi
 				done
@@ -243,61 +283,208 @@ function chooser()
 
 			if [[ -n $current[2] ]]; then
 				current=$current[2]
-				in_array -v current_key $current list
+				if [[ $current != <-> ]]; then
+					in_array -v current_key $current _olist
+				elif (($+_olist[$current])); then
+					current_key=$current
+				fi
+				if ((noSelect[(r)$current_key])); then
+					current_key=
+				fi
 			fi
 
+			# # # # # # # # # # #
+			# SIMPLE  SELECTION # 
+			# # # # # # # # # # #
 			if (($+_opts[--simple])); then
-				# # # # # # # # # # #
-				# simple  selection # 
-				# # # # # # # # # # #
-				local sel_box
-				integer loop=1
+				local sel_box elem_show first last _msg
+				integer last_key next_key b search_num_elem loop=1
+				integer begin_idx end_idx opt_wid page_size max_lines=6 found_idx=0
+				integer num_elem
 
+				typeset -A keys=(
+					'UP' $'\e[A' 'PGUP' $'\e[5~' 'HOME' $'\e[1~' 
+					'DOWN' $'\e[B' 'PGDOWN' $'\e[6~' 'END' $'\e[4~' 
+				)
 				for i in $selected_idx; do
-					selected[i]=1
+					(($+selected[i])) && selected[i]=1
 				done
 
-				((multi)) && sel_box=' [ ]'
+				(($#_olist >= 10)) && include -qr conversion
 
-				(($#list >= 10)) && include -qr conversion
-
-				for ((i=1; i<=$#list; i++)); do
-					if [[ -z ${(k)list_keys[(r)$i]} ]]; then
-						if ((i <= 9)); then
-							opt=$i # number
+				(($#noSelect)) && noSelect=($=noSelect[2])
+				for ((i=j=1; i<=$#_olist; i++)); do
+					if [[ -z ${(k)list_keys[(r)$i]} && -z ${noSelect[(r)$i]} ]]; then
+						if ((j <= 9)); then
+							opt=$j # number as key binding
 						else
-							opt=$(inttochar $i + 55) # letter
-						fi
-						list_keys+=($opt $i)
-					fi
-				done
-				((multi)) && list_keys+=(' ' 'check')
-				if (($#events)); then
-					list_keys+=($events[2])
-				fi
-
-				UP=$'\e[A'
-				DOWN=$'\e[B'
-				while ((loop)); do
-					# draw list
-					techo -c head $head[2]
-					for ((i=1; i<=$#list; i++)); do
-						opt=${(k)list_keys[(r)$i]}
-						if ((multi)); then
-							if ((selected[$i])); then
-								sel_box[3]='✔'
-							else
-								sel_box[3]=' '
+							opt=$(inttochar $j + 55) # letter
+							if ((!$#opt)); then
+								techo '@TODO - ran out of key shortcuts: j='$j
+								continue
 							fi
 						fi
-						if ((i == current_key)); then
-							techo "⮕ $C[ok]$opt$C_)$sel_box $list[i]"
-						else
-							techo "  $C[ok]$opt$C_)$sel_box $list[i]"
+						list_keys+=($opt $i)
+						if (($#opt>opt_wid)); then
+							opt_wid=$#opt
+						fi
+						((j++))
+					fi
+				done
+				array_dump noSelect
+				array_dump list_keys
+
+				#typeset -R $opt_wid opt
+				if ((multi)); then
+					list_keys+=(' ' 'CHECK')
+					sel_box=' [ ]'
+				fi
+
+				if (($#events)); then
+					events=(${(z)events[2]})
+					array_dump events
+					list_keys+=(${(U)events})
+				fi
+
+				# # # # # # # # #
+				# FIND ELEMENTS #
+				# # # # # # # # #
+				if [[ $search != $last_search ]]; then
+					elem_show=() # clear
+					# elem_show has nothing to do with pagination. It indicates it's not filtered out. 
+					# begin_idx and end_idx are used for that.
+					((num_elem=first=last=0))
+					for ((i=1; i<=$#_olist; i++)); do
+						if [[ $_olist[i] == (#i)*$search* ]]; then # case insensitive
+							elem_show[i]=1
+							#elem_show+=($i)
+							((num_elem++))
+							((first==0)) && first=$i
+							last=$i
 						fi
 					done
+					last_search=$search
+					((elem_show[current_key])) || current_key=$first
+				fi
+				#	first=1
+				#	last=$#_olist
+				#	elem_show=() # clear
+				#	for ((i=1; i<=$#_olist; i++)); do
+				#		elem_show[i]=1
+				#		#elem_show+=($i)
+				#	done
+				#	num_elem=$#_olist
 
-					# Input handling
+				# putting this here, as we might need to dynamically change page_size according to data
+				((page_size=LINES>max_lines?max_lines:LINES))
+
+				# TODO: find page where current_key belongs to
+				# at the beginning we draw all pages until we find it
+				#begin_idx=
+				begin_idx=$first
+				((end_idx=i-1))
+					#techo "begin=$begin_idx, end=$end_idx, current=$current_key" 
+
+				# for page_size = 5: end = page_size - foot = 5 - 1 = 4
+				# in case of hidden elements (search filter)
+				# i j                     i j 
+				#   header                  header              
+				# 1 2  begin              5 2  begin
+				# 2   <- hidden elem      6 3 
+				# 3 3                     7   <- hidden elem
+				# 4 4  end  j<page_size   8 4  end  j<page_size
+				#   footer                  footer              
+				(($#head)) && techo -c head "$head[2]"
+				while ((loop)); do
+					if ((next_key)); then
+						last_key=current_key
+						current_key=$next_key
+						techo last=$last_key, current=$current_key 
+						if ((current_key > end_idx)); then
+							found_idx=0
+							((begin_idx=end_idx+1))
+							techo begin=$begin_idx, end=$end_idx 
+							while ((! found_idx && begin_idx<=last)); do
+								for ((i=begin_idx, j=2; i>=first && j<page_size; i++)); do
+									((elem_show[$i])) && ((j++))
+									if ((i==current_key)); then
+										found_idx=$i
+									fi
+								done
+								if ((! found_idx)); then
+									begin_idx=$i
+								fi
+							done
+							if ((i>last)); then
+								((end_idx=last))
+							else
+								((end_idx=i-1))
+							fi
+						elif ((current_key < begin_idx)); then
+							found_idx=0
+							((end_idx=begin_idx-1))
+							techo begin=$begin_idx, end=$end_idx 
+							while ((! found_idx && end_idx>=first)); do
+								for ((i=end_idx, j=2; i>=first && j<page_size; i--)); do
+									((elem_show[$i])) && ((j++))
+									if ((i==current_key)); then
+										found_idx=$i
+									fi
+								done
+								if ((! found_idx)); then
+									end_idx=$i
+								fi
+							done
+							if ((i<first)); then
+								begin_idx=$first
+							else
+								((begin_idx=i+1))
+							fi
+							techo begin=$begin_idx, end=$end_idx 
+						fi
+					fi
+
+					# # # # # # #
+					# DRAW LIST #
+					# # # # # # #
+					if ((num_elem)); then
+						for ((i=begin_idx, j=2; j<page_size && i<=last; i++)); do
+							((elem_show[$i])) || continue
+							opt=${(k)list_keys[(r)$i]}
+							if [[ -z $opt ]]; then #@TODO noSelect
+								# left padding: (l:expr::string1::string2:)
+								techo "  ${(l:opt_wid+$#sel_box+1:)} $_olist[i]"
+								continue
+							fi
+
+							if ((multi)); then
+								if ((selected[$i])); then
+									sel_box[3]='✔'
+								else
+									sel_box[3]=' '
+								fi
+							fi
+
+							if ((i==current_key)); then
+								found_idx=$i
+								techo "⮕ $C[ok]${(ml:opt_wid:)opt}$C_)$sel_box $_olist[i]"
+							else
+								techo "  $C[ok]${(ml:opt_wid:)opt}$C_)$sel_box $_olist[i]"
+							fi
+
+							((j++))
+						done
+						_msg="Showing $((j - 2)) matches of total $num_elem"
+					else
+						_msg='No matches found'
+					fi
+					#((end_idx=$i-1))
+					#techo "begin=$begin_idx, end=$end_idx, current=$current_key" 
+					(($#foot)) && techo -c head "$foot[2]"
+
+					# # # # # # # # # #
+					# iNPUT  HANDLING # 
+					# # # # # # # # # #
 					while readkey; do
 						case $KEY in
 							$'\n')
@@ -312,39 +499,96 @@ function chooser()
 									break
 								fi
 							;;
-							$UP)
-								if ((current_key>1)); then
-									((current_key--))
-									break
-								else
-									current_key=$#list
+							$keys[HOME])
+								if ((current_key!=first)); then
+									next_key=$first
 									break
 								fi
 							;;
-							$DOWN)
-								if ((current_key<$#list)); then
-									((current_key++))
-									break
-								elif ((current_key==0)); then
-									((current_key++))
-								else
-									current_key=1
+							$keys[PGUP])
+								i=$current_key
+								j=2
+								while ((i>=first && j++<page_size)); do
+									# find previous shown element
+									while (((elem_show[--i]!=1 || noSelect[(r)$i]) && i>=first)) :
+								done
+								if ((i<first)); then
+									i=$last
+								fi
+							;;
+							$keys[UP])
+								array_dump elem_show
+								array_dump noSelect
+								i=$current_key
+								techo i=$i
+								set -x
+								for ((--i; (elem_show[i]!=1 || noSelect[(r)$i]) && i>=first; --i)) :
+								if ((i<first)); then
+									i=$last
+								fi
+								set +x
+								techo i=$i
+								# if ((i>first)); then
+								# 	while ((elem_show[--i]!=1 && i>1)) :
+								# else
+								# 	i=$last
+								# fi
+								if ((i!=current_key)); then
+									next_key=$i
 									break
 								fi
 							;;
-							$LEFT)
+							$keys[END])
+								if ((current_key!=last)); then
+									next_key=$last
+									break
+								fi
 							;;
-							$~RIGHT)
+							$keys[PGDOWN])
+								i=$current_key
+								j=1
+								while ((i<=last && j++<page_size)); do
+									# find next shown element
+									while (((elem_show[++i]!=1 || noSelect[(r)$i]) && i<=last)) :
+								done
+								if ((i>last)); then
+									i=$last
+								fi
+							;;
+							$keys[DOWN])
+								i=$current_key
+								# find next shown element
+								while (((elem_show[++i]!=1 || noSelect[(r)$i]) && i<=$last)) :
+								if ((i>last)); then
+									i=$first
+								fi
+								#if ((i<last)); then
+									# while ((elem_show[++i]!=1 && i<$#list)) :
+								#else
+								#	i=$first
+								#fi
+								if ((i!=current_key)); then
+									next_key=$i
+									break
+								fi
+							;;
+							$keys[LEFT])
+							;;
+							$keys[RIGHT])
+							;;
+							'/')
+								input -r -p "Search" -v search
 							;;
 							*)
 								# Verify whether KEY matches one of options
 								event=$list_keys[(k)${(U)KEY}]
 								[[ -n $event ]] || continue
 								if [[ $event == <-> ]]; then
+									# Select corresponding element by KEY shortcut
 									i=$event
 								elif ((multi)); then
 									i=0
-									if [[ $event == 'check' ]]; then
+									if [[ $event == 'CHECK' ]]; then
 										if ((current_key)); then
 											i=$current_key
 										fi
@@ -353,9 +597,10 @@ function chooser()
 										break
 									fi
 								else
-									# Select and finish
+									# Action by KEY event
 									selected_idx=($current_key)
 									loop=0
+									ACTION=$event
 									break
 								fi
 
@@ -364,8 +609,10 @@ function chooser()
 										# Toggle selection
 										((b=1-selected[$i]))
 										selected[i]=$b
+										next_key=$i
 									else
 										# Select and finish
+										# TODO finish only if the event say so 
 										selected_idx=($i)
 										loop=0
 									fi
@@ -374,26 +621,28 @@ function chooser()
 							;;
 						esac
 					done
+					#[[ $KEY == 130 ]] && confirm Cancel && cancel
+					[[ $KEY == 130 ]] && cancel
 				done
 
 				if ((multi)); then
 					# check selection
 					for ((i=1; i<=$#selected; i++)); do
 						if ((selected[i])); then
-							chosenList+=($list[i])
+							chosenList+=($_olist[i])
 							(($+_opts[-I])) && selected_idx+=($i)
 						fi
 					done
 				else
-					chosenList+=($list[$selected_idx])
+					chosenList+=($_olist[$selected_idx])
 				fi
 			else
 				# # # # # #
-				# ncurses #
+				# NCURSES #
 				# # # # # #
 				tmp="$(
 					ZSHSELECT_CURRENT_IDX=$current_key \
-					NLIST_SET_SEARCH_TO=$search[2] \
+					NLIST_SET_SEARCH_TO=$search \
 					ZSHSELECT_START_IN_SEARCH_MODE=1 \
 					ZSHSELECT_NONSELECTABLE=$noSelect[2] \
 					ZSHSELECT_ENABLE_EVENTS=$events[2] \
@@ -401,7 +650,7 @@ function chooser()
 					ZSHSELECT_SELECTED=$selected_idx \
 					ZSHSELECT_MULTI=$multi \
 					ZSHSELECT_SAVE_IDX=$+_opts[-I] \
-					zsh-select "${(@)list}"
+					zsh-select "${(@)_olist}"
 				)" || throw $?
 				explode -v chosenList $tmp $'\n'
 				if (($+_opts[-I])); then
@@ -410,19 +659,19 @@ function chooser()
 				fi
 			fi
 		} always {
-			if catch '*'; then
-				return $CAUGHT
-			fi
+			if catch '*'; then return $CAUGHT; fi
 		}
 	else
-		chosenList=($list)
+		# Only one element - autoselect
+		chosenList=($_olist)
 		selected_idx=1
 	fi
 
 	(($#chosenList)) || return 10
 
-	typeset -a list=()
+	typeset -a _olist=()
 	# Filter output
+	typeset +R opt
 	for chosen in $chosenList; do
 		for opt in $selectors; do
 			case $opt in
@@ -443,17 +692,22 @@ function chooser()
 			esac
 		done
 
-		if [[ -n $ofs && $#list -gt 0 ]]; then
-			list+=($ofs $chosen)
+		if [[ -n $ofs && $#_olist -gt 0 ]]; then
+			#@UNTESTED, maybe output a string
+			_olist+=($ofs $chosen)
 		else
-			list+=($chosen)
+			_olist+=($chosen)
 		fi
 	done
 
-	if (($#var)); then
-		set -A "$var[2]" $list
+	# Save selection
+	if (($+_opts[-v])); then
+		typeset -ga "$_opts[-v]"
+		set -A "$_opts[-v]" $_olist
+		((DEBUG)) && array_dump _olist
 	else
-		print -r -- $list
+		print -r -- $_olist
+		((DEBUG)) && techo "chosen: $_olist"
 	fi
 
 	# Save index
@@ -462,11 +716,11 @@ function chooser()
 			typeset -ga
 			set -A $_opts[-I] $selected_idx
 		else
-			#typeset "$_opts[-I]=${selected[(i)1]}"
 			typeset -gi "$_opts[-I]=$selected_idx"
 		fi
+		((DEBUG)) && techo "idx: $selected_idx"
 	fi
-	#[[ ! -t 1 || -z $var ]] && print -r $list
+	#[[ ! -t 1 || -z $var ]] && print -r $_olist
 	return 0
 }
 
@@ -580,20 +834,21 @@ function chkCmd()
 		in_array -v n ';' tmp || n=2 
 		desc=("${(@fqq)tmp[n+1,-1]}") # description
 
-		# pkg version packager cmd
+		# i:pkg   |   i+1:version   |   i+2:packager   |   i+3:cmd
 		case $pkgList[i+3] in
 			$cmd|'-')
 				lines+=($pkgList[i] "(version: ${(qq)pkgList[i+1]})" $pkgList[i+2] $cmd $desc[1] $'\n')
 				;;
 			*)
-				similar+=("Similar\ command:" $pkgList[i+3] '(' $pkgList[i+2] 'package:' $pkgList[i] 'version:' $pkgList[i+1] ')' $cmd $desc[1] $'\n')
+				similar+=("Similar command:" $pkgList[i+3] '(' $pkgList[i+2] 'package:' $pkgList[i] 'version:' $pkgList[i+1] ')' $cmd $desc[1] $'\n')
 				;;
 		esac
 	done
 
 	tmp=()
-	chooser -f'*' -v tmp --ifs $'\n' $lines $similar || return
-	#chooser -v tmp --ifs $'\n' $(print -a -C 5 $lines $similar) || return
+	chooser -R'^(.*) \(version: '\''(.*)'\''\) ([^ ]*) ([^ ]*)|Similar command: (.*) \((.*) (.*) version: (.*)\) ([^ ]*) ([^ ])' \
+		-v tmp --ifs $'\n' $lines $similar || return
+	#chooser -f'*' -v tmp --ifs $'\n' $lines $similar || return
 
 	if [[ $tmp[1] =~ '^Similar' ]]; then
 		pkg=$tmp[7]; cmd=$tmp[3]; packager=$tmp[5]
@@ -685,11 +940,12 @@ comp+=('run=which')
 function run()
 {
 	local ret cmd fullcmd logfile watch cmdPrefix
-	local sudo trysudo dryrun verbose color alert print
-	local cmdinst workdir okcodes debug noEx
+	local sudo trysudo dryrun color alert print
+	local cmdinst workdir okcodes debug noEx _opts
+	integer verbose
 
 	if [[ ${1:0:1} == - ]]; then
-		zparseopts -M -D - v:=verbose c:=color a=alert p:=print e=noEx A=noAbort \
+		zparseopts -M -D -A _opts - v: c:=color a=alert p: e=noEx A=noAbort \
 			s=sudo S=trysudo n=dryrun I:=cmdinst -cd:=workdir \
 			l:=logfile w:=watch N:=okcodes -ok-exit-codes:=N D:=debug
 		OPT_CHK noAbort -A
@@ -697,7 +953,7 @@ function run()
 		[[ $1 == - ]] && shift
 		[[ ${1:0:1} == - ]] && { abort 2 "Invalid command: $1"; return }
 	fi
-	verbose=${verbose[2]:-6}
+	verbose=${_opts[-v]:-6}
 
 	cmd=$1
 	if [[ -n $sudo ]]; then
@@ -712,19 +968,20 @@ function run()
 	elif [[ $color[2] == (0|) ]] || ; then
 		color=''
 	fi
-	[[ -n $print ]] && print=$print[2]
-	if ((verbose>=3)) || [[ $verbose -ge 2 && -n $print ]] ; then
+	(($+_opts[-p])) && print=$_opts[-p]
+	if ((verbose>=3-$+print)); then
 		if ((verbose>=6)); then
-			[[ -n $print ]] && techo $color $print
-			techo $color $fullcmd
-		elif [[ -n $print ]]; then
-			((verbose>=5)) && techo $color "$print ($cmd)" || techo $color $print
+			(($+print)) && techo -r $color $print
+			techo -r $color "${(q@)fullcmd}"
+		elif (($+print)); then
+			((verbose>=5)) && techo -r $color "$print ($cmd)" || techo -r $color $print
 		else
-			techo $color $cmd
+			techo -r $color $cmd
 		fi
 	fi
 
-	[[ -n $print ]] && print="$print : $cmd" || print=$cmd
+	#@TODO: log $fullcmd (-l)
+	(($+print)) && print="$print : $cmd" || print=$cmd
 
 	{
 		[[ -n $dryrun ]] && return 0
@@ -747,6 +1004,7 @@ function run()
 		(($#debug)) && DEBUG=$debug[2]
 		if ((DEBUG)); then
 			(($#watch)) && _dbg_funcOnOff $watch[2]
+
 			cmdPrefix='debug'
 		elif (($#color)); then
 			cmdPrefix='color'

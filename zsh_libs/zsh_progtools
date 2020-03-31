@@ -43,7 +43,7 @@ function pretty()
 		if ! cmp --quiet $f $prettyF; then
 			diff -u $f $prettyF | head -n 20
 			local _opt
-			if chooser --simple -f1 -v _opt S "Save changes to $F" M 'Meld files'; then
+			if chooser --simple -f1 -v _opt --use-keys 'S' "Save changes to $F" 'M' 'Meld files'; then
 				case $_opt in
 					Meld)
 						meld $f $prettyF
@@ -82,7 +82,7 @@ function tags()
 	elif [[ -n $lang[2] ]]; then
 		lang=$lang[2]
 	else
-		chooser -v lang --simple 'J' 'Javascript' 'P' 'PHP' 'Y' 'Python' 'S' 'Shell' || cancel
+		chooser -v lang --simple --use-keys 'J' 'Javascript' 'P' 'PHP' 'Y' 'Python' 'S' 'Shell' || cancel
 	fi
 	
 	explode -v excludePatterns "${(@)exclude[2]}" ','

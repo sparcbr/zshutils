@@ -50,7 +50,7 @@ function _dbg_funcOnOff()
 	if (($#)); then
 		_dbg_flvl[$1]=$lvl
 		#(($2>DEBUG)) && typeset -tf $1 || typeset -Tf $1
-		if (($lvl)); then
+		if ((lvl)); then
 			typeset -Tf "$@"
 		else
 			typeset +Ttf "$@"
@@ -125,20 +125,23 @@ function debug()
 		shift
 		if [[ -n $script ]]; then
 			DEBUG=1 $script
+			ret=$?
 		else
 			{
 				$_cmd "$@" #|& colorify -D $_cmd
 			} always {
+				ret=$?
 				if catch '*'; then
 					techo "CAUGHT: $CAUGHT"
-					return 1
+					ret=$CAUGHT
+				elif (($?==130)); then
+					ret=130
 				fi
 			}
 		fi
-		ret=$?
 	fi
 
-	(( ! $#keep && $#_func )) && _dbg_funcOnOff 0 $_func
+	((! $#keep && $#_func)) && _dbg_funcOnOff 0 $_func
 	set +x
 	return $ret
 }

@@ -1,4 +1,4 @@
-VERSION=1.0.8
+VERSION=1.0.9
 #lazyload=syncDirs,urlfollow,urlinfo,vnc,imdb,globo,awkWrapper,getfullpath,getpath,getext,getfilename,isDir,isEmptyDir,box,ddiff
 
 [[ -v comp ]] || typeset -ga comp
@@ -161,10 +161,10 @@ function ddiff()
 comp+=("syncDirs=rsync")
 function syncDirs()
 {
-	integer i n
+	integer n
 	local dir data checksum arg noDelete
 	local quiet sudo excludeFrom exclude dry reverse
-	local stat name noSlash sshCFG
+	local stat name noSlash sshCFG ret host p
 	typeset -aU src targets rsArgs extraArgs files excludePatterns
 	zparseopts -D -M - q=quiet s=sudo d=dry \
 		c=checksum r=reverse -no-add-slash=noSlash -no-delete=noDelete \
@@ -211,7 +211,10 @@ function syncDirs()
 	fi 
 
 	# exclusions
-	excludePatterns=(.osync_workdir 'backup*' '*.local' '.bsync*' '.git' 'node_modules')
+	if [[ -n $exclude ]]; then
+		explode -v excludePatterns $exclude[2] ' '
+	fi
+	excludePatterns+=(.osync_workdir 'backup*' '*.local' '.git' 'node_modules')
 	rsArgs+=(--exclude=$^excludePatterns)
 	[[ -n $excludeFrom ]] && rsArgs+=(--exclude-from="${excludeFrom[2]}")
 
@@ -221,7 +224,8 @@ function syncDirs()
 
 		dir=$src[$n]
 		if [[ $dir =~ ([^:]+):(.*) ]]; then		 # remote
-			local ret host=$match[1] p=$match[2]
+			host=$match[1]
+			p=$match[2]
 
 			#include -q network
 			#if [[ -n $sshCFG[$host] ]]; then
@@ -283,7 +287,7 @@ function syncDirs()
 	# # # # # #
 	# Targets #
 	# # # # # #
-	local nothing=1 permFlags ret host p
+	local nothing=1 permFlags
 	for dir in $targets; do
 		host=''; p=''  #sshArgs
 		if [[ $dir =~ ([^:]+):(.*) ]]; then
@@ -389,7 +393,7 @@ function box()
 					#@TODO: glob search name, if count==1 box=result
 					result=($base/(#i)*${box}*)
 					(($#result)) || abort 10
-					chooser -v box $result:t || cancel
+					chooser --simple -v box $result:t || cancel
 				fi
 				if [[ -d $base/$box/node_modules ]]; then
 					(cd $base/$box/node_modules ; npm start &)
@@ -405,7 +409,7 @@ function box()
 
 				list=($base/*(-/omN))
 				(($#list)) || return 10
-				chooser -v box -f1 ${=box:+-S $search} $list:t 'New box' || cancel
+				chooser --simple -v box -f1 ${=box:+-S $search} $list:t 'New box' || cancel
 				if [[ $box == 'New' ]]; then
 					cmd='new' ; box=''
 				elif [[ -d $base/$box ]]; then
