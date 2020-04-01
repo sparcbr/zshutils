@@ -1,19 +1,34 @@
-VERSION=1.0.3
-#lazyload=gclone,gpr,commit,github,gh,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase
+VERSION=1.0.5
+#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow
 alias pull="git pull"
 alias push="gpush"
-alias gdiff="git diff --ignore-space-at-eol -b -w --ignore-blank-lines --minimal"
 alias gadd="git add"
 alias gadd-modified="git add \$(git diff --name-only --relative)"
-alias gshow="git show --color=always"
 alias gh='github'
 alias unstage="gunstage"
 alias git_get_tag='git describe --tags $(git rev-list --tags --max-count=1)'
 alias glog2='git log --date=iso -g'
+alias gd='gdiff'
+alias gdi='gdiff --interactive'
 
 export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 [[ ! -v comp ]] && typeset -g -a comp
+
+#if [[ -z $PAGER && -z $GITPAGER ]]; then
+#	chooser -v PAGER -f1 'less' 'bat' '- *no pager*'
+#	[[ $PAGER == '-' ]] && PAGER=''
+#fi
+
+function gshow()
+{
+	local _opts gopts=()
+	zparseopts -D -M -A _opts - l -list=l
+
+	(($+_opts[-l])) && gopts=('--name-only')
+
+	git show $gopts "$@"
+}
 
 comp+=('gchk=git')
 function gchk()
@@ -27,44 +42,79 @@ function gunstage()
 	git restore --staged "$@"
 }
 
-function gfollow()
+function gselect()
 {
-	local hash entries REPLY
-	zparseopts -M -D - d=diff -diff=d
-	#hashes=($(egrep '^commit' <(git log --follow "$@") | awk '{print $2}'))
-	#entries=("${(@f)$(git log --format=format:%h\ %an\ \<%aE\>\ %ai\ %f --follow $1)}")
-	while hash=$(
-		chooser -f1 --ifs $'\n' --keys 'v f' \
-			--head 'Commits containing "$1"' \
-			--foot '(Enter) Show commit in terminal (v) Open commit in vim (f) view full file revision' \
-			"$(git log --color=always --format=format:'%h %an <%aE> %ai %f' --follow $1)"
+	local lines _opts gopts noSelect
+	integer ret i idx nlimit=30
+	setopt extendedglob
+	#zparseopts -D -M -A _opts - #-all
+	#opts="$@"
+	gopts=(
+		--color=always --graph -n $nlimit
+		--format=format:'%h %an <%aE> %ai %f'
 	)
+
+	while [[ ${1[1]} == '-' ]]; do
+		if [[ $1 == '-' || $1 == '--' ]]; then
+			shift
+			break
+		fi
+		gopts+=("$1")
+		shift
+	done
+
+	lines=("$(run git log $gopts "$@")")
+
+	# mark lines without content as non-selectable
+	for ((i=1; i<=$#lines; i++)); do
+		if [[ ! $lines[i] =~ [a-f0-9]{5,} ]]; then
+			noSelect+=($i)
+		fi
+	done
+	(($#noSelect)) && _opts+=(-n "$noSelect")
+
+	_opts=(
+		#--head 'Commits containing "$1"'
+		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision (D) Diff (M) Meld (Q) Quit. Do nothing.'
+		--events "v\\|e EDIT f FULL d DIFF m MELD" 
+		-I idx
+	)
+	
+	if ((${lines[(i)--follow]}<$#lines)); then
+		_opts+=(--head "Following $@")
+	fi
+
+	while { chooser --simple -v hash --ifs $'\n' \
+		-R '([a-f0-9]{5,40} .*)' -f1 -D $idx $_opts $lines ; ret=$? ; ((ret==0)) }
 	do
-		opts=()
-		case $REPLYKEY in
+		case $ACTION in
 			'')
 				gshow $hash $1
 				;;
-			v)
+			'EDIT')
 				gshow $hash $1 | gvim -
 				;;
-			f)
+			'FULL')
 				gshow $hash:$1 | gvim -
 				;;
-			d)
+			'DIFF')
 				gvimdiff $1 <(gshow $hash:$1)
 				;;
-			m)
+			'MELD')
 				meld $1 <(gshow $hash:$1)
 				;;
 		esac
 	done
-				#input -v -p <<-EOF
-		#	<Esc>   q Exit
-		#	        v vim
-		#			/ search
-		#	<Enter> or <Space> Go back to commit list
-		#EOF
+	return $ret
+}
+
+function gfollow()
+{
+	local hash entries REPLY
+	zparseopts -M -D - d=diff -diff=d
+	gselect --follow "$@"
+	#hashes=($(egrep '^commit' <(git log --follow "$@") | awk '{print $2}'))
+	#entries=("${(@f)$(git log --format=format:%h\ %an\ \<%aE\>\ %ai\ %f --follow $1)}")
 }
 
 function gtag() #@TODO
@@ -77,12 +127,155 @@ function gtag() #@TODO
 	git tag -a $tag $hash
 }
 
+function rebase_in_progress()
+{
+	[[ -d "$(git rev-parse --git-path rebase-merge 2>/dev/null)" || \
+		-d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ]]
+}
+
+function gconfig()
+{
+	# 'color.ui' 'auto'
+	#git config --global $opt $val
+}
+# git log --first-parent 
+function gmergebase()
+{
+	local common common2 _A _B
+	#@TODO get "main" branch
+	compare_to='master'
+	#[[ -z $branch ]] && getbranch
+	getbranch
+	_A=${1:-$compare_to}
+	_B=${2:-$branch}
+	common=$(run git merge-base $_A $_B) 
+	common2=$(run git merge-base --fork-point $_A $_B 2>/dev/null)
+	#[[ -n $common && $common != HEAD
+	#@TODO show glog graphic with shared commits and fork-point
+	if [[ -n $common || -n $common2 ]]; then
+		if [[ -z $common2 || $common == $common2 ]]; then
+			echo $common
+		elif [[ -n $common ]]; then
+			echo $common $common2
+		fi
+	else
+		return 1
+	fi
+}
+
+function grebase()
+{
+	local msg status cmd common _opts _from _onto
+	zparseopts -D -M -A _opts - i -onto:
+	compare_to='master' #@TODO
+	if ! rebase_in_progress; then
+		_from=${1:-$compare_to}
+
+		if [[ $_from != $compare_to ]] && ((!$+_opts[--onto])); then
+			chooser -v _onto --head 'Rebase onto:' -f1 --simple $compare_to $_from  || cancel
+			_opts+=(--onto $_onto)
+		fi
+
+		#chooser -v branch -H 'Rebase branch' -S "$1" -b2- --ifs $'\n' "$(git branch)" || cancel
+		getbranch || { techo -c warn 'No branches'; return 10 }
+		#mergeHash=$(git rev-parse MERGE_HEAD)
+		common=($(gmergebase $_from $branch))
+		if (($#common > 1)); then
+			integer n
+			chooser -I n -v common -f1 --head 'Select base:' --simple \
+				$common[1] "$common[2] --fork-point" || cancel
+
+			((n==2)) && _opts+=(--fork-point '')
+			common=$common[n]
+		fi
+
+		glog $common..$branch
+		# unstaged changes => g stash ?
+		if confirm "Rebase ${(kv)_opts} $_from $branch"; then
+			run git rebase ${(kv)_opts} $_from $branch
+		else
+			cancel
+		fi
+		
+		rebase_in_progress || return 0
+	fi
+
+	# mergeHash=$(git rev-parse MERGE_HEAD)
+	local unmerged=($(git diff --name-only --diff-filter=U))
+	local events=(
+		'A' 'Abort'
+		'Q' 'Quit (abort but don'\''t reset HEAD)'
+		'E|T' 'Edit (todo list)'
+	)
+	integer i
+	#.git/rebase-merge/{msgnum,end}
+	#e $VCS_STATUS_ACTION => rebase-i 1/2
+
+	if [[ -n $1 ]]; then
+		cmd=$1
+	fi
+	if (($#unmerged==0)); then # all resolved, enable continue
+		opts+=('C' 'Continue')
+	else
+		local _disabled=("continue:Can't continue. There are conflicts to resolve.")
+	fi
+
+	if [[ -n $cmd ]]; then
+		if [[ -z ${opts[(r)Rebase $cmd*]} ]]; then
+			i=${_disabled[(i)$cmd:*]}
+			if ((i<=$#_disabled)); then
+				msg="$C[warn]Disabled command $C[lred]$cmd$C_: ${_disabled[$i]#$cmd:}"
+			else
+				msg="$C[warn]Invalid command: $C[lred]$cmd"
+			fi
+			cmd=
+		fi
+	fi
+	
+	if [[ -z $cmd ]]; then
+		if (($#unmerged)); then
+			local list=()
+			for ((i=1; i<=$#unmerged; i++)); do
+				list+=($i $unmerged[i])
+			done
+			chooser --head 'There are rebase conflicts in the following files:' \
+				--simple -f2 -v cmd --events "${(@q)events}" $list || cancel
+		else
+			chooser --head 'No conflicts' --simple -f2 -v cmd --events "${(@q)events}" || cancel
+		fi
+	fi
+
+	case $cmd in
+		[Qq]uit)
+			run git rebase --quit
+		;;
+		[Cc]ancel|[Aa]bort)
+			run git rebase --abort
+		;;
+		finish|[Cc]ontinue|cont)
+			run git rebase --continue
+		;;
+		edit|todo)
+			run git rebase --edit-todo
+		;;
+		stat|status)
+			local file
+			#techo -c warn "Merge in progress (${mergeHash:0:8})"
+			#unmerged=($(git ls-files --unmerged --abbrev=8))
+			techo Needs merging: $unmerged
+		;;
+		*)
+			return 1
+		;;
+	esac
+}
+
 function gmerge() #@TODO
 {
-	local mergeHash branch status unmerged cmd=$1
+	local mergeHash status unmerged cmd=$1
 	(($#)) && shift || cmd='status'
-	mergeHash=$(git rev-parse MERGE_HEAD)
-	if [[ -n $mergeHash ]]; then
+	mergeHash=($(git rev-parse -q --verify MERGE_HEAD))
+	if (($#mergeHash)); then
 		case $cmd in
 			cancel|abort) git merge --abort
 			;;
@@ -90,10 +283,11 @@ function gmerge() #@TODO
 			;;
 			status)
 				local file
-				techo -c warn "Merge in progress (${mergeHash:0:10})"
-				unmerged=($(git ls-files --unmerged))
+				techo -c warn "Merge in progress (${mergeHash:0:8})"
+				unmerged=($(git diff --name-only --diff-filter=U))
+				#unmerged=($(git ls-files --unmerged))
 				#chooser -v file -f1 
-				techo Needs merging: $unmerged
+				techo -c head "Needs merging: $C[warn]$unmerged"
 			;;
 		esac
 	else
@@ -101,7 +295,7 @@ function gmerge() #@TODO
 		# 	status)
 		# 	;;
 		# esac
-		chooser -v branch -H 'Merge branch' -S "$1" -b2- --ifs $'\n' "$(git branch)" || cancel
+		chooser -v branch -H 'Merge branch' -S "$1" -b2- --ifs $'\n' "$(listbranch)" || cancel
 		confirm "Merge branch $branch" && run git merge $branch --no-ff --no-commit
 	fi
 }
@@ -145,7 +339,7 @@ function croot()
 
 # Added 2019-01-25 11:17:01
 # https://github.com/search?q=
-comp+=('github=cd' 'gh=cd')
+comp+=('github=cd')
 function github()
 {
 	local url repo search echo
@@ -193,7 +387,7 @@ function githubAPI()
 	}
 	GQL
 	#	"variables":{ "search":"fork:true $(omz_urlencode "$*")","limit":$limit }
-	fields='.data.search.nodes[] | .nameWithOwner,.createdAt[0:10],.updatedAt,.stargazers.totalCount,.description'
+	fields='.data.search.nodes[] | .nameWithOwner,.createdAt[0:8],.updatedAt,.stargazers.totalCount,.description'
 	request=${request//$'\n'/}
 	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d $request $endpoint)
 	ret=$?
@@ -205,8 +399,11 @@ function githubAPI()
 	if ((ret == 0)); then
 		local field
 		typeset -a repos tmp
-		while read -r field; do
-			tmp+=("$(trim "$field")")
+		#while read -r field; do
+		#	tmp+=("$(trim "$field")")
+		#@TODO with raw, and trim is slow
+		while read field; do
+			tmp+=("$field")
 			if (($#tmp == 5)); then
 				repos+=("$tmp")
 				tmp=()
@@ -259,27 +456,8 @@ function gitgetrepo()
 	return $?
 }
 
-function gselect()
-{
-	local var line lines noSelect nlimit='-500'
-	integer i n
-	setopt extendedglob
-	lines=("${(@f)$(git log --graph --oneline --all $nlimit $@)}")
-
-	# mark lines without content as non-selectable
-	n=$#lines
-	for ((i=1; i<=n; i++)); do
-		if [[ ! $lines[$i] =~ [a-f0-9] ]]; then
-			noSelect+=($i)
-		fi
-	done
-	chooser -n $noSelect -R '([a-f0-9]{5,40} .*)' $lines
-	#line=(${=line##[^a-f0-9]#})
-}
-
 function gpush()
 {
-	local remote branch
 	if ! git push "$@"; then
 		remote=(${1:-$VCS_STATUS_REMOTE_NAME})
 		if [[ -z $remote ]]; then
@@ -295,8 +473,18 @@ function gpush()
 
 function getbranch()
 {
-	branch=$(git symbolic-ref --short ${1:-HEAD}) 
-	techo "Current branch: $branch"
+	local tmp
+
+	read -A tmp < $(git rev-parse --git-path ${1:-HEAD}) || return 1
+	
+	if (($#tmp>1)) && [[ $tmp[1] == 'ref:' ]]; then
+		branch=$(git symbolic-ref --short ${1:-HEAD})
+	elif (($#tmp)); then
+		branch=$tmp
+	else
+		return 1
+	fi
+	techo -c head "Current branch: $C[warn]$branch"
 }
 
 function gbranch() #@TODO
@@ -312,14 +500,68 @@ function gbranch() #@TODO
 	esac
 }
 
+typeset -A gFields=(
+	'HEAD' ''
+	'refname:s' 'yellow'
+	'objectname:s' 'red'
+	'contents:subject' 'magenta'
+	'committerdate' 'green' 
+)
+
+#only works for git log --format?
+	glineFormat=(
+		'%(HEAD)'
+		'%C(yellow)%(refname:short)%Creset'
+		'%C(red)%(objectname:short)%Creset'
+		'%C(magenta)%(contents:subject)%Creset'
+		'(%C(green)%(committerdate:relative)%Creset)'
+	)
 function listbranch()
 {
-	local head merged opts=()
-	zparseopts -M -D - --no-merged:=merged --merged:=merged
-
-	(($#merged)) && opts+=($merged) || opts+=(--no-merged origin/master) 
+	local _cols head merged to compare_to all _opts opts=()
+	zparseopts -M -D -A _opts - -no-merged::=merged -merged::=merged a=all O:
+	#compare_to="$remote[1]/master"
+	#@TODO get "main" branch
+	compare_to='master'
+	if (($#all)); then
 	
-	git --no-pager branch --sort=committerdate --format='%(HEAD) %(color:yellow)%(refname:short)%(color:reset) - %(color:red)%(objectname:short)%(color:reset) - %(contents:subject) - %(authorname) (%(color:green)%(committerdate:relative)%(color:reset))' --color=always $opts "$@"
+	else
+		if (($+_opts[--no-merged])); then
+			if (($#_opts[--no-merged)); then
+				opts+=(--no-merged $_opts[--no-merged])
+			else
+				opts+=(--no-merged $compare_to)
+			fi
+		elif (($+_opts[--merged])); then
+			if (($#_opts[--merged)); then
+				opts+=(--merged $_opts[--no-merged])
+			else
+				opts+=(--merged $compare_to)
+			fi
+		else
+			opts+=(--no-merged $compare_to)
+		fi
+	fi
+	
+	_cols=('refname' 'objectname' 'contents' 'committerdate')
+
+	if (($+_opts[-O])); then
+		_cols+=($=_opts[-O])
+	fi
+
+	[[ -n $_cols[(r)author] ]]
+	#%(authorname)
+	for tmp in $_cols; do
+
+	done
+	glineFormat=(
+		'%(HEAD)'
+		'%(color:yellow)%(refname:short)%(color:reset)'
+		'%(color:red)%(objectname:short)%(color:reset)'
+		'%(color:magenta)%(contents:subject)%(color:reset)'
+		'(%(color:green)%(committerdate:relative)%(color:reset))'
+	)
+	git --no-pager branch --sort=committerdate --format="$glineFormat" --color=always $opts "$@"
 }
 function gremote()
 {
@@ -408,4 +650,55 @@ function gbisect()
 		'')
 			;;
 	esac
+}
+
+# Added 2020-3-28 21:27
+#search changes of string: -Sstring
+#--ignore-space-at-eol -b -w --ignore-blank-lines --minimal
+comp+=('gdiff=git-diff')
+function gdiff()
+{
+	local cmd _opts flist hash
+	zparseopts -D -M -A _opts - i -interactive=i
+
+	if  (($+_opts[-i])); then
+		local f name _copts
+		integer idx
+		hash=$1
+		shift
+		_copts=(
+			--head "Following $@"
+			--foot '(Enter) Show in terminal (V or E) Gvimdiff (M) Meld (Q) Quit'
+			--events "v\\|e EDIT m MELD" 
+			-I idx
+		)
+		
+		flist=($(git diff --no-color --name-only $hash "$@"))
+
+		while chooser -v f -D $idx $_copts $flist
+		do
+			case $ACTION in
+				'')
+					git diff $hash $f
+					;;
+				'DIFF')
+					gvimdiff <(gshow $hash:$f) $f
+					;;
+				'MELD')
+					meld <(gshow $hash:$f) $f
+					;;
+			esac
+		done
+		for f in $flist; do
+			techo ${(q)f}
+			#$cmd "$f"
+			#confirm 'Compare' || continue
+			name=$(getfilename $f)
+			tmp=$TMPDIR/$name
+			#gshow account_manager:$f > $tmp
+			#meld $tmp "$f"
+		done
+	else
+		git diff "$@"
+	fi
 }

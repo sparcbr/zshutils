@@ -653,3 +653,8 @@ function awkWrapper()
 		awk $opts $prog $1
 	fi
 }
+
+function open()
+{
+	xdg-open "$@" &
+}

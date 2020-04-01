@@ -2,8 +2,7 @@ VERSION=1.0.7
 [[ -v comp ]] || typeset -g -a comp
 alias e=echo
 alias up='xdotool key Ctrl+Shift+F type ❯ ; xdotool key Shift+F3 key Shift+F3' # find last prompt
-alias op="xdg-open"
-alias open="xdg-open"
+alias op='open'
 alias vmake="make SHELL='$SHELL -x'"
 alias sv="v -s"
 alias cfg="cd $CFG"
@@ -141,6 +140,7 @@ function mkscript()
 		if [[ "$file" == "New zsh library" ]]; then
 			input -v file -p "Enter new library name" 'zsh_' || cancel
 		elif [[ "$file" == "Browse full path" ]]; then
+			#@TODO
 			chooser -v file -p "Choose path of zsh library" --dir || cancel
 		fi
 
@@ -207,7 +207,7 @@ function gvimdiff()
 
 function emu()
 {
-    gvim /media/sparc/retropie/opt/retropie/emulators/retroarch/retroarch.cfg
+    v /media/sparc/retropie/opt/retropie/emulators/retroarch/retroarch.cfg
     xdg-open https://github.com/retropie/retropie-setup/wiki/retroarch-configuration
     xdg-open http://www.instructables.com/id/USB-SNES-Controller/
 }
@@ -364,7 +364,7 @@ function vw()
 function v()
 {
 	local opts sudo arg args skip vim
-	typeset -aU
+	#typeset -aU
 	if [[ -n $DISPLAY ]]; then
 		vim=gvim
 	else
@@ -419,7 +419,7 @@ function loadvim()
 	set -x
 	list=${1:-vimlist.txt}
 	dirs=(. $CFG)
-	gvim -p $(cat `find ${dirs[*]} -name $list`)
+	v -p $(cat `find ${dirs[*]} -name $list`)
 	set +x
 
 }

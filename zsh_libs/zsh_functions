@@ -234,7 +234,7 @@ function chooser()
 		if (($+_opts[--selected])); then
 			ropts+=(--selectfile "$=_opts[--selected]")
 		fi
-		ranger "$ropts[@]" "$@" || DEBUG=1 abort $? 'ranger error'
+		ranger "$ropts[@]" "$@" || chkCmd ranger --git 'ranger/ranger'
 		explode -v chosenList "$(<$out)" $'\n' 
 	else
 		if (($+_opts[--use-keys])); then # keyboard shortcuts
@@ -297,10 +297,10 @@ function chooser()
 			# SIMPLE  SELECTION # 
 			# # # # # # # # # # #
 			if (($+_opts[--simple])); then
-				local sel_box elem_show first last _msg
-				integer last_key next_key b search_num_elem loop=1
-				integer begin_idx end_idx opt_wid page_size max_lines=6 found_idx=0
-				integer num_elem
+				local sel_box elem_show _msg last_search
+				integer last_key next_key b loop=1
+				integer opt_wid page_size max_lines=6 found_idx=0
+				integer num_elem first last begin_idx end_idx 
 
 				typeset -A keys=(
 					'UP' $'\e[A' 'PGUP' $'\e[5~' 'HOME' $'\e[1~' 
@@ -331,8 +331,8 @@ function chooser()
 						((j++))
 					fi
 				done
-				array_dump noSelect
-				array_dump list_keys
+				((DEBUG)) && array_dump noSelect
+				((DEBUG)) && array_dump list_keys
 
 				#typeset -R $opt_wid opt
 				if ((multi)); then
@@ -342,14 +342,14 @@ function chooser()
 
 				if (($#events)); then
 					events=(${(z)events[2]})
-					array_dump events
+					((DEBUG)) && array_dump events
 					list_keys+=(${(U)events})
 				fi
 
 				# # # # # # # # #
 				# FIND ELEMENTS #
 				# # # # # # # # #
-				if [[ $search != $last_search ]]; then
+				if [[ -z $search || $search != $last_search ]]; then
 					elem_show=() # clear
 					# elem_show has nothing to do with pagination. It indicates it's not filtered out. 
 					# begin_idx and end_idx are used for that.
@@ -517,8 +517,8 @@ function chooser()
 								fi
 							;;
 							$keys[UP])
-								array_dump elem_show
-								array_dump noSelect
+								((DEBUG)) && array_dump elem_show
+								((DEBUG)) && array_dump noSelect
 								i=$current_key
 								techo i=$i
 								set -x
@@ -579,6 +579,9 @@ function chooser()
 							'/')
 								input -r -p "Search" -v search
 							;;
+							$'\e')
+								throw 130
+							;;
 							*)
 								# Verify whether KEY matches one of options
 								event=$list_keys[(k)${(U)KEY}]
@@ -622,7 +625,7 @@ function chooser()
 						esac
 					done
 					#[[ $KEY == 130 ]] && confirm Cancel && cancel
-					[[ $KEY == 130 ]] && cancel
+					[[ $KEY == 130 ]] && throw 130
 				done
 
 				if ((multi)); then
@@ -727,9 +730,9 @@ function chooser()
 #@TODO merge with inst() from zsh_main
 function chkCmd()
 {
-	local cmd tmp verbose list pkgs pkg packager
-	zparseopts -D -M - v=verbose l=list p:=pkgs
-	(($#1)) || { techo -c lred "chkCmd: Empty command"; fstack; return 1 }
+	local _opts cmd tmp verbose list pkgs pkg packager
+	zparseopts -D -M -A _opts - v=verbose l=list -list=l -pkg:=pkgs p:=pkg -git: g:=git
+	(($#1)) || abort -v 1 "$0: empty command"
 	cmd=$1
 	if command -v $cmd >/dev/null; then
 		[[ -n $verbose ]] && techo -c head "$cmd$C_ already installed."
@@ -745,6 +748,11 @@ function chkCmd()
 			# check package exists
 			pkgList+=($pkg - apt -)
 		done
+	fi
+
+	if (($+_opts[--git])); then
+		pkgList+=($_opts[--git] - git $cmd)
+		# i:pkg   |   i+1:version   |   i+2:packager   |   i+3:cmd
 	fi
 
 	if [[ -z $pkgList && -x /usr/lib/command-not-found ]] ; then
@@ -823,6 +831,12 @@ function chkCmd()
 					'print join(ver,"\n",1)"\n;\n"join(desc,"\n")'
 			)
 			snap info $pkgList[i] | awkWrapper -e expr -o tmp
+			;;
+		git)
+			if [[ $pkgList[i+1] == '-' ]]; then
+				#github -e --info -o tmp -r $_opts[--git] || abort $? ""
+			fi
+			tmp=('-' 'bla bla')
 			;;
 		*)
 			techo -c lred "Unsupported packager: $C[warn]$pkgList[i+2]"

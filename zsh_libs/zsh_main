@@ -237,6 +237,8 @@ function zshLibReadHeader()
 				[[ -z $tmp || $tmp == '#/head' ]] && break
 				if [[ $tmp =~ '^alias (.*)=(.*)' ]]; then
 					eval "alias $match[1]=$match[2]"
+				elif [[ $tmp =~ '^unalias (.*)' ]]; then
+					eval "unalias $=match[1]"
 				elif [[ $tmp[1] != '#' ]]; then
 					break
 				fi
