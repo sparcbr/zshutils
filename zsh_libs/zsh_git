@@ -527,13 +527,13 @@ function listbranch()
 	
 	else
 		if (($+_opts[--no-merged])); then
-			if (($#_opts[--no-merged)); then
+			if (($#_opts[--no-merged])); then
 				opts+=(--no-merged $_opts[--no-merged])
 			else
 				opts+=(--no-merged $compare_to)
 			fi
 		elif (($+_opts[--merged])); then
-			if (($#_opts[--merged)); then
+			if (($#_opts[--merged])); then
 				opts+=(--merged $_opts[--no-merged])
 			else
 				opts+=(--merged $compare_to)
