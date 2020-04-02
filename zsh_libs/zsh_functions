@@ -197,10 +197,11 @@ function chooser()
 		 s:=sep f:=field R:=regex b:=bytes ofs:=ofs \
 		 H:=head -head:=H p:=H F:=foot -foot:=F \
 		 -simple -multi -use-keys -selected: E:=events -events:=E \
-		 -file -files -dir 
+		 -file -files -dir -no-auto-select
 
-	ACTION=''
+	typeset -g ACTION=''
 	multi=$+_opts[--multi]
+
 	if (($+_opts[--dir])); then
 	elif (($+_opts[--files])); then
 		multi=1
@@ -264,7 +265,7 @@ function chooser()
 
 	if (($+_opts[--file])); then
 
-	elif (($#_olist > 1)); then
+	elif (($#_olist > 1 || $+_opts[--no-auto-select])); then
 		chosenList=()
 		{
 			integer current_key=1
@@ -299,8 +300,10 @@ function chooser()
 			if (($+_opts[--simple])); then
 				local sel_box elem_show _msg last_search
 				integer last_key next_key b loop=1
-				integer opt_wid page_size max_lines=6 found_idx=0
+				integer opt_wid page_size max_lines found_idx=0
 				integer num_elem first last begin_idx end_idx 
+
+				max_lines=${PAGE_SIZE:-15}
 
 				typeset -A keys=(
 					'UP' $'\e[A' 'PGUP' $'\e[5~' 'HOME' $'\e[1~' 

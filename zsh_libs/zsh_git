@@ -658,35 +658,56 @@ function gbisect()
 comp+=('gdiff=git-diff')
 function gdiff()
 {
-	local cmd _opts flist hash
+	local cmd _opts flist
 	zparseopts -D -M -A _opts - i -interactive=i
 
 	if  (($+_opts[-i])); then
-		local f name _copts
-		integer idx
-		hash=$1
-		shift
+		local f name _copts args head_hash hashes2=() hashes=()
+		integer idx h
+		#hash=$1
+		#shift
 		_copts=(
-			--head "Following $@"
-			--foot '(Enter) Show in terminal (V or E) Gvimdiff (M) Meld (Q) Quit'
+			--head "diff $*"
+			--foot '(Enter) Show in terminal (V or E) Gvimdiff (M) Meld (Esc) Quit'
 			--events "v\\|e EDIT m MELD" 
 			-I idx
+			--no-auto-select
 		)
 		
-		flist=($(git diff --no-color --name-only $hash "$@"))
+		#flist=($(git diff --no-color --name-only $hash "$@"))
+		flist=($(git diff --no-color --name-only "$@")) || return $?
 
-		while chooser -v f -D $idx $_copts $flist
+		if [[ "$*" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
+			if [[ -n $match[2] ]]; then
+				hashes=(${match[1]:-HEAD} ${match[2]:-HEAD})
+			elif [[ -n $match[1] ]]; then
+				# workdir <-> commit
+				hashes=($match[1])
+			else
+				#abort -v5 -d-1 1 "Incorrect arguments: $@"
+			fi
+			hashes2=($(git rev-parse $hashes))
+			head_hash="$(git rev-parse HEAD)"
+			#if in_array -v h $head_hash hashes2; then
+			#	$hashes
+			#fi
+		else
+			abort -v5 -d-1 2 "Incorrect arguments: $@"
+		fi
+
+		while chooser --simple -v f -D $idx $_copts $flist
 		do
+			cmd=''
 			case $ACTION in
 				'')
-					git diff $hash $f
-					;;
+					git diff "$@" -- $f
+				;;
 				'DIFF')
-					gvimdiff <(gshow $hash:$f) $f
-					;;
+					cmd='gvimdiff'
+				;;
 				'MELD')
-					meld <(gshow $hash:$f) $f
-					;;
+					cmd='meld'
+				;;
 			esac
 		done
 		for f in $flist; do

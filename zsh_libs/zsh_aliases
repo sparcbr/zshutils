@@ -552,7 +552,7 @@ function stripcolors()
 # Added 2019-01-11 17:00:37
 function shpydf()
 {
-    output=`pydf`; devs=`echo $output | cut -f1 -d `; labels=`sudo lsblk --noheadings -o LABEL $devs|stripcolors`; for line in $output; do i=1; echo "${labels[$i]} $line"; i++; done
+    output=`pydf`; devs=`echo $output | cut -f1 -d' ' `; labels=`sudo lsblk --noheadings -o LABEL $devs|stripcolors`; for line in $output; do i=1; echo "${labels[$i]} $line"; i++; done
 }
 
 # Added 2019-02-20 15:38:03
