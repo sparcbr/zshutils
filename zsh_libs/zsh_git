@@ -84,24 +84,24 @@ function gselect()
 		_opts+=(--head "Following $@")
 	fi
 
-	while { chooser --simple -v hash --ifs $'\n' \
+	while { chooser --simple -v hashes --ifs $'\n' \
 		-R '([a-f0-9]{5,40} .*)' -f1 -D $idx $_opts $lines ; ret=$? ; ((ret==0)) }
 	do
 		case $ACTION in
 			'')
-				gshow $hash $1
+				gshow $hashes $1
 				;;
 			'EDIT')
-				gshow $hash $1 | gvim -
+				gshow $hashes $1 | gvim -
 				;;
 			'FULL')
-				gshow $hash:$1 | gvim -
+				gshow $hashes:$1 | gvim -
 				;;
 			'DIFF')
-				gvimdiff $1 <(gshow $hash:$1)
+				gvimdiff $1 <(gshow $hashes:$1)
 				;;
 			'MELD')
-				meld $1 <(gshow $hash:$1)
+				meld $1 <(gshow $hashes:$1)
 				;;
 		esac
 	done
@@ -295,7 +295,7 @@ function gmerge() #@TODO
 		# 	status)
 		# 	;;
 		# esac
-		chooser -v branch -H 'Merge branch' -S "$1" -b2- --ifs $'\n' "$(listbranch)" || cancel
+		chooser -v branch -H 'Merge branch' -S "$1" -b2- --ifs $'\n' "$(listbranch -a)" || cancel
 		confirm "Merge branch $branch" && run git merge $branch --no-ff --no-commit
 	fi
 }
@@ -709,16 +709,25 @@ function gdiff()
 					cmd='meld'
 				;;
 			esac
+
+			if [[ -n $cmd ]]; then
+				if (($#hashes == 0)); then
+				elif (($#hashes == 1)); then
+					$cmd <(gshow $hashes[1]:$f) $f
+				else
+					$cmd <(gshow $hashes[1]:$f) <(gshow $hashes[2]:$f)
+				fi
+			fi
 		done
-		for f in $flist; do
-			techo ${(q)f}
+		#for f in $flist; do
+			#techo ${(q)f}
 			#$cmd "$f"
 			#confirm 'Compare' || continue
-			name=$(getfilename $f)
-			tmp=$TMPDIR/$name
+			#name=$(getfilename $f)
+			#tmp=$TMPDIR/$name
 			#gshow account_manager:$f > $tmp
 			#meld $tmp "$f"
-		done
+		#done
 	else
 		git diff "$@"
 	fi
