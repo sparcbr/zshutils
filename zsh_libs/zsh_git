@@ -295,8 +295,13 @@ function gmerge() #@TODO
 		# 	status)
 		# 	;;
 		# esac
-		chooser -v branch -H 'Merge branch' -S "$1" -b2- --ifs $'\n' "$(listbranch -a)" || cancel
-		confirm "Merge branch $branch" && run git merge $branch --no-ff --no-commit
+		local selection
+		chooser -v selection -H 'Merge branch' -S "$1" --strip-color \
+			-b3- --ifs $'\n' "$(listbranch -a)" || cancel
+
+		selection=($=selection)
+		
+		confirm "Merge branch $selection" && run git merge $selection[1] --no-ff --no-commit
 	fi
 }
 
