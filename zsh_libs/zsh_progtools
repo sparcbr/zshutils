@@ -12,8 +12,14 @@ function pretty()
 	local F Fname f files args prettyF tmpBasePath basePath baseName _s
 	#zparseopts -D -M - 
 	basePath=$(git root)
+
+	#@TODO specify extension.. and have a default
+	#@TODO if any dirs are given, add a file glob and use them below
 	files=($(prettier -l "$@"))
-	for f in $files; do
+	glist=($(git ls-files $files))
+	
+	# non git files are after git files
+	for f in $glist ${files:|glist}; do
 		F=$(getfullpath -r $basePath $f)
 		if [[ ${F:0:1} == '/' ]]; then
 			#F=$(getfullpath -r . $f)
@@ -23,7 +29,7 @@ function pretty()
 		baseName=$(basename $basePath)
 		tmpBasePath=$TMP/$baseName
 		prettyF=$tmpBasePath/$F.pretty
-		if [[ ! -f $prettyF || $f -nt $prettyF ]]; then
+		if [[ ! -f $prettyF || ! -s $prettyF || $f -nt $prettyF ]]; then
 			techo "$f => \$TMP/$baseName/$F.pretty"
 			dir=$(getpath $prettyF)
 			[[ -d $dir ]] || mkdir -p $dir
@@ -40,10 +46,14 @@ function pretty()
 				continue
 			fi
 		fi
-		if ! cmp --quiet $f $prettyF; then
-			diff -u $f $prettyF | head -n 20
+		while ! cmp --quiet $f $prettyF; do
+			diff -u --ignore-space-change $f $prettyF | head -n 20
+			(($pipestatus[1]==0)) && techo -c head 'Only space changes'
+
 			local _opt
-			if chooser --simple -f1 -v _opt --use-keys 'S' "Save changes to $F" 'M' 'Meld files'; then
+			if chooser --simple -f1 -v _opt --use-keys 'S' "Save changes to $F" \
+				'M' 'Meld files' 'D' 'Diff'
+			then
 				case $_opt in
 					Meld)
 						meld $f $prettyF
@@ -51,12 +61,21 @@ function pretty()
 					Save)
 						cp $prettyF $f
 						;;
+					Diff)
+						diff -u $f $prettyF
+						;;
 					*)
 						;;
 				esac
 				cmp --quiet $f $prettyF && touch $prettyF
+			else
+				if (($?==130)); then
+					break
+				else
+					return $?
+				fi
 			fi
-		fi
+		done
 	done
 }
 
@@ -128,4 +147,13 @@ function vreplace()
 	(($#replace)) && replace=$replace[2]
 
 	v "+arg | arg" "+argdo %s/\<$word\>/$replace/gce | update"
+}
+
+# Added 2020-04-02 17:17
+function phpcheck()
+{
+	local args=('.') report=phpcs73.log
+	(($#)) && { report=$1; shift }
+	(($#)) && args=("$@")
+	run phpcs -p --colors --extensions=php --standard=PHPCompatibility --report-full=$report --runtime-set testVersion 7.3 $args
 }

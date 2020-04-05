@@ -4,6 +4,18 @@ VERSION=1.0.9
 #alias _dbg_trap='[[ -o xtrace ]] && { unalias _dbg_trap; include debug && _dbg_trap $0 }'
 function _dbg_trap() { set +x }
 
+#function getoptargs()
+#{
+#	while [[ ${1[1]} == '-' ]]; do
+#		if [[ $1 == '-' || $1 == '--' ]]; then
+#			shift
+#			break
+#		fi
+#		_optargs+=("$1")
+#		shift
+#	done
+#}
+
 function techo()
 {
 	local c _O _topts nonl print noesc ts msg
@@ -12,14 +24,6 @@ function techo()
 	_topts=($=_O[2])
 	[[ -n $nonl ]] && _topts+=('-n')
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
-#	while [[ ${1[1]} == '-' ]]; do
-#		if [[ $1 == '-' || $1 == '--' ]]; then
-#			shift
-#			break
-#		fi
-#		_topts+=("$1")
-#		shift
-#	done
 	if [[ -n $c ]]; then
 		c=$c[2]
 		if [[ $c == <1-> ]]; then

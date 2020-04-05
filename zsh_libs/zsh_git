@@ -15,10 +15,19 @@ export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 [[ ! -v comp ]] && typeset -g -a comp
 
-#if [[ -z $PAGER && -z $GITPAGER ]]; then
-#	chooser -v PAGER -f1 'less' 'bat' '- *no pager*'
-#	[[ $PAGER == '-' ]] && PAGER=''
-#fi
+#@TODO configs:
+
+function gconfig()
+{
+	git config --global core.excludesfile $CFG/.gitignore_global
+	# or in repopath/.git/info/exclude
+	#if [[ -z $PAGER && -z $GITPAGER ]]; then
+	#	chooser -v PAGER -f1 'less' 'bat' '- *no pager*'
+	#	[[ $PAGER == '-' ]] && PAGER=''
+	#	git config --global core.pager
+	#fi
+}
+
 
 function gshow()
 {
@@ -472,7 +481,15 @@ function gpush()
 		if [[ -z $branch ]]; then
 			getbranch || { techo -c warn 'No branches'; return 10 }
 		fi
-		git push --set-upstream $remote[1] $branch
+		run git push --set-upstream $remote[1] $branch
+		if confirm 'Open Pull Request'; then
+			if url=$(gitgetrepo "$*"); then
+				local args=($(urlinfo -hp $url))
+				open "https://$args[1]/$args[2]/pull/new/$branch"
+			else
+
+			fi
+		fi
 	fi
 }
 
@@ -608,8 +625,75 @@ function gclone()
 
 function gpr()
 {
-	local request owner 
+	#local request owner 
+	local owner 
 
+#{
+#	"query":query(owner:"$owner", name:"$repname") {
+#	  repository(owner:"$owner", name:"$repname") {
+#		pullRequests(first: 10, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) {
+#		  nodes {
+#			... on PullRequest {
+#			  id, author { login }, createdAt
+#			  merged, mergedAt, mergeable
+#			  body, changedFiles
+#			  commits(first: 100) {
+#				nodes { commit {
+#					oid
+#					message
+#					status { context(name: "x") { description } }
+#				  } }
+#			  }
+#			  comments(last: 100) {
+#				nodes { author { login }, updatedAt, minimizedReason }
+#			  }
+#			  labels(last: 100) {
+#				nodes {
+#				  ... on Label { color, name, description }
+#				}
+#			  }
+#			}
+#		  }
+#		}
+#	  },
+#	}
+#	"variables":{ "search":"fork:true $*","limit":$limit }
+#}
+#query { organization(login: "MyOrganisation") {
+#		  repositories(first: 20, orderBy: {field: PUSHED_AT, direction: DESC}) {
+#		  nodes {
+#			  name
+#			  pullRequests(first: 10, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) {
+#				  nodes {
+#					  headRepository { nameWithOwner }
+#					  url
+#					  author {
+#					  ... on User {
+#						  login name
+#						  }
+#					  }
+#					  mergeable
+#					  createdAt
+#					  baseRefName
+#					  headRefName
+#					  title
+#					  ... on PullRequest {
+#						  pullRequestcommits: commits(last: 1) {
+#							  totalCount
+#							  nodes {
+#								  commit {
+#									  url
+#									  status { state contexts { context description createdAt targetUrl } }
+#								  }
+#							  }
+#						  }
+#					  }
+#				  }
+#			  }
+#		  }
+#	  }
+#	}
+#  }
 	request=$(cat) <<-GQL
 	{
 	"query":query(owner:"$owner", name:"$repname") {
@@ -663,8 +747,8 @@ function gbisect()
 comp+=('gdiff=git-diff')
 function gdiff()
 {
-	local cmd _opts flist
-	zparseopts -D -M -A _opts - i -interactive=i
+	local cmd _opts _dopts flist
+	zparseopts -D -M -A _opts - i -interactive=i l -list=l
 
 	if  (($+_opts[-i])); then
 		local f name _copts args head_hash hashes2=() hashes=()
@@ -680,7 +764,7 @@ function gdiff()
 		)
 		
 		#flist=($(git diff --no-color --name-only $hash "$@"))
-		flist=($(git diff --no-color --name-only "$@")) || return $?
+		flist=($(git diff --no-color --name-only --relative "$@")) || return $?
 
 		if [[ "$*" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
 			if [[ -n $match[2] ]]; then
@@ -701,6 +785,7 @@ function gdiff()
 		fi
 
 		while chooser --simple -v f -D $idx $_copts $flist
+		#while chooser -v f -D $idx $_copts $flist
 		do
 			cmd=''
 			case $ACTION in
@@ -734,6 +819,7 @@ function gdiff()
 			#meld $tmp "$f"
 		#done
 	else
-		git diff "$@"
+		(($+_opts[-l])) && _dopts=('--name-only')
+		git diff $_dopts "$@"
 	fi
 }

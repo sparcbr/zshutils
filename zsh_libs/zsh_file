@@ -107,14 +107,14 @@ function rename()
 
 function ddiff()
 {
-	local list cmd file sudo config var dargs r u q
+	local list cmd file sudo config var _dopts r u q
 	zparseopts -D -M - c=config -set=c l=list s=sudo i:=ignore q=q
 
 	echo "dir1=$dir1\ndir2=$dir2"
 	[[ -n $list ]] && return 0
 	
-	dargs=(-u -r)
-	[[ -n $q ]] && dargs+=($q)
+	_dopts=(-u -r)
+	[[ -n $q ]] && _dopts+=($q)
 
 	if [[ -n $config || -z $dir1 || -z $dir2 ]]; then
 		if [[ -n $config ]]; then
@@ -142,18 +142,31 @@ function ddiff()
 		techo "dir1: $dir1\ndir2: $dir2"
 	fi
 
+	cmd=()
 	if [[ -d $dir1 && -d $dir2 ]]; then 
 		if [[ -n $1 ]] && type $1 >/dev/null; then
-			cmd=$1
+			cmd=($1)
 			shift
 		fi
-		if [[ -z $cmd ]]; then
-			[[ -n $1 ]] && run $sudo -p "diff -ur \$d1/$1 \$d2/$1" diff $dargs $dir1/$1 $dir2/$1 ||
-				run $sudo -p "diff -ur \$dir1 \$dir2" diff $dargs $dir1 $dir2
-		else
-			[[ -n $1 ]] && run $sudo -p "${=cmd} \$dir1/$1 \$dir2/$1" $=cmd $dir1/$1 $dir2/$1 ||
-				run $sudo -p "${=cmd} \$dir1 \$dir2" $=cmd $dir1 $dir2
+		if ((! $#cmd)); then
+			cmd=(diff $_dopts)
+		elif (($#>1)); then
+			integer i=${@[(ie)--]}
+			cmd+=("$@[1,i-1]")
+			shift $#cmd
+			#args=("$@[i+1:-1]")
 		fi
+		if [[ -n $1 ]]; then
+			#@TODO
+			# for f in files 
+			#    cnd iots $dir1/$f $dir2/$f
+			_dargs=($dir1/$1 $dir2/$1)
+		else
+			_dargs=($dir1 $dir2)
+		fi
+		#@TODO add pager option to run()
+		#@TODO add no-pager option to ddiff
+		run $sudo -p "$cmd $_dargs" $cmd $_dargs #| $PAGER
 	fi
 }
 
@@ -299,11 +312,11 @@ function syncDirs()
 
 		if ((1)); then
 			permFlags=''
-			if (($#host)); then # remote
-				permFlags='-p' # og'
-			else
-				[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-p' #og'
-			fi
+			#if (($#host)); then # remote
+			#	permFlags='-p' # og'
+			#else
+			#	[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-p' #og'
+			#fi
 			#data="$(run $sudo rsync -ni ${sshArgs[@]} ${rsArgs[@]} $permFlags "$src[@]" $dir)"
 			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
 			if (($#data)); then
@@ -350,11 +363,13 @@ function syncDirs()
 # Added 2019-02-20 09:23:39 @TODO
 function box()
 {
-	local box base=$HOME/repos cmd search list
+	local box base=$HOME/repos cmd search list _opts
 	#zparseopts -D -M - 
 	include -r functions
 	include -l network
 	#include boxes
+
+	zparseopts -D -M -A _opts - a -all=a
 
 	if (($#)); then
 		cmd=$1 ; shift ; box="$*"
@@ -406,8 +421,13 @@ function box()
 					cmd='open'; box=$search
 					continue
 				fi
-
-				list=($base/*(-/omN))
+				integer num
+				if (($+_opts[-a] || $#search)); then
+					num=-1 # [1,-1] => all
+				else
+					num=20
+				fi
+				list=($base/*(-/omN[1,num]))
 				(($#list)) || return 10
 				chooser --simple -v box -f1 ${=box:+-S $search} $list:t 'New box' || cancel
 				if [[ $box == 'New' ]]; then
@@ -452,7 +472,8 @@ function attributeSync()
 		if [[ $stats[7] == o || $stats[8] == g ]] && [[ $stats != skipping ]]; then
 			$dry sudo chown --reference "$dir1/$name" $dir2/$name
 		fi
-	done < <(run -s rsync -n -hDirtpog $rsArgs $dir1/ $dir2 | tee $TTY)
+	done < <(run -s rsync -n -hDirt -pog $rsArgs $dir1/ $dir2 | tee $TTY)
+	#@TODO -p perms -o owner -g group : make these optional throw an option
 	_sync
 }
 

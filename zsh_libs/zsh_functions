@@ -49,10 +49,11 @@ function regex {
 # --bcb button callback - cb args: ret str buttons
 function input()
 {
-	local _var p gui z c title raw _buttons okcodes tmp
+	local _var _opts p gui z c title raw _buttons okcodes tmp
 	local colors args str current gx cb ret
-	zparseopts -M -D - c:=c p:=p v:=_var g=gui z=z t:=title r=raw \
-		b:=_buttons -buttons:=b -bcb:=cb N:=okcodes -okcodes:=N D:=current
+	zparseopts -M -D -A _opts - c:=c p:=p v:=_var I: -save-index:=I D:=current \
+		g=gui z=z t:=title r=raw \
+		b:=_buttons -buttons:=b -bcb:=cb N:=okcodes -okcodes:=N
 
 	typeset -A buttons=(Cancel 130 Ok 0)
 	if (($#_buttons)); then
@@ -76,7 +77,7 @@ function input()
 		str="$@"
 	fi
 
-	[[ ${p: -1} != ' ' ]] && techo -n -c ${c[2]:-head} "$p$C_: " || techo -n $c $p 
+	[[ ${p: -1} != ' ' ]] && techo -n -c ${c[2]:-head} "$p$C_: " || techo -n $c $p
 
 	{
 		if [[ -n $DISPLAY && -z $raw ]] && type gxmessage >/dev/null && ; then
@@ -98,7 +99,7 @@ function input()
 	} always {
 		if catch '*'; then ret=$CAUGHT; fi
 
-		in_array -v tmp $ret buttons || abort $ret
+		in_array -v tmp $ret buttons || return $ret
 
 		if ((ret)); then
 			if ! in_array $ret okcodes; then
@@ -110,10 +111,16 @@ function input()
 
 	if [[ -n $cb ]]; then
 		$cb -v str $ret $str 'buttons' || return
+	elif ((! $#str)); then
+		if [[ ${(k)buttons[(r)$ret]} =~ '\[(.*)\]' ]]; then
+			str=$match[1]
+		else
+			techo -c warn "Empty input string"
+		fi
 	fi
 
-	(($#str)) || return 10
-	if ((gx && $#str)) && techo -c warn -E $str
+	#(($#str)) || return 10
+	if ((gx && $#str)) && techo -r -c warn $str
 	
 	if (($#_var)); then
 		typeset -g "$_var=$str"
@@ -121,7 +128,12 @@ function input()
 		echo $str
 	fi
 
-	return $ret
+	if (($+_opts[-I])); then
+		typeset -gi "$_opts[-I]=$ret"
+		techo -c warn "Selected index: $ret"
+	fi
+
+	return 0
 }
 
 function clearBuffer()
@@ -236,10 +248,10 @@ function chooser()
 			ropts+=(--selectfile "$=_opts[--selected]")
 		fi
 		ranger "$ropts[@]" "$@" || chkCmd ranger --git 'ranger/ranger'
-		explode -v chosenList "$(<$out)" $'\n' 
+		explode -v chosenList "$(<$out)" $'\n'
 	else
 		if (($+_opts[--use-keys])); then # keyboard shortcuts
-			if (($+_opts[--ifs])); then 
+			if (($+_opts[--ifs])); then
 				abort 2 'Not implemented --use-keys option together with --ifs'
 			fi
 			
@@ -255,7 +267,7 @@ function chooser()
 				_olist+=("$@[i++]")
 			done
 		else
-			if (($+_opts[--ifs])); then 
+			if (($+_opts[--ifs])); then
 				explode -v _olist "$*" $_opts[--ifs]
 			else
 				_olist=("$@")
@@ -295,19 +307,19 @@ function chooser()
 			fi
 
 			# # # # # # # # # # #
-			# SIMPLE  SELECTION # 
+			# SIMPLE  SELECTION #
 			# # # # # # # # # # #
 			if (($+_opts[--simple])); then
 				local sel_box elem_show _msg last_search
 				integer last_key next_key b loop=1
 				integer opt_wid page_size max_lines found_idx=0
-				integer num_elem first last begin_idx end_idx 
+				integer num_elem first last begin_idx end_idx
 
 				max_lines=${PAGE_SIZE:-15}
 
 				typeset -A keys=(
-					'UP' $'\e[A' 'PGUP' $'\e[5~' 'HOME' $'\e[1~' 
-					'DOWN' $'\e[B' 'PGDOWN' $'\e[6~' 'END' $'\e[4~' 
+					'UP' $'\e[A' 'PGUP' $'\e[5~' 'HOME' $'\e[1~'
+					'DOWN' $'\e[B' 'PGDOWN' $'\e[6~' 'END' $'\e[4~'
 				)
 				for i in $selected_idx; do
 					(($+selected[i])) && selected[i]=1
@@ -320,12 +332,11 @@ function chooser()
 					if [[ -z ${(k)list_keys[(r)$i]} && -z ${noSelect[(r)$i]} ]]; then
 						if ((j <= 9)); then
 							opt=$j # number as key binding
-						else
+						elif ((j < 36)); then
 							opt=$(inttochar $j + 55) # letter
-							if ((!$#opt)); then
-								techo '@TODO - ran out of key shortcuts: j='$j
-								continue
-							fi
+						else
+							techo '@TODO - ran out of key shortcuts: j='$j
+							continue
 						fi
 						list_keys+=($opt $i)
 						if (($#opt>opt_wid)); then
@@ -354,7 +365,7 @@ function chooser()
 				# # # # # # # # #
 				if [[ -z $search || $search != $last_search ]]; then
 					elem_show=() # clear
-					# elem_show has nothing to do with pagination. It indicates it's not filtered out. 
+					# elem_show has nothing to do with pagination. It indicates it's not filtered out.
 					# begin_idx and end_idx are used for that.
 					((num_elem=first=last=0))
 					for ((i=1; i<=$#_olist; i++)); do
@@ -386,27 +397,27 @@ function chooser()
 				#begin_idx=
 				begin_idx=$first
 				((end_idx=i-1))
-					#techo "begin=$begin_idx, end=$end_idx, current=$current_key" 
+					#techo "begin=$begin_idx, end=$end_idx, current=$current_key"
 
 				# for page_size = 5: end = page_size - foot = 5 - 1 = 4
 				# in case of hidden elements (search filter)
-				# i j                     i j 
-				#   header                  header              
+				# i j                     i j
+				#   header                  header
 				# 1 2  begin              5 2  begin
-				# 2   <- hidden elem      6 3 
+				# 2   <- hidden elem      6 3
 				# 3 3                     7   <- hidden elem
 				# 4 4  end  j<page_size   8 4  end  j<page_size
-				#   footer                  footer              
+				#   footer                  footer
 				(($#head)) && techo -c head "$head[2]"
 				while ((loop)); do
 					if ((next_key)); then
 						last_key=current_key
 						current_key=$next_key
-						techo last=$last_key, current=$current_key 
+						techo last=$last_key, current=$current_key
 						if ((current_key > end_idx)); then
 							found_idx=0
 							((begin_idx=end_idx+1))
-							techo begin=$begin_idx, end=$end_idx 
+							techo begin=$begin_idx, end=$end_idx
 							while ((! found_idx && begin_idx<=last)); do
 								for ((i=begin_idx, j=2; i>=first && j<page_size; i++)); do
 									((elem_show[$i])) && ((j++))
@@ -426,7 +437,7 @@ function chooser()
 						elif ((current_key < begin_idx)); then
 							found_idx=0
 							((end_idx=begin_idx-1))
-							techo begin=$begin_idx, end=$end_idx 
+							techo begin=$begin_idx, end=$end_idx
 							while ((! found_idx && end_idx>=first)); do
 								for ((i=end_idx, j=2; i>=first && j<page_size; i--)); do
 									((elem_show[$i])) && ((j++))
@@ -443,7 +454,7 @@ function chooser()
 							else
 								((begin_idx=i+1))
 							fi
-							techo begin=$begin_idx, end=$end_idx 
+							techo begin=$begin_idx, end=$end_idx
 						fi
 					fi
 
@@ -453,11 +464,14 @@ function chooser()
 					if ((num_elem)); then
 						for ((i=begin_idx, j=2; j<page_size && i<=last; i++)); do
 							((elem_show[$i])) || continue
-							opt=${(k)list_keys[(r)$i]}
-							if [[ -z $opt ]]; then #@TODO noSelect
+							if [[ -n ${noSelect[(r)$i]} ]]; then
 								# left padding: (l:expr::string1::string2:)
 								techo "  ${(l:opt_wid+$#sel_box+1:)} $_olist[i]"
 								continue
+							fi
+							opt=${(k)list_keys[(r)$i]}
+							if [[ -z $opt ]]; then
+								opt=' '
 							fi
 
 							if ((multi)); then
@@ -482,11 +496,11 @@ function chooser()
 						_msg='No matches found'
 					fi
 					#((end_idx=$i-1))
-					#techo "begin=$begin_idx, end=$end_idx, current=$current_key" 
+					#techo "begin=$begin_idx, end=$end_idx, current=$current_key"
 					(($#foot)) && techo -c head "$foot[2]"
 
 					# # # # # # # # # #
-					# iNPUT  HANDLING # 
+					# iNPUT  HANDLING #
 					# # # # # # # # # #
 					while readkey; do
 						case $KEY in
@@ -583,7 +597,7 @@ function chooser()
 								input -r -p "Search" -v search
 							;;
 							$'\e')
-								throw 130
+								return 130
 							;;
 							*)
 								# Verify whether KEY matches one of options
@@ -618,7 +632,7 @@ function chooser()
 										next_key=$i
 									else
 										# Select and finish
-										# TODO finish only if the event say so 
+										# TODO finish only if the event say so
 										selected_idx=($i)
 										loop=0
 									fi
@@ -852,7 +866,7 @@ function chkCmd()
 		esac
 		
 		pkgList[i+1]=$tmp[1] # version
-		in_array -v n ';' tmp || n=2 
+		in_array -v n ';' tmp || n=2
 		desc=("${(@fqq)tmp[n+1,-1]}") # description
 
 		# i:pkg   |   i+1:version   |   i+2:packager   |   i+3:cmd
@@ -992,7 +1006,9 @@ function run()
 	(($+_opts[-p])) && print=$_opts[-p]
 	if ((verbose>=3-$+print)); then
 		if ((verbose>=6)); then
-			(($+print)) && techo -r $color $print
+			if (($+print)) && [[ $print != $fullcmd ]]; then
+				techo -r $color $print
+			fi
 			techo -r $color "${(q@)fullcmd}"
 		elif (($+print)); then
 			((verbose>=5)) && techo -r $color "$print ($cmd)" || techo -r $color $print
@@ -1192,8 +1208,8 @@ function colorify()
 		if [[ -n $debug ]]; then
 			cmd=$debug[2]
 			# @TODO IFS='' ??
-			# while IFS='' read line; do 
-			while read line; do 
+			# while IFS='' read line; do
+			while read line; do
 				if [[ $line =~ ^\\+([0-9]?)\<?$cmd:([0-9]+)\>\ (.*) ]]; then
 					techo -c lcyan $cmd:$match[2] $C_$match[3]
 				elif [[ $line =~ ^\\+([0-9]?)\<?([[:alnum:]]+):([0-9]+)\>\ (.*) ]]; then
@@ -1317,7 +1333,7 @@ function todo()
 
 function opts()
 {
-	local long opt desc arg 
+	local long opt desc arg
 	for long opt arg desc; do
 		print -ca -C 4 -- --$long -$opt $arg $desc
 	done

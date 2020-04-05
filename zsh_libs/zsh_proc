@@ -70,7 +70,7 @@ function p()
 		cols=($(explode "$cols[2]" ','))
 		#elif in_array args --any '-o,-O'; then
 	else
-		cols=(pid ppid %cpu stat cmd)
+		cols=(pid ppid %cpu stat cmd tty)
 		[[ -n $user[2] ]] && cols+=() # euid if not -u or -u $x with $x != $UID
 	fi
 	if [[ -n $appendcols ]]; then
