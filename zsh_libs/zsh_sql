@@ -88,8 +88,10 @@ function sql()
 			user=${user[2]:-$sqlUser[root]}
 			pass=${pass[2]:-$sqlPass[$user]}
 		fi
+		(($+_opts[-p])) && pass=$_opts[-p]
 		opts+=(${user:+-u$user} ${pass:+-p"$pass"})
-		if (($#_out)); then
+
+		if (($+_opts[-o)); then
 			i=1
 			_out=$_out[2]
 			unset $_out$i

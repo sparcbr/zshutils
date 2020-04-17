@@ -7,7 +7,7 @@ alias gadd-modified="git add \$(git diff --name-only --relative)"
 alias gh='github'
 alias unstage="gunstage"
 alias git_get_tag='git describe --tags $(git rev-list --tags --max-count=1)'
-alias glog2='git log --date=iso -g'
+unalias glog # from git plugin
 alias gd='gdiff'
 alias gdi='gdiff --interactive'
 
@@ -27,7 +27,6 @@ function gconfig()
 	#	git config --global core.pager
 	#fi
 }
-
 
 function gshow()
 {
@@ -53,26 +52,26 @@ function gunstage()
 
 function gselect()
 {
-	local lines _opts gopts noSelect
-	integer ret i idx nlimit=30
+	local lines _opts _copts=() gopts noSelect gFormat head=()
+	integer ret i idx nlimit=20
 	setopt extendedglob
-	#zparseopts -D -M -A _opts - #-all
-	#opts="$@"
+	zparseopts -D -M -A _opts - 'l' -nograph=l -oneline=l 'n'
+
+	(($+_opts[-n])) && nlimit=$_opts[-n]
 	gopts=(
-		--color=always --graph -n $nlimit
-		--format=format:'%h %an <%aE> %ai %f'
+		-n $nlimit
 	)
+	((! $+_opts[-l])) && gopts+=('--graph')
+#	while [[ ${1[1]} == '-' ]]; do
+#		if [[ $1 == '-' || $1 == '--' ]]; then
+#			shift
+#			break
+#		fi
+#		gopts+=("$1")
+#		shift
+#	done
 
-	while [[ ${1[1]} == '-' ]]; do
-		if [[ $1 == '-' || $1 == '--' ]]; then
-			shift
-			break
-		fi
-		gopts+=("$1")
-		shift
-	done
-
-	lines=("$(run git log $gopts "$@")")
+	lines=("$(run glog $gopts "$@")")
 
 	# mark lines without content as non-selectable
 	for ((i=1; i<=$#lines; i++)); do
@@ -82,19 +81,23 @@ function gselect()
 	done
 	(($#noSelect)) && _opts+=(-n "$noSelect")
 
-	_opts=(
-		#--head 'Commits containing "$1"'
-		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision (D) Diff (M) Meld (Q) Quit. Do nothing.'
-		--events "v\\|e EDIT f FULL d DIFF m MELD" 
+	_copts=(
+		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision \
+			(D) Diff (M) Meld (Q) Quit'
+		--events 'v\|e EDIT f FULL d DIFF m MELD'
 		-I idx
 	)
-	
-	if ((${lines[(i)--follow]}<$#lines)); then
-		_opts+=(--head "Following $@")
-	fi
 
-	while { chooser --simple -v hashes --ifs $'\n' \
-		-R '([a-f0-9]{5,40} .*)' -f1 -D $idx $_opts $lines ; ret=$? ; ((ret==0)) }
+	#if (( (i=${@[(i)--grep]}) < $#lines)); then
+	#	head+=("Search: $@[i+1]")
+	#fi
+	#if (( (i=${@[(i)--follow]}) < $#lines)); then
+	#	head+=("Following $@[i+1]")
+	#fi
+	#_copts+=(--head "$head")
+
+	while { chooser --simple --ifs $'\n' -v hashes -D $idx --strip-color \
+		-R '([a-f0-9]{5,40} .*)' -f1 $_copts $lines ; ret=$? ; ((ret==0)) }
 	do
 		case $ACTION in
 			'')
@@ -122,8 +125,6 @@ function gfollow()
 	local hash entries REPLY
 	zparseopts -M -D - d=diff -diff=d
 	gselect --follow "$@"
-	#hashes=($(egrep '^commit' <(git log --follow "$@") | awk '{print $2}'))
-	#entries=("${(@f)$(git log --format=format:%h\ %an\ \<%aE\>\ %ai\ %f --follow $1)}")
 }
 
 function gtag() #@TODO
@@ -522,31 +523,15 @@ function gbranch() #@TODO
 	esac
 }
 
-typeset -A gFields=(
-	'HEAD' ''
-	'refname:s' 'yellow'
-	'objectname:s' 'red'
-	'contents:subject' 'magenta'
-	'committerdate' 'green' 
-)
-
-#only works for git log --format?
-	glineFormat=(
-		'%(HEAD)'
-		'%C(yellow)%(refname:short)%Creset'
-		'%C(red)%(objectname:short)%Creset'
-		'%C(magenta)%(contents:subject)%Creset'
-		'(%C(green)%(committerdate:relative)%Creset)'
-	)
 function listbranch()
 {
 	local _cols head merged to compare_to all _opts opts=()
-	zparseopts -M -D -A _opts - -no-merged::=merged -merged::=merged a=all O:
+	zparseopts -M -D -A _opts - -no-merged::=merged -merged::=merged a -all=a O:
 	#compare_to="$remote[1]/master"
 	#@TODO get "main" branch
 	compare_to='master'
-	if (($#all)); then
-	
+	if (($+_opts[-a])); then
+		opts+=(-a)
 	else
 		if (($+_opts[--no-merged])); then
 			if (($#_opts[--no-merged])); then
@@ -576,12 +561,14 @@ function listbranch()
 	for tmp in $_cols; do
 
 	done
+
+	# format used in git-for-each-refonly
 	glineFormat=(
 		'%(HEAD)'
-		'%(color:yellow)%(refname:short)%(color:reset)'
+		'%(color:yellow)%(align:20,left)%(refname:short)%(end)%(color:reset)'
 		'%(color:red)%(objectname:short)%(color:reset)'
-		'%(color:magenta)%(contents:subject)%(color:reset)'
-		'(%(color:green)%(committerdate:relative)%(color:reset))'
+		'%(color:reset)%(contents:subject)'
+		'(%(color:green)%(committerdate:iso) %(color:#4579aa)%(committerdate:relative)%(color:reset))'
 	)
 	git --no-pager branch --sort=committerdate --format="$glineFormat" --color=always $opts "$@"
 }
@@ -748,22 +735,12 @@ comp+=('gdiff=git-diff')
 function gdiff()
 {
 	local cmd _opts _dopts flist
-	zparseopts -D -M -A _opts - i -interactive=i l -list=l
+	zparseopts -D -M -A _opts - 'i' -interactive=i 'l' -list=l 's' -status=s
 
 	if  (($+_opts[-i])); then
 		local f name _copts args head_hash hashes2=() hashes=()
 		integer idx h
-		#hash=$1
-		#shift
-		_copts=(
-			--head "diff $*"
-			--foot '(Enter) Show in terminal (V or E) Gvimdiff (M) Meld (Esc) Quit'
-			--events "v\\|e EDIT m MELD" 
-			-I idx
-			--no-auto-select
-		)
 		
-		#flist=($(git diff --no-color --name-only $hash "$@"))
 		flist=($(git diff --no-color --name-only --relative "$@")) || return $?
 
 		if [[ "$*" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
@@ -784,15 +761,22 @@ function gdiff()
 			abort -v5 -d-1 2 "Incorrect arguments: $@"
 		fi
 
-		while chooser --simple -v f -D $idx $_copts $flist
-		#while chooser -v f -D $idx $_copts $flist
+		_copts=(
+			--head "diff $*" -I 'idx' -v 'f' --simple 
+			--foot '(Enter) Show diff in terminal (V or E) Gvimdiff (M) Meld (Esc) Quit'
+			--events "v\\|e EDIT m MELD" --no-auto-select
+		)
+		# --src-prefix=
+		# Show the given source prefix instead of "a/".
+		# --dst-prefix=<prefix>
+		while chooser -D $idx $_copts $flist
 		do
 			cmd=''
 			case $ACTION in
 				'')
-					git diff "$@" -- $f
+					run git diff "$@" -- $f
 				;;
-				'DIFF')
+				'EDIT')
 					cmd='gvimdiff'
 				;;
 				'MELD')
@@ -822,4 +806,22 @@ function gdiff()
 		(($+_opts[-l])) && _dopts=('--name-only')
 		git diff $_dopts "$@"
 	fi
+}
+
+# Added 2020-04-06 16:43
+function glog()
+{
+	local _gopts
+	#zparseopts -D -M -A _opts - -date:
+
+	gFormat=(
+		'%C(yellow)%h'		# short hash
+		'%C(auto)%d'		# ref names
+		'%Creset%s'			# subject.
+		'%Creset%'			#
+		'%Creset(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
+	)
+
+	_gopts=(--graph --color=always --format=tformat:"$gFormat")
+	run git log --date=${_opts[--date]:-iso} $_gopts "$@"
 }
