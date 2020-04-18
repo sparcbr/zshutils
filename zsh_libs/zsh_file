@@ -1,6 +1,9 @@
 VERSION=1.0.9
 #lazyload=syncDirs,urlfollow,urlinfo,vnc,imdb,globo,awkWrapper,getfullpath,getpath,getext,getfilename,isDir,isEmptyDir,box,ddiff
 
+alias fullpath='getfullpath'
+alias full='getfullpath'
+
 [[ -v comp ]] || typeset -ga comp
 
 setopt nomultios
@@ -46,7 +49,11 @@ function isDir()
 			return 2
 		fi
 		[[ -z $mk ]] && return 1
-		confirm "dir $dir doesn't exist. Create" && run -S mkdir -p $dir
+		if confirm "dir $dir doesn't exist. Create"; then
+			run -S mkdir -p $dir
+		else
+			return 130
+		fi
 	fi
 }
 
@@ -225,7 +232,7 @@ function syncDirs()
 
 	# exclusions
 	if [[ -n $exclude ]]; then
-		explode -v excludePatterns $exclude[2] ' '
+		explode -v excludePatterns $exclude[2] ','
 	fi
 	excludePatterns+=(.osync_workdir 'backup*' '*.local' '.git' 'node_modules')
 	rsArgs+=(--exclude=$^excludePatterns)
@@ -678,4 +685,14 @@ function awkWrapper()
 function open()
 {
 	xdg-open "$@" &
+}
+
+# Added 2020-04-06 23:53
+# Just like the --relative-base option from realpath
+# Usage: relpath <file|dir> <relative_base>
+# Exs:
+# relpath /home/user/repo/API /home/user/repo/API/v6 ; # gives: v6
+function relpath()
+{
+	python -c 'import os, sys; print(os.path.relpath(*sys.argv[1:]))' $2 $1
 }
