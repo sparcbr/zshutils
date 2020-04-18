@@ -51,47 +51,56 @@ function sqlQuote()
 # sql [-d dbname] [-f file.sql] SELECT ...
 function sql()
 {
-	local file name nodb verbose user pass silent host ret _out opts
-	local _colsOut _cols p _idVar _raw
+	local file name verbose user pass silent host ret _out opts
+	local _colsOut _cols p _idVar _raw _opts
 	integer i _id
+
 	typeset -g sql
- #s=silent 
-	zparseopts -D -M - f:=file d:=name n=nodb v=verbose u:=user p:=pass \
-		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw
+
+	zparseopts -D -M -A _opts - f: d:=name n v=verbose u: -user:=u p: -pass:=p \
+		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw \
+		i --pager #s=silent 
 
 	sql="$*"
 
-	if (($#file)); then
-		[[ -f $file[2] ]] || abort --ex FileIoEx_NotFound 127 $(getfullpath $file[2])
+	if (($+_opts[-f])); then
+		file=$(getfullpath $_opts[-f]) 
+		[[ -f $file ]] || abort --ex FileIoEx_NotFound 127 $file
 	fi
 
 	coproc parseSqlErrors; p=$!
 
 	if [[ -n $host ]]; then # remote
 		OPT_CHK file -f for remote
-		#(($#file)) && file=$file[2]
-		if (($#_out)); then
+		#(($+file)) && 
+		opts=() # TODO
+		if (($+_opts[-o])); then
 			#@TODO
-			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p | \
-				awkWrapper -F '\\t' --inc printFields -E - - - - 'printFields(1,-1)'
+			#ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p | \
+			#	awkWrapper -F '\\t' --inc printFields -E - - - - 'printFields(1,-1)'
 		else
 			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p
 		fi
 		ret=$?
+
+	elif (($+_opts[-i])); then # interactive mode
+		#@TODO
 	else
-		opts=(-B $_raw)  # $silent
-		[[ -n $nodb ]] || usedb $name[2]
+		opts=(
+			-B $_raw --safe-updates --disable-auto-rehash
+			)  # batch mode, $silent
+		((! $+_opts[-n])) && usedb $name[2]
 		if [[ -n $db ]]; then
-			user=${user[2]:-${sqlUser[$db]:-$root}}
+			user=${_opts[-u]:-${sqlUser[$db]:-$root}}
 			pass=${pass[2]:-$sqlPass[$user]}
 		else
-			user=${user[2]:-$sqlUser[root]}
+			user=${_opts[-u]:-$sqlUser[root]}
 			pass=${pass[2]:-$sqlPass[$user]}
 		fi
 		(($+_opts[-p])) && pass=$_opts[-p]
 		opts+=(${user:+-u$user} ${pass:+-p"$pass"})
 
-		if (($+_opts[-o)); then
+		if (($+_opts[-o])); then
 			i=1
 			_out=$_out[2]
 			unset $_out$i
@@ -126,11 +135,11 @@ function sql()
 		else
 			#@TODO: no error handling: redirect stderr to null
 			if (($#file)); then
-				if [[ -f $file[2] ]]; then
-					(($#verbose)) && techo -r -c head mysql ${(qq)opts} ${(qq)sql} $db '<' $file[2]
-					mysql $opts $sql $db 2>&p < $file[2]
+				if [[ -f $file ]]; then
+					(($#verbose)) && techo -r -c head mysql ${(qq)opts} ${(qq)sql} $db '<' $file
+					mysql $opts $sql $db 2>&p < $file
 				else
-					techo -c err "File not found$C_: $file[2]"
+					techo -c err "File not found$C_: $file"
 					false
 				fi
 			else
