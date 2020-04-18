@@ -214,11 +214,12 @@ function vartype() {
 # Set info for a lib
 function lib_set_info()
 {
-	local name info ll err
-	zparseopts -D - E=err l=ll
-	err=$#err; ll=$#ll; name=${(U)1}
+	local name info err _opts
+	zparseopts -D -A _opts - E=err 'l'
+	err=$#err; name=${(U)1}
 	typeset -Ag "ZSH_${name}_INFO"
-	set -A "ZSH_${name}_INFO" ver $2 path "$3" required $4 mtime "$5" lazyload $ll err $err
+	set -A "ZSH_${name}_INFO" 'ver' $2 'path' "$3" 'required' \
+		$4 'mtime' "$5" 'lazyload' $+_opts[-l] 'err' $err
 }
 
 function getmime()
@@ -239,10 +240,10 @@ function zshLibReadHeader()
 		if ((ll)); then
 			while read -r tmp; do
 				[[ -z $tmp || $tmp == '#/head' ]] && break
-				if [[ $tmp =~ '^alias (.*)=(.*)' ]]; then
-					eval "alias $match[1]=$match[2]"
-				elif [[ $tmp =~ '^unalias (.*)' ]]; then
-					eval "unalias $=match[1]"
+				if [[ $tmp =~ '^(alias [^=]+=.*)' ]]; then
+					eval "$match[1]"
+				elif [[ $tmp =~ '^(unalias .*)' ]]; then
+					eval "$match[1]"
 				elif [[ $tmp[1] != '#' ]]; then
 					break
 				fi
