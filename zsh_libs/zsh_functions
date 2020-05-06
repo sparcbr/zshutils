@@ -68,7 +68,7 @@ function input()
 
 	colors=(-fg white -bg black)
 	p=${p[2]:-Input text}
-	title=${title[2]:-Input text}
+	title=$title[2]:-Input} # window title
 	if (($#_var)); then
 		_var=$_var[2]
 		typeset -g $_var
@@ -77,11 +77,14 @@ function input()
 		str="$@"
 	fi
 
-	[[ ${p: -1} != ' ' ]] && techo -n -c ${c[2]:-head} "$p$C_: " || techo -n $c $p
-
 	{
 		if [[ -n $DISPLAY && -z $raw ]] && type gxmessage >/dev/null && ; then
 			gx=1
+			if [[ ${p: -1} != ' ' ]]; then # if last char is not a space
+				techo -n -c ${c[2]:-head} "$p$C_: "
+			else
+				techo -n $c $p
+			fi
 			args=($colors -name name -center -ontop -wrap -buttons "$(implode -A':' buttons ',')")
 			str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")
 			#@ is returning 1, should be ok, but empty str, but since code is 1, we can manually set str
@@ -200,7 +203,7 @@ function chooser()
 	local noSelect sep field bytes search current head foot
 	local _olist chosen chosenList selectors ofs
 	local file opt _opts selected selected_idx list_keys events
-	integer multi i j
+	integer multi i j noAutoSelect
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
@@ -220,6 +223,7 @@ function chooser()
 		_opts[--file]=1
 	fi
 	search=$_opts[-S]
+	(($#events || $+_opts[--no-auto-select])) && noAutoSelect=1
 
 	[[ -n $ofs ]] && ofs=$ofs[2]
 
@@ -246,16 +250,21 @@ function chooser()
 			#--list-tagged-files=tag
 		if (($+_opts[--selected])); then
 			ropts+=(--selectfile "$=_opts[--selected]")
+		elif (($#)); then
+			ropts+=(--selectfile "$1")
 		fi
-		ranger "$ropts[@]" "$@" || chkCmd ranger --git 'ranger/ranger'
+		if ! type ranger >/dev/null; then
+			chkCmd ranger --git 'ranger/ranger' || abort $?
+		fi
+		ranger "$ropts[@]" || return
 		explode -v chosenList "$(<$out)" $'\n'
 	else
 		if (($+_opts[--use-keys])); then # keyboard shortcuts
 			if (($+_opts[--ifs])); then
-				abort 2 'Not implemented --use-keys option together with --ifs'
+				abort -v3 2 'Not implemented --use-keys option together with --ifs'
 			fi
 			
-			(($# % 2)) && abort 1 "Odd number of options with --use-keys"
+			(($# % 2)) && abort -v3 1 "Odd number of options with --use-keys: ""$@"
 			_olist=()
 			for ((i=1; i<=$#; )); do
 				local glob="$@[i++]"
@@ -277,7 +286,7 @@ function chooser()
 
 	if (($+_opts[--file])); then
 
-	elif (($#_olist > 1 || $+_opts[--no-auto-select])); then
+	elif (($#_olist > 1 || noAutoSelect)); then
 		chosenList=()
 		{
 			integer current_key=1
@@ -313,7 +322,7 @@ function chooser()
 				local sel_box elem_show _msg last_search
 				integer last_key next_key b loop=1
 				integer opt_wid page_size max_lines found_idx=0
-				integer num_elem first last begin_idx end_idx
+				integer num_elem first last begin_idx end_idx noSelectAlign
 
 				max_lines=${PAGE_SIZE:-15}
 
@@ -349,9 +358,11 @@ function chooser()
 				((DEBUG)) && array_dump list_keys
 
 				#typeset -R $opt_wid opt
+				((noSelectAlign=opt_wid+1))
 				if ((multi)); then
 					list_keys+=(' ' 'CHECK')
-					sel_box=' [ ]'
+					sel_box=" [${C[ok]} $C_]"
+					((noSelectAlign+=4))
 				fi
 
 				if (($#events)); then
@@ -466,7 +477,7 @@ function chooser()
 							((elem_show[$i])) || continue
 							if [[ -n ${noSelect[(r)$i]} ]]; then
 								# left padding: (l:expr::string1::string2:)
-								techo "  ${(l:opt_wid+$#sel_box+1:)} $_olist[i]"
+								techo "  ${(l:noSelectAlign:)} $_olist[i]"
 								continue
 							fi
 							opt=${(k)list_keys[(r)$i]}
@@ -476,9 +487,13 @@ function chooser()
 
 							if ((multi)); then
 								if ((selected[$i])); then
-									sel_box[3]='✔'
+									# 5,6 -> 2 digit color number
+									# 8 -> symbol
+									# @TODO: cycle through multiple selection types
+									#selection_types=(' ')
+									sel_box[8]='✔'
 								else
-									sel_box[3]=' '
+									sel_box[8]=' '
 								fi
 							fi
 

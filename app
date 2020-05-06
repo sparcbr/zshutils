@@ -412,12 +412,12 @@ function logcat()
 function getprop()
 {
 	local name names val values tmp
-	
+
 	if (($# == 0)); then
-		confirm "List all properties" && run shell getprop
+		run shell getprop
 		return
 	fi
-	
+
 	names=() ; values=()
 	for name; do
 		if [[ $name != *'*'* ]]; then

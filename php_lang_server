@@ -1,0 +1,9 @@
+#!/bin/zsh
+ADDRESS='0.0.0.0:5005'
+
+vendor=$HOME/.composer/vendor
+lpath=$vendor'/felixfbecker/language-server/bin/php-language-server.php'
+opts=(--tcp-server=$ADDRESS --memory-limit=256M)
+
+php $lpath &; pid=$!; wait $pid; ret=$?; echo ret=$ret; return $ret
+

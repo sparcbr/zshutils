@@ -1,5 +1,5 @@
 VERSION=1.0.5
-#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow
+#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow,gitgetrepo
 alias pull="git pull"
 alias push="gpush"
 alias gadd="git add"
@@ -52,27 +52,27 @@ function gunstage()
 
 function gselect()
 {
-	local lines _opts _copts=() gopts noSelect gFormat head=()
+	local lines _opts _copts=() gopts noSelect head=()
 	integer ret i idx nlimit=20
 	setopt extendedglob
-	zparseopts -D -M -A _opts - 'l' -nograph=l -oneline=l 'n'
+	zparseopts -D -M -A _opts - 'l' -nograph=l -oneline=l n: -follow
 
 	(($+_opts[-n])) && nlimit=$_opts[-n]
 	gopts=(
 		-n $nlimit
 	)
+	(($+_opts[--follow])) && gopts+=('--follow')
 	((! $+_opts[-l])) && gopts+=('--graph')
-#	while [[ ${1[1]} == '-' ]]; do
-#		if [[ $1 == '-' || $1 == '--' ]]; then
-#			shift
-#			break
-#		fi
-#		gopts+=("$1")
-#		shift
-#	done
+	#	while [[ ${1[1]} == '-' ]]; do
+	#		if [[ $1 == '-' || $1 == '--' ]]; then
+	#			shift
+	#			break
+	#		fi
+	#		gopts+=("$1")
+	#		shift
+	#	done
 
-	lines=("$(run glog $gopts "$@")")
-
+	explode -v lines "$(glog $gopts "$@")" $'\n'
 	# mark lines without content as non-selectable
 	for ((i=1; i<=$#lines; i++)); do
 		if [[ ! $lines[i] =~ [a-f0-9]{5,} ]]; then
@@ -84,19 +84,19 @@ function gselect()
 	_copts=(
 		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision \
 			(D) Diff (M) Meld (Q) Quit'
-		--events 'v\|e EDIT f FULL d DIFF m MELD'
+		--events '[ve] EDIT f FULL d DIFF m MELD'
 		-I idx
 	)
 
 	#if (( (i=${@[(i)--grep]}) < $#lines)); then
 	#	head+=("Search: $@[i+1]")
 	#fi
-	#if (( (i=${@[(i)--follow]}) < $#lines)); then
-	#	head+=("Following $@[i+1]")
-	#fi
+	if (( (i=${gopts[(i)--follow]}) < $#gopts)); then
+		head+=("Following: $@")
+	fi
 	#_copts+=(--head "$head")
 
-	while { chooser --simple --ifs $'\n' -v hashes -D $idx --strip-color \
+	while { chooser --simple -v hashes -D $idx --strip-color \
 		-R '([a-f0-9]{5,40} .*)' -f1 $_copts $lines ; ret=$? ; ((ret==0)) }
 	do
 		case $ACTION in
@@ -148,7 +148,7 @@ function gconfig()
 	# 'color.ui' 'auto'
 	#git config --global $opt $val
 }
-# git log --first-parent 
+# git log --first-parent
 function gmergebase()
 {
 	local common common2 _A _B
@@ -158,8 +158,8 @@ function gmergebase()
 	getbranch
 	_A=${1:-$compare_to}
 	_B=${2:-$branch}
-	common=$(run git merge-base $_A $_B) 
-	common2=$(run git merge-base --fork-point $_A $_B 2>/dev/null)
+	common=$(run -v3 git merge-base $_A $_B)
+	common2=$(run -v3 git merge-base --fork-point $_A $_B 2>/dev/null)
 	#[[ -n $common && $common != HEAD
 	#@TODO show glog graphic with shared commits and fork-point
 	if [[ -n $common || -n $common2 ]]; then
@@ -176,7 +176,8 @@ function gmergebase()
 function grebase()
 {
 	local msg status cmd common _opts _from _onto
-	zparseopts -D -M -A _opts - i -onto:
+	zparseopts -D -M -A _opts - -onto:
+
 	compare_to='master' #@TODO
 	if ! rebase_in_progress; then
 		_from=${1:-$compare_to}
@@ -206,7 +207,7 @@ function grebase()
 		else
 			cancel
 		fi
-		
+
 		rebase_in_progress || return 0
 	fi
 
@@ -241,7 +242,7 @@ function grebase()
 			cmd=
 		fi
 	fi
-	
+
 	if [[ -z $cmd ]]; then
 		if (($#unmerged)); then
 			local list=()
@@ -296,7 +297,7 @@ function gmerge() #@TODO
 				techo -c warn "Merge in progress (${mergeHash:0:8})"
 				unmerged=($(git diff --name-only --diff-filter=U))
 				#unmerged=($(git ls-files --unmerged))
-				#chooser -v file -f1 
+				#chooser -v file -f1
 				techo -c head "Needs merging: $C[warn]$unmerged"
 			;;
 		esac
@@ -310,7 +311,7 @@ function gmerge() #@TODO
 			-b3- --ifs $'\n' "$(listbranch -a)" || cancel
 
 		selection=($=selection)
-		
+
 		confirm "Merge branch $selection" && run git merge $selection[1] --no-ff --no-commit
 	fi
 }
@@ -357,15 +358,23 @@ function croot()
 comp+=('github=cd')
 function github()
 {
-	local url repo search echo
-	zparseopts -D -M - r=repo s=search e=echo
+	local url repo search echo forks
+	zparseopts -D -M - r=repo s=search e=echo f=forks
+	if (($#forks)); then
+		repo="$*"
+	fi
+
 	if [[ $# -eq 0 ]]; then
 		[[ -d "$(git rev-parse --git-dir 2>/dev/null)" ]] && github . || open 'https://github.com/'
 	elif [[ -n $search ]]; then
 		open "https://github.com/search?q=$(omz_urlencode $*)"
 	elif [[ -n $repo ]]; then
-		url="https://github.com/$*"
-		[[ -n $echo || ! -t 1 ]] && echo $url || open $url
+		if (($#forks)); then
+			open 'https://techgaun.github.io/active-forks/index.html#'$repo
+		else
+			url="https://github.com/$*"
+			[[ -n $echo || ! -t 1 ]] && echo $url || open $url
+		fi
 	elif url=$(gitgetrepo "$*"); then
 		if [[ -n $echo || ! -t 1 ]]; then
 			echo $url
@@ -388,7 +397,7 @@ function githubAPI()
 	args="${@%%.git}"
 
 	request=$(cat) <<-GQL
-	{ 
+	{
 		"query":"query(\$search:String!,\$limit:Int!){
 			search(query:\$search, first: \$limit, type: REPOSITORY){
 				nodes {
@@ -406,7 +415,7 @@ function githubAPI()
 	request=${request//$'\n'/}
 	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d $request $endpoint)
 	ret=$?
-	type jq >/dev/null || chkCmd jq 
+	type jq >/dev/null || chkCmd jq
 	(($#verbose)) && {
 		jq -r <<<$request
 		jq -r <<<$response
@@ -430,11 +439,11 @@ function githubAPI()
 		elif (($#repos == 1)); then
 			github -r $echo $(explode "$repos" ' ' 1)
 		else
-			name=$(chooser -s' ' -f1 $repos "Open this search in github") || cancel
+			name=$(chooser --simple -s' ' -f1 $repos "Open this search in github") || cancel
 			if [[ $name == 'Open' ]]; then
 				github -s "$*"
 				abort 0
-				return 
+				return
 			else
 				github -r $echo $name
 			fi
@@ -499,7 +508,7 @@ function getbranch()
 	local tmp
 
 	read -A tmp < $(git rev-parse --git-path ${1:-HEAD}) || return 1
-	
+
 	if (($#tmp>1)) && [[ $tmp[1] == 'ref:' ]]; then
 		branch=$(git symbolic-ref --short ${1:-HEAD})
 	elif (($#tmp)); then
@@ -519,7 +528,7 @@ function gbranch() #@TODO
 	case $cmd in
 		-c) getbranch "$@" ;;
 		-l) listbranch "$@" ;;
-		*) listbranch "$@" ;; 
+		*) listbranch "$@" ;;
 	esac
 }
 
@@ -549,7 +558,7 @@ function listbranch()
 			opts+=(--no-merged $compare_to)
 		fi
 	fi
-	
+
 	_cols=('refname' 'objectname' 'contents' 'committerdate')
 
 	if (($+_opts[-O])); then
@@ -576,18 +585,21 @@ function gremote()
 {
 	#local current
 	#zparseopts c=current
-	
+
 	remote=($(git remote))
 }
 
 # Added 2019-09-03 19:04
 function gclone()
 {
-	local repo dir
+	local repo dir _opts base=$HOME/repos
+
+	zparseopts -D -M -A _opts - b:
 
 	include -r network
 	repo=$1 ; dir=$2
-	cd $HOME/repos
+	(($+_opts[-b])) && base=$_opts[-b]
+	cd $base
 
 	{ [[ -n "$(urlinfo -s $repo)" ]] || repo="$(github -e $repo)" } || return
 
@@ -612,8 +624,8 @@ function gclone()
 
 function gpr()
 {
-	#local request owner 
-	local owner 
+	#local request owner
+	local owner
 
 #{
 #	"query":query(owner:"$owner", name:"$repname") {
@@ -735,35 +747,59 @@ comp+=('gdiff=git-diff')
 function gdiff()
 {
 	local cmd _opts _dopts flist
-	zparseopts -D -M -A _opts - 'i' -interactive=i 'l' -list=l 's' -status=s
+	zparseopts -D -M -A _opts - 'i' -interactive=i 'l' -list=l 's' -status=s #@TODO -s
 
 	if  (($+_opts[-i])); then
 		local f name _copts args head_hash hashes2=() hashes=()
-		integer idx h
-		
-		flist=($(git diff --no-color --name-only --relative "$@")) || return $?
-
-		if [[ "$*" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
+		integer idx h i sepgiven
+		i=${@[(ie)--]}
+		_dopts=()
+		if ((i<=$#)); then # "--" given
+			#hashes=("$@[1,i-1]")
+			#shift $#hashes
+			sepgiven=1
+		fi
+		j=1
+		while [[ $j -lt $i && (
+			$sepgiven -gt 0 || ( ! -f $@[j] && ! -d $@[j] ) #&& isRevision rev-parse)
+		) ]]
+		do
+			if [[ ${@[j]:0:1} == '-' ]]; then
+				_dopts+=($@[j])
+				shift
+				((i--))
+			else
+				((j++))
+			fi
+		done
+		hashes=("$@[1,j-1]")
+		shift $#hashes
+		((sepgiven)) && shift # shift the "--" sep
+		args=("$@")
+		# --relative
+		flist=($(git diff --no-color --name-only $_dopts $hashes -- "$args[@]")) || return
+		if [[ "$hashes" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
+			techo -r h1="'$match[1]'" h2="'$match[2]'" h3="'$match[3]'"
 			if [[ -n $match[2] ]]; then
-				hashes=(${match[1]:-HEAD} ${match[2]:-HEAD})
+				hashes=(${match[1]:-HEAD} ${match[3]:-HEAD})
 			elif [[ -n $match[1] ]]; then
 				# workdir <-> commit
 				hashes=($match[1])
 			else
 				#abort -v5 -d-1 1 "Incorrect arguments: $@"
 			fi
-			hashes2=($(git rev-parse $hashes))
-			head_hash="$(git rev-parse HEAD)"
+			# hashes2=($(git rev-parse $hashes))
+			# head_hash="$(git rev-parse HEAD)"
 			#if in_array -v h $head_hash hashes2; then
 			#	$hashes
 			#fi
 		else
-			abort -v5 -d-1 2 "Incorrect arguments: $@"
+			abort -v5 -d-1 2 "Incorrect arguments: $hashes"
 		fi
 
 		_copts=(
-			--head "diff $*" -I 'idx' -v 'f' --simple 
-			--foot '(Enter) Show diff in terminal (V or E) Gvimdiff (M) Meld (Esc) Quit'
+			--head "Diff $hashes" -I 'idx' -v 'f' --simple
+			--foot '(Enter) Show diff in terminal  (V or E) Gvimdiff  (M) Meld  (Esc) Quit'
 			--events "v\\|e EDIT m MELD" --no-auto-select
 		)
 		# --src-prefix=
@@ -771,24 +807,27 @@ function gdiff()
 		# --dst-prefix=<prefix>
 		while chooser -D $idx $_copts $flist
 		do
-			cmd=''
+			cmd=()
 			case $ACTION in
 				'')
-					run git diff "$@" -- $f
+					techo -c head git diff $hashes -- $C_$f
+					run -v0 git diff "$hashes[@]" -- $f
 				;;
 				'EDIT')
-					cmd='gvimdiff'
+					cmd=(gvimdiff -f)
 				;;
 				'MELD')
-					cmd='meld'
+					cmd=(meld)
 				;;
 			esac
 
-			if [[ -n $cmd ]]; then
+			if (($#cmd)); then
 				if (($#hashes == 0)); then
 				elif (($#hashes == 1)); then
+					techo -c lcyan $cmd $hashes[1]:$f $f
 					$cmd <(gshow $hashes[1]:$f) $f
 				else
+					techo -c lcyan $cmd $hashes[1]:$f $hashes[2]:$f
 					$cmd <(gshow $hashes[1]:$f) <(gshow $hashes[2]:$f)
 				fi
 			fi
@@ -808,20 +847,54 @@ function gdiff()
 	fi
 }
 
+gFormat=(
+	'%C(yellow)%h'		# short hash
+	'%C(auto)%d'		# ref names
+	'%Creset%s'			# subject.
+	'%Creset(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
+)
 # Added 2020-04-06 16:43
 function glog()
 {
 	local _gopts
 	#zparseopts -D -M -A _opts - -date:
 
-	gFormat=(
-		'%C(yellow)%h'		# short hash
-		'%C(auto)%d'		# ref names
-		'%Creset%s'			# subject.
-		'%Creset%'			#
-		'%Creset(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
-	)
-
 	_gopts=(--graph --color=always --format=tformat:"$gFormat")
-	run git log --date=${_opts[--date]:-iso} $_gopts "$@"
+	run -v0 git log --date=${_opts[--date]:-iso} $_gopts "$@"
+}
+
+# Added 2020-04-29 14:25
+function gstash()
+{
+	local _gopts cmd
+	#zparseopts -D -M -A _opts - -date:
+	# --date=${_opts[--date]:-iso}
+	_gopts=(--color=always --format=tformat:"$gFormat")
+
+	if (($#==0)); then
+		cmd='list'
+	else
+		cmd=$1
+		shift
+	fi
+
+	case $cmd in
+		list)
+			_gopts+=(--dirstat)
+			run -v3 git stash list $_gopts "$@"
+			;;
+		show)
+			run -v3 git stash show $_gopts "$@"
+			;;
+		'')
+			;;
+	esac
+}
+
+# Added 2020-04-20 00:46
+function gexpirestash()
+{
+	local when='30.days'
+	input -p 'Expire before' -v when || return
+	[[ -n $when ]] && run git reflog expire --expire=$when refs/stash
 }

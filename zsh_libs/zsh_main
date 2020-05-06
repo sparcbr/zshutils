@@ -19,11 +19,24 @@ function _dbg_trap() { set +x }
 function techo()
 {
 	local c _O _topts nonl print noesc ts msg
+	integer i
 	_dbg_trap $0
-	zparseopts -M -D - c:=c n=nonl P=print r=noesc -O:=_O T=ts
-	_topts=($=_O[2])
-	[[ -n $nonl ]] && _topts+=('-n')
+	zparseopts -M -D - c:=c n=nonl P=print r=noesc T=ts
+	_topts=()
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
+
+	i=${@[(i)--]} # look for '--'
+	if ((i<=$#)); then
+		((i--))
+		_topts+=("$@[1,i]")
+	else
+		i=${@[(i)^-*]} # find first non option
+		((i--))
+		_topts+=("$@[1,i]")
+	fi
+	shift $i
+	[[ -n $nonl ]] && _topts+=('-n')
+
 	if [[ -n $c ]]; then
 		c=$c[2]
 		if [[ $c == <1-> ]]; then
@@ -38,7 +51,7 @@ function techo()
 	else
 		msg="$@"
 	fi
-	
+
 	[[ -n $ts ]] && { print=1; ts='%D{%s.%.}>' }
 
 	if [[ -n $print ]]; then
@@ -193,7 +206,7 @@ function explode()
 				[[ -v $_var ]] || typeset -gA $_var
 				_Asep=$_Asep[2]
 				set -A $_var ${(@ps/$_Asep/)_list}
-			else 
+			else
 				[[ -v $_var ]] || typeset -ga $_var
 				set -A $_var $_list
 			fi
@@ -263,7 +276,7 @@ function zshLibReadHeader()
 					*) techo -r opt $opt=$val; continue
 						;;
 				esac
-				HEADER[$opt]=$val 
+				HEADER[$opt]=$val
 			done
 		fi
 	fi
@@ -300,7 +313,7 @@ function typeOf()
 			echo 'none'
 			return 1
 		fi
-		
+
 		echo $type $tpath
 		return 0
 	fi
@@ -340,7 +353,7 @@ function parseErrors()
 			techo -Pr "%F{9}${line}%f"
 			continue
 		fi
-		
+
 		print -Pr ${(@qqq)match}
 	done
 }
@@ -367,7 +380,7 @@ function include()
 			lpath="$ZSH_LIBS/zsh_$name"
 		fi
 	fi
-		
+
 	required=$#required
 
 	if [[ ! -f $lpath ]]; then
@@ -382,13 +395,13 @@ function include()
 	info="ZSH_${(U)name}_INFO"
 
 	if [[ -z ${(P)info} ||  # not loaded
-		-n $force ||  # force load 
+		-n $force ||  # force load
 		${${(P)info}[mtime]} -lt $mtime ]] || # file was modified
 		((
 			${${(P)info}[err]} ||
 			( ${${(P)info}[lazyload]} && ! $#lazyload )
-		)) # has error or was lazy loaded 
-	then 
+		)) # has error or was lazy loaded
+	then
 		if ! zshLibReadHeader $lazyload $lpath; then
 			techo -P "%F{11}$lpath %F{9}is not a zsh library%f"
 			if ((required)); then
@@ -413,7 +426,7 @@ function include()
 			return 0
 		fi
 
-		# [[ -o interactive ]] && 
+		# [[ -o interactive ]] &&
 		if ((verbose)); then
 			techo -P -r "Including %F{11}$name%f ("${lpath/$ZSH_LIBS/"\\$"ZSH_LIBS}") [%F{2}$VERSION%f]"
 		fi
@@ -499,7 +512,7 @@ function aptinst()
 
 # Added 2019-09-05 00:57
 # check if any item of array equals value
-# in_array value array_name 
+# in_array value array_name
 function in_array()
 {
 	_dbg_trap $0
@@ -521,7 +534,7 @@ function in_array()
 		abort 2 "not an array"
 		return 2
 	esac
-	
+
 	(($#_var)) && typeset -g "$_var[2]=$_i"
 	return 0
 }
@@ -635,7 +648,7 @@ function do_sudo()
 	_dbg_trap $0
 	integer glob=1
 	local _sopts user cmd
-	
+
 	include -r functions
 	zparseopts -D -M - u:=user
 
@@ -648,7 +661,7 @@ function do_sudo()
 				break
 			;;
 			nocorrect)
-				shift 
+				shift
 			;;
 			noglob)
 				glob=0; shift

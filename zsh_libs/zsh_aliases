@@ -1,7 +1,7 @@
 VERSION=1.0.7
 [[ -v comp ]] || typeset -g -a comp
 alias e=echo
-alias up='xdotool key Ctrl+Shift+F type ❯ ; xdotool key Shift+F3 key Shift+F3' # find last prompt
+alias up='xdotool key Ctrl+Shift+F sleep 0.4 type ❯ ; xdotool key Shift+F3' # find last prompt
 alias op='open'
 alias vmake="make SHELL='$SHELL -x'"
 alias sv="v -s"
@@ -21,7 +21,7 @@ function hg()
 	#gopt+=($ic ${@#-[]})
 	gopt+=($ic)
 	[[ -n $range ]] && fopt=${range[2]} || fopt="0"
-	#@TODO 
+	#@TODO
 	fc -li ${=fopt} | egrep ${=gopt} -- $1
 }
 
@@ -48,7 +48,7 @@ function mkscript()
 	local shell func name edit append ret=1
 	local file isLib help line data data2 _type
 	zparseopts -D -K s:=shell f:=func n:=name e=edit
-	
+
 	(($#func)) && func=$func[2]
 	data2="$@"
 	while ((ret)); do
@@ -240,7 +240,7 @@ function edalias()
 	else
 		var=("${(@f)$(egrep -rHn --exclude tags "^([^#]* )?$pat" $ZSH_LIBS $fpath)}")
 	fi
-	
+
 	if [[ -n $var[1] ]]; then
 		local result line col=0 opts i=1
 		typeset -a tmp opts
@@ -273,7 +273,7 @@ function edalias()
 		fi
 	else
 		if (($#isFunc)); then
-			techo -c err "Could not find function $1()" 
+			techo -c err "Could not find function $1()"
 		else
 			techo -c err "Could not find alias $1"
 		fi
@@ -308,7 +308,7 @@ function edfunc()
 			fi
 		fi
 	fi
-	edalias ${2:+-l $2} -f "$1" "$file" 
+	edalias ${2:+-l $2} -f "$1" "$file"
 }
 
 comp+=("vw=exec")
@@ -360,7 +360,7 @@ function vw()
 }
 
 # call vim to each file:linenum argument
-# file1:l4 file2:l66 
+# file1:l4 file2:l66
 function v()
 {
 	local opts sudo arg args skip vim
@@ -489,7 +489,7 @@ function aldd() {
 function recv()
 {
 	local host=$1
-#	scp $host:$2 
+#	scp $host:$2
 	echo TODO
 }
 
@@ -503,9 +503,11 @@ function send()
 function ge()
 {
 	local sudo icase in_exts ex_exts ex_dirs width prefix
-	local opts args defExDirs defExExts
-	zparseopts -D -E -M - i=icase s=sudo --exclude:=ex_exts E:=ex_dirs C::=width -cols::=C
-	
+	local opts args defExDirs defExExts _opts
+	zparseopts -D -E -M -A _opts - i=icase s=sudo --exclude:=ex_exts E:=ex_dirs \
+		W::=width -cols::=W
+
+	opts=()
 	IFS=',;: ' read -rA in_exts <<<"$1"
 	shift
 	#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
@@ -526,14 +528,23 @@ function ge()
 		prefix='command'
 	fi
 	if (($#width)); then
+		# -wN
 		(($#width[1] > 2)) && width=${width[1]:2} || width=0
 		if ((!width)); then
 			$prefix grep -rn $opts "$@"
 			return
 		fi
+	else
+		((width=$(tput cols)+50))
 	fi
-	((width=$(tput cols)+50))
 	$prefix grep -rn $opts "$@" | cut -c1-$width
+
+	if (($pipestatus[1] && $#ex_dirs)); then
+		if confirm 'Retry without exclusions?'; then
+			opts=('--include=*.'${^in_exts[@]} --color=always $icase)
+			$prefix grep -rn $opts "$@" | cut -c1-$width
+		fi
+	fi
 }
 
 function duh()
@@ -546,7 +557,16 @@ function duh()
 # Added 2019-01-11 16:33:46
 function stripcolors()
 {
-	echo $@ | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]//g"
+	local sreg="s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]//g"
+	if (($#)); then
+		if [[ -f $1 ]]; then
+			sed -r $sreg $1
+		else
+			echo $@ | sed -r $sreg
+		fi
+	else
+		sed -r $sreg -
+	fi
 }
 
 # Added 2019-01-11 17:00:37
