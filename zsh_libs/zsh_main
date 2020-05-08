@@ -24,18 +24,13 @@ function techo()
 	zparseopts -M -D - c:=c n=nonl P=print r=noesc T=ts
 	_topts=()
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
-
-	i=${@[(i)--]} # look for '--'
-	if ((i<=$#)); then
-		((i--))
-		_topts+=("$@[1,i]")
-	else
-		i=${@[(i)^-*]} # find first non option
-		((i--))
-		_topts+=("$@[1,i]")
-	fi
-	shift $i
 	[[ -n $nonl ]] && _topts+=('-n')
+
+	i=${@[(i)^-*|-##]} # find first non option or "null option" like '--' or '-'
+	((i--))
+	_topts+=("$@[1,i]")
+	shift $i
+	[[ $# -gt 0 && $1 == -## ]] && shift # remove '--'
 
 	if [[ -n $c ]]; then
 		c=$c[2]
@@ -57,7 +52,7 @@ function techo()
 	if [[ -n $print ]]; then
 		print -P $noesc $_topts - $ts$msg >$TTY
 	else
-		echo ${noesc:+-E} $_topts - $ts$msg >$TTY
+		echo ${noesc:+-E} $_topts - $msg >$TTY
 	fi
 }
 

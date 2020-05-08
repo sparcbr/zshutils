@@ -58,9 +58,7 @@ function gselect()
 	zparseopts -D -M -A _opts - 'l' -nograph=l -oneline=l n: -follow
 
 	(($+_opts[-n])) && nlimit=$_opts[-n]
-	gopts=(
-		-n $nlimit
-	)
+	gopts=(-n $nlimit)
 	(($+_opts[--follow])) && gopts+=('--follow')
 	((! $+_opts[-l])) && gopts+=('--graph')
 	#	while [[ ${1[1]} == '-' ]]; do
@@ -79,25 +77,27 @@ function gselect()
 			noSelect+=($i)
 		fi
 	done
-	(($#noSelect)) && _opts+=(-n "$noSelect")
+	(($#noSelect)) && _copts+=(-n "$noSelect")
 
-	_copts=(
+	_copts+=(
+		--simple -v hashes
 		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision \
 			(D) Diff (M) Meld (Q) Quit'
 		--events '[ve] EDIT f FULL d DIFF m MELD'
-		-I idx
+		-D $idx -I idx
+		--strip-color
+		-R '([a-f0-9]{5,40} .*)' -f1
 	)
 
-	#if (( (i=${@[(i)--grep]}) < $#lines)); then
-	#	head+=("Search: $@[i+1]")
-	#fi
-	if (( (i=${gopts[(i)--follow]}) < $#gopts)); then
-		head+=("Following: $@")
+	if (( (i=${gopts[(i)--grep]}) < $#gopts)); then
+		head+=("Search$C_: $@")
 	fi
-	#_copts+=(--head "$head")
+	if (( (i=${gopts[(i)--follow]}) < $#gopts)); then
+		head+=("Following$C_: $@")
+	fi
+	_copts+=(--head "$head")
 
-	while { chooser --simple -v hashes -D $idx --strip-color \
-		-R '([a-f0-9]{5,40} .*)' -f1 $_copts $lines ; ret=$? ; ((ret==0)) }
+	while { chooser $_copts $lines ; ret=$? ; ((ret==0)) }
 	do
 		case $ACTION in
 			'')
@@ -750,7 +750,7 @@ function gdiff()
 	zparseopts -D -M -A _opts - 'i' -interactive=i 'l' -list=l 's' -status=s #@TODO -s
 
 	if  (($+_opts[-i])); then
-		local f name _copts args head_hash hashes2=() hashes=()
+		local f name _copts args _a _b head_hash hashes2=() hashes=()
 		integer idx h i sepgiven
 		i=${@[(ie)--]}
 		_dopts=()
@@ -759,6 +759,8 @@ function gdiff()
 			#shift $#hashes
 			sepgiven=1
 		fi
+
+		#
 		j=1
 		while [[ $j -lt $i && (
 			$sepgiven -gt 0 || ( ! -f $@[j] && ! -d $@[j] ) #&& isRevision rev-parse)
@@ -778,13 +780,21 @@ function gdiff()
 		args=("$@")
 		# --relative
 		flist=($(git diff --no-color --name-only $_dopts $hashes -- "$args[@]")) || return
+
 		if [[ "$hashes" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
 			techo -r h1="'$match[1]'" h2="'$match[2]'" h3="'$match[3]'"
 			if [[ -n $match[2] ]]; then
 				hashes=(${match[1]:-HEAD} ${match[3]:-HEAD})
+				if [[ $match[2] == '...' ]]; then
+					hashes[1]="$(git merge-base $hashes[@])"
+				fi
+				_a=$hashes[1]
+				_b=$hashes[2]
 			elif [[ -n $match[1] ]]; then
-				# workdir <-> commit
+				# commit <=> workdir
 				hashes=($match[1])
+				_a=$hashes[1]
+				_b='WORKDIR'
 			else
 				#abort -v5 -d-1 1 "Incorrect arguments: $@"
 			fi
@@ -800,18 +810,17 @@ function gdiff()
 		_copts=(
 			--head "Diff $hashes" -I 'idx' -v 'f' --simple
 			--foot '(Enter) Show diff in terminal  (V or E) Gvimdiff  (M) Meld  (Esc) Quit'
-			--events "v\\|e EDIT m MELD" --no-auto-select
+			--events "[ve] EDIT m MELD" --no-auto-select
 		)
 		# --src-prefix=
 		# Show the given source prefix instead of "a/".
 		# --dst-prefix=<prefix>
-		while chooser -D $idx $_copts $flist
-		do
+		while chooser -D $idx $_copts $flist; do
 			cmd=()
 			case $ACTION in
 				'')
-					techo -c head git diff $hashes -- $C_$f
-					run -v0 git diff "$hashes[@]" -- $f
+					techo "$cmd {$C[warn]$_a $C[lcyan]=> $C[ok]$_b$C_}:$f"
+					run -v0 git diff --src-prefix=$_a/ --dst-prefix=$_b/ "$hashes[@]" -- $f
 				;;
 				'EDIT')
 					cmd=(gvimdiff -f)
@@ -824,10 +833,10 @@ function gdiff()
 			if (($#cmd)); then
 				if (($#hashes == 0)); then
 				elif (($#hashes == 1)); then
-					techo -c lcyan $cmd $hashes[1]:$f $f
+					techo "$cmd {$C[warn]$_a $C[lcyan]=> $C[ok]$_b$C_}:$f"
 					$cmd <(gshow $hashes[1]:$f) $f
 				else
-					techo -c lcyan $cmd $hashes[1]:$f $hashes[2]:$f
+					techo "$cmd {$C[warn]$_a $C[lcyan]=> $C[ok]$_b$C_}:$f"
 					$cmd <(gshow $hashes[1]:$f) <(gshow $hashes[2]:$f)
 				fi
 			fi
