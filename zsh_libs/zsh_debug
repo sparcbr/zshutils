@@ -1,5 +1,5 @@
-VERSION=1.0.2
-#lazyload=debug,fstack,array_dump
+VERSION=1.0.3
+#lazyload=debug,fstack,array_dump,dbgecho
 alias dbg='debug -r'
 
 [[ -v comp ]] || typeset -ga comp
@@ -183,16 +183,21 @@ function array_dump()
 	  association*)
 		techo -c head "dump of \"$1\" ($_type size: ${(P)#1}):"
 		for key in ${(Pk)1}; do
-			techo -r - ${(q)key} '=>' ${(q)${(P)1}[$key]}
+			techo -r - - ${(q)key} '=>' ${(q)${(P)1}[$key]}
 		done
 		;;
 	  array*)
 		techo -c head "dump of \"$1\" ($_type size: ${(P)#1}):"
 		for val in "${(P@)1}"; do
-			techo -r - ${(q)val}
+			techo -r - - ${(q)val}
 		done
 		;;
 	  *)
 		techo -c err "\"$1\": not an array." ;;
 	esac
+}
+
+function dbgecho()
+{
+	((DEBUG)) && techo "$@"
 }

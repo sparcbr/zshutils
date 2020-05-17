@@ -26,6 +26,9 @@ function gconfig()
 	#	[[ $PAGER == '-' ]] && PAGER=''
 	#	git config --global core.pager
 	#fi
+
+	#git config --global $opt $val
+	# 'color.ui' 'auto'
 }
 
 function gshow()
@@ -70,7 +73,7 @@ function gselect()
 	#		shift
 	#	done
 
-	explode -v lines "$(glog $gopts "$@")" $'\n'
+	explode -v lines "$(glog --relative $gopts "$@")" $'\n'
 	# mark lines without content as non-selectable
 	for ((i=1; i<=$#lines; i++)); do
 		if [[ ! $lines[i] =~ [a-f0-9]{5,} ]]; then
@@ -81,10 +84,8 @@ function gselect()
 
 	_copts+=(
 		--simple -v hashes
-		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision \
-			(D) Diff (M) Meld (Q) Quit'
+		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision (D) Diff (M) Meld (Q) Quit'
 		--events '[ve] EDIT f FULL d DIFF m MELD'
-		-D $idx -I idx
 		--strip-color
 		-R '([a-f0-9]{5,40} .*)' -f1
 	)
@@ -97,7 +98,7 @@ function gselect()
 	fi
 	_copts+=(--head "$head")
 
-	while { chooser $_copts $lines ; ret=$? ; ((ret==0)) }
+	while { chooser -D $idx -I idx $_copts $lines ; ret=$? ; ((ret==0)) }
 	do
 		case $ACTION in
 			'')
@@ -115,9 +116,10 @@ function gselect()
 			'MELD')
 				meld $1 <(gshow $hashes:$1)
 				;;
+			*) ;;
 		esac
 	done
-	return $ret
+	return 0 # $ret
 }
 
 function gfollow()
@@ -143,11 +145,6 @@ function rebase_in_progress()
 		-d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ]]
 }
 
-function gconfig()
-{
-	# 'color.ui' 'auto'
-	#git config --global $opt $val
-}
 # git log --first-parent
 function gmergebase()
 {
@@ -781,6 +778,8 @@ function gdiff()
 		# --relative
 		flist=($(git diff --no-color --name-only $_dopts $hashes -- "$args[@]")) || return
 
+		(($#flist==0)) && { techo -c warn 'No differences'; return }
+
 		if [[ "$hashes" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
 			techo -r h1="'$match[1]'" h2="'$match[2]'" h3="'$match[3]'"
 			if [[ -n $match[2] ]]; then
@@ -796,7 +795,9 @@ function gdiff()
 				_a=$hashes[1]
 				_b='WORKDIR'
 			else
-				#abort -v5 -d-1 1 "Incorrect arguments: $@"
+				# index <=> workdir
+				_a='INDEX'
+				_b='WORKDIR'
 			fi
 			# hashes2=($(git rev-parse $hashes))
 			# head_hash="$(git rev-parse HEAD)"

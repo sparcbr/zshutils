@@ -19,18 +19,19 @@ function _dbg_trap() { set +x }
 function techo()
 {
 	local c _O _topts nonl print noesc ts msg
-	integer i
+	integer i dashGiven
 	_dbg_trap $0
 	zparseopts -M -D - c:=c n=nonl P=print r=noesc T=ts
 	_topts=()
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
 	[[ -n $nonl ]] && _topts+=('-n')
 
-	i=${@[(i)^-*|-##]} # find first non option or "null option" like '--' or '-'
+	i=${@[(i)^-*|-##]} # find first non option or -- or -
+	((i<=$#)) && [[ $@[i] == -## ]] && dashGiven=1 # found -- or -
 	((i--))
 	_topts+=("$@[1,i]")
+	((dashGiven)) && ((i++))
 	shift $i
-	[[ $# -gt 0 && $1 == -## ]] && shift # remove '--'
 
 	if [[ -n $c ]]; then
 		c=$c[2]
