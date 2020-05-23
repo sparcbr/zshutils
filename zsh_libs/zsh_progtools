@@ -103,7 +103,7 @@ function tags()
 	else
 		chooser -v lang --simple --use-keys 'J' 'Javascript' 'P' 'PHP' 'Y' 'Python' 'S' 'Shell' || cancel
 	fi
-	
+
 	explode -v excludePatterns "${(@)exclude[2]}" ','
 
 	args=("$@")
@@ -111,15 +111,16 @@ function tags()
 		javascript|js)
 			type jsctags >/dev/null || npm install -g git+https://github.com/ramitos/jsctags.git
 			run find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" \
-				-exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags
+				-exec jsctags {} -f \; | sed '/^$/d' | LANG=C sort > tags
 			;;
 		php)
 			excludePatterns+=('vendor/*')
 			#@TODO box
 			(($#args)) || {
 				args=(v?(N) *.php(N))
-				(($#args)) || return 10
+				(($#args)) || args=(.)
 			}
+
 			run phpctags -R --exclude=$^excludePatterns $args
 			;;
 		python|py)

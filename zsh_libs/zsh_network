@@ -54,7 +54,7 @@ function url()
 {
 	local echo encode url arg c
 	zparseopts -D -M -E - e=echo -no-color=c c:=c # E=encode -encode=E
-	
+
 	[[ -n $1 ]] || return 10
 	url=$1
 	arg=$2
@@ -80,7 +80,7 @@ function htmlget()
 {
 	local url output begin end tmp data opts code expr
 	zparseopts -D -M - b:=begin e:=end o:=output u=update
-	
+
 	url=$1
 	opts=(-q --show-errors 0 --show-warnings false --wrap 0)
 	if (($#output)); then
@@ -115,9 +115,9 @@ function htmlget()
 		techo -c err "curl: http code $code"
 		return 1
 	fi
-	
+
 	tidy $opts <<< $tmp[1,-2]
-	#echo $pipefail
+	return 0
 }
 
 # print: sed -n '/^<tr>/p' file
@@ -125,7 +125,7 @@ function htmlget()
 function globo()
 {
 	local tmp vars expr data file=$HOME/globo.html
-	zparseopts -D -M - u=update 
+	zparseopts -D -M - u=update
 
 	htmlget $update -b '<section class="schedule-item' \
 		-e '<div class="grade-de-programacao-container-bottom"' \
@@ -150,7 +150,7 @@ function globo()
 		- '/<\/section>/' -
 			'x=0'
 	)
-	
+
 	if awkWrapper -v vars -e expr -o data $file; then
 		local field isCurrent dt a c
 		(($#data)) || abort 1 'No match'
