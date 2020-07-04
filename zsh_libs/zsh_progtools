@@ -110,8 +110,8 @@ function tags()
 	case ${(L)lang} in
 		javascript|js)
 			type jsctags >/dev/null || npm install -g git+https://github.com/ramitos/jsctags.git
-			run find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" \
-				-exec jsctags {} -f \; | sed '/^$/d' | LANG=C sort > tags
+
+			run -v6 jsctags -f $(git ls-files **/*.js) | sed '/^$/d' | LANG=C sort > tags
 			;;
 		php)
 			excludePatterns+=('vendor/*')
@@ -120,8 +120,10 @@ function tags()
 				args=(v?(N) *.php(N))
 				(($#args)) || args=(.)
 			}
-
+			args=($(git ls-files $args))
+			#exclude=(*.new*)
 			run phpctags -R --exclude=$^excludePatterns $args
+				#${args:|exclude}
 			;;
 		python|py)
 			run ctags -R --python-kinds=-i .

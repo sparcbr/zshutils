@@ -59,16 +59,18 @@ function sql()
 
 	zparseopts -D -M -A _opts - f: d:=name n v=verbose u: -user:=u p: -pass:=p \
 		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw \
-		i --pager #s=silent 
+		i --pager #s=silent
 
 	sql="$*"
 
 	if (($+_opts[-f])); then
-		file=$(getfullpath $_opts[-f]) 
+		file=$(getfullpath $_opts[-f])
 		[[ -f $file ]] || abort --ex FileIoEx_NotFound 127 $file
 	fi
 
-	coproc parseSqlErrors; p=$!
+	if ((! $+_opts[-i])); then # interactive mode
+		coproc parseSqlErrors; p=$!
+	fi
 
 	if [[ -n $host ]]; then # remote
 		OPT_CHK file -f for remote
@@ -82,16 +84,13 @@ function sql()
 			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p
 		fi
 		ret=$?
-
-	elif (($+_opts[-i])); then # interactive mode
-		#@TODO
 	else
-		opts=(
-			-B $_raw --safe-updates --disable-auto-rehash
-			)  # batch mode, $silent
-		((! $+_opts[-n])) && usedb $name[2]
+		opts=()
+
+		(($+_opts[-n])) || usedb $name[2]
+
 		if [[ -n $db ]]; then
-			user=${_opts[-u]:-${sqlUser[$db]:-$root}}
+			user=${_opts[-u]:-${sqlUser[$db]:-$sqlUser[root]}}
 			pass=${pass[2]:-$sqlPass[$user]}
 		else
 			user=${_opts[-u]:-$sqlUser[root]}
@@ -100,13 +99,20 @@ function sql()
 		(($+_opts[-p])) && pass=$_opts[-p]
 		opts+=(${user:+-u$user} ${pass:+-p"$pass"})
 
+		if (($+_opts[-i])); then # interactive mode
+			mysql $opts $db
+			return
+		fi
+
+		opts+=(-B $_raw --safe-updates --disable-auto-rehash) # batch mode, $silent
+
 		if (($+_opts[-o])); then
 			i=1
 			_out=$_out[2]
 			unset $_out$i
 			rowIndex[$_out]=0
 			#@TODO: no error handling mode: redirect stderr to null
-			(($#verbose)) && techo -r -c head mysql $opts -e $sql $db
+			(($#verbose)) && techo -r -c head mysql $opts -e ${(qq)sql} $db
 			{
 				# column names
 				if IFS=$'\t\t' read -r -A _cols; then
@@ -146,11 +152,11 @@ function sql()
 				if (($#_idVar)); then
 					# sql+="; SELECT ROW_COUNT(), LAST_INSERT_ID()"
 					sql+="; SELECT LAST_INSERT_ID()"
-					(($#verbose)) && techo -r -c head mysql $opts -s -e $sql $db
+					(($#verbose)) && techo -r -c head mysql $opts -s -e ${(qq)sql} $db
 					_id=$(mysql $opts -s -e $sql $db) 2>&p
 				else
-					(($#verbose)) && techo -r -c head mysql $opts -e $sql $db
-					mysql $opts -e $sql $db 2>&p
+					(($#verbose)) && techo -r -c head mysql $opts -e ${(qq)sql} $db
+					mysql $opts -e "$sql" $db 2>&p
 				fi
 			fi
 			ret=$?
@@ -258,13 +264,13 @@ function parseSqlErrors()
 			errCode=$match[1]
 			sqlState=$match[2]
 			line=$match[3]
-			
+
 			# More info:
 			#  https://www.ppgia.pucpr.br/pt/arquivos/techdocs/mysql/error-handling.html
 			#  https://mariadb.com/kb/en/mariadb-error-codes/
 			#  sql/share/errmsg-utf8.txt
 			case $errCode in
-			1062) 
+			1062)
 				#uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
 				msgFormat="Duplicate entry '(.*)' for key '(.*)'"
 				;;
@@ -300,9 +306,11 @@ function parseSqlErrors()
 			else
 				techo -c lred "$C[warn]$errCode$C_ ($sqlState)\n" \
 					"Message format doesn't match line"
-				techo "format: $msgFormat"
-				print -Pr $errCode $sqlState $line - #@ $msg
+									techo "format: $msgFormat"
+									print -Pr $errCode $sqlState $line - #@ $msg
 			fi
+		elif [[ $data =~ $'^Warning: (.*)' ]]; then
+			techo -c warn $data
 		else
 			techo -c lred $data
 			print -Pr - - - - - $data
@@ -317,24 +325,28 @@ function isdb()
 
 function usedb()
 {
+	integer error
 	if [[ ${1:0:1} == '-' ]]; then
 		local search s
 		zparseopts -D -M - S:=search s:=s ; OPT_CHK s '-s(changed to -S)'
 	fi
 	if (($#)); then
-		isdb $1 && db=$1 || {
-			if [[ -o interactive ]]; then
-				(($#search)) || search=(-S $1)
-			else
-				abort --ex SqlEx_DbError 127 1049 42000 1 $1
-			fi
-		}
+		isdb $1 && { db=$1 ; return 0 }
+
+		error=1
+		techo -c lred "Database not found: \"$1\""
+		if [[ -o interactive ]]; then
+			(($#search)) || search=(-S $1)
+		else
+			abort --ex SqlEx_DbError 127 1049 42000 1 $1
+		fi
 	fi
 	if [[ -z $db ]]; then
 		#@TODO
 		#${dbname:-$(box get dbname)}
-		db=$(chooser ${DBNAME:+-D$DBNAME} $search $(dblist))
+		db=$(chooser ${DBNAME:+-D$DBNAME} $search $(dblist)) || return 1
 	fi
+	return 0
 }
 
 function dblist()
@@ -344,7 +356,7 @@ function dblist()
 
 function istable()
 {
-	[[ -n $db ]] || return 
+	[[ -n $db ]] || return
 	sql "describe $1" >/dev/null 2>&1
 }
 

@@ -101,7 +101,7 @@ function rename()
 	#@TODO is link? confirm rename link or link target
 	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
 	orig="$(getfilename "$1")"
-	dir="$(getpath $(getfullpath $1))"
+	dir="$(getpath "$(getfullpath $1)")"
 	fullpath="$dir/$orig"
 	[[ -f "$1" || -d "$1" ]] || abort 127 "$1 doesn't exist or no file permission"
 	name=${2:-$orig}
@@ -115,11 +115,17 @@ function rename()
 function ddiff()
 {
 	local list cmd file sudo config var _dopts r u q
+	typeset -a _ropts _dopts
+
 	zparseopts -D -M - c=config -set=c l=list s=sudo i:=ignore q=q
 
-	echo "dir1=$dir1\ndir2=$dir2"
-	[[ -n $list ]] && return 0
-	
+	if [[ -z $config ]] && (($#==2)) && [[ -d $1 && -d $2 ]]; then
+		config=1
+	else
+		echo "dir1=$dir1\ndir2=$dir2"
+		[[ -n $list ]] && return 0
+	fi
+
 	_dopts=(-u -r)
 	[[ -n $q ]] && _dopts+=($q)
 
@@ -150,7 +156,7 @@ function ddiff()
 	fi
 
 	cmd=()
-	if [[ -d $dir1 && -d $dir2 ]]; then 
+	if [[ -d $dir1 && -d $dir2 ]]; then
 		if [[ -n $1 ]] && type $1 >/dev/null; then
 			cmd=($1)
 			shift
@@ -177,22 +183,44 @@ function ddiff()
 	fi
 }
 
+typeset -A rsyncCodes=(
+	1 'Syntax or usage error'
+	2 'Protocol incompatibility'
+	3 'Errors selecting input/output files, dirs'
+	4 'Requested action not supported: an attempt was made to manipulate 64-bit files on a platform that cannot support them; or an option was specified that is supported by the client and not by the server.'
+	5 'Error starting client-server protocol'
+	6 'Daemon unable to append to log-file'
+	10 'Error in socket I/O'
+	11 'Error in file I/O'
+	12 'Error in rsync protocol data stream'
+	13 'Errors with program diagnostics'
+	14 'Error in IPC code'
+	20 'Received SIGUSR1 or SIGINT'
+	21 'Some error returned by waitpid()'
+	22 'Error allocating core memory buffers'
+	23 'Partial transfer due to error'
+	24 'Partial transfer due to vanished source files'
+	25 'The --max-delete limit stopped deletions'
+	30 'Timeout in data send/receive'
+	35 'Timeout waiting for daemon connection'
+)
+
 # Added 2019-05-03 16:50
 comp+=("syncDirs=rsync")
 function syncDirs()
 {
-	integer n
+	integer n cod
 	local dir data checksum arg noDelete
 	local quiet sudo excludeFrom exclude dry reverse
 	local stat name noSlash sshCFG ret host p
-	typeset -aU src targets rsArgs extraArgs files excludePatterns
-	zparseopts -D -M - q=quiet s=sudo d=dry \
+	typeset -aU _opts src targets rsArgs extraArgs files excludePatterns
+	zparseopts -D -M -A _opts - q=quiet s=sudo d=dry 'r' -relative=r \
 		c=checksum r=reverse -no-add-slash=noSlash -no-delete=noDelete \
 		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	(($# >= 2)) || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
-	
+
 	n=$#
 	for arg; do
 		if [[ ${arg:0:1} = - ]]; then # option parameter
@@ -228,15 +256,7 @@ function syncDirs()
 		rsArgs+=(-c --no-times)
 	else
 		rsArgs+=(-tu)
-	fi 
-
-	# exclusions
-	if [[ -n $exclude ]]; then
-		explode -v excludePatterns $exclude[2] ','
 	fi
-	excludePatterns+=(.osync_workdir 'backup*' '*.local' '.git' 'node_modules')
-	rsArgs+=(--exclude=$^excludePatterns)
-	[[ -n $excludeFrom ]] && rsArgs+=(--exclude-from="${excludeFrom[2]}")
 
 	# analyse sources
 	for ((n=1; n<=$#src; n++)); do
@@ -400,8 +420,17 @@ function box()
 					 box=$BOX
 				fi
 				cd $base/$box || return
+				local cfg initCmd initList=()
 				BOX=$box
-				[[ -d .git ]] && git status &
+				cfg='.box.cfg.json'
+				if [[ -f $cfg ]] && explode -v initList -z "$(jq -rc '.cmd.init | @sh' < $cfg)"; then
+					for initCmd in $initList; do
+						#run -z "$initCmd"
+						explode -z -v initCmd $initCmd
+						run "$initCmd[@]" &
+					done
+				fi
+				[[ -d .git ]] && gst &
 				[[ -d android ]] && include android
 				todo -d . #@TODO mv to cd hook
 				return 0
@@ -418,7 +447,7 @@ function box()
 					chooser --simple -v box $result:t || cancel
 				fi
 				if [[ -d $base/$box/node_modules ]]; then
-					(cd $base/$box/node_modules ; npm start &)
+					(cd $base/$box ; npm start)
 				fi
 				return
 			;;

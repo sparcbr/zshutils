@@ -1,18 +1,42 @@
 VERSION=1.0.7
 [[ -v comp ]] || typeset -g -a comp
 alias e=echo
-alias up='xdotool key Ctrl+Shift+F sleep 0.4 type ❯ ; xdotool key Shift+F3' # find last prompt
 alias op='open'
 alias vmake="make SHELL='$SHELL -x'"
 alias sv="v -s"
 alias cfg="cd $CFG"
 alias s="do_sudo"
-alias cpa="sudo cp -a"
-alias mk="make"
 alias apt="sudo apt"
 alias sys="sudo systemctl"
+alias c='cod'
+alias wh='what'
 
 [[ -z $VIM && $SHELL == '/bin/zsh' ]] || return
+
+function cod()
+{
+	local opts arg args linenum file pos tmp
+
+	for arg in "$@"; do
+		if [[ "$arg" =~ ":" ]]; then
+			explode -v tmp $arg ':'
+			file=$tmp[1]
+			linenum=$tmp[2]
+			if ((linenum)); then
+				pos=+$linenum
+			fi
+			code $opts $pos $file
+		else
+			code $opts $arg
+		fi
+	done
+}
+
+function what()
+{
+	which $1
+
+}
 
 function hg()
 {
@@ -96,7 +120,7 @@ function mkscript()
 					*) abort -D-1 9 "Unknown option '$tmp'" ;;
 				esac
 			elif in_array 'command' _type; then
-				techo @TODO warn command $func exists
+				techo -c warn "Command $func exists"
 			else
 				ret=0
 			fi
@@ -141,7 +165,7 @@ function mkscript()
 			input -v file -p "Enter new library name" 'zsh_' || cancel
 		elif [[ "$file" == "Browse full path" ]]; then
 			#@TODO
-			chooser -v file -p "Choose path of zsh library" --dir || cancel
+			chooser -v file --head "Choose path of zsh library" --dir || cancel
 		fi
 
 		name=$(getfilename $file)
@@ -365,7 +389,7 @@ function vw()
 # file1:l4 file2:l66
 function v()
 {
-	local opts sudo arg args skip vim
+	local opts sudo arg args vim linenum
 	#typeset -aU
 	if [[ -n $DISPLAY ]]; then
 		vim=gvim
@@ -375,7 +399,7 @@ function v()
 	while (($#)); do
 		if [[ ${1:0:1} == '-' ]]; then
 			case $1 in
-				-s) sudo=(sudo -H)
+				-s) sudo=(sudo)
 					;;
 				-#) opts+=('+/^\s*[^#]')
 					;;
@@ -394,7 +418,7 @@ function v()
 
 	for arg in $args; do
 		if [[ "$arg" =~ ":" ]]; then
-			local tmp pos
+			local tmp pos file
 			explode -v tmp $arg ':'
 			file=$tmp[1]
 			linenum=$tmp[2]
@@ -506,13 +530,14 @@ function ge()
 {
 	local sudo icase in_exts ex_exts ex_dirs width prefix
 	local opts args defExDirs defExExts _opts
-	zparseopts -D -E -M -A _opts - i=icase s=sudo --exclude:=ex_exts E:=ex_dirs \
+	zparseopts -D -E -M -A _opts - i=icase s=sudo -exclude:=ex_exts E:=ex_dirs \
 		W::=width -cols::=W
 
 	opts=()
 	IFS=',;: ' read -rA in_exts <<<"$1"
 	shift
 	#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
+	opts+=('--include=*.'${^in_exts[@]})
 	if (($#ex_exts)); then
 		IFS=',;: ' read -rA ex_exts <<<$ex_exts[2]
 		opts+=('--exclude=*.'${^ex_exts[@]})
@@ -523,7 +548,7 @@ function ge()
 		techo "Excluding dirs: $ex_dirs"
 		opts+=('--exclude-dir='${^ex_dirs[@]})
 	fi
-	opts+=('--include=*.'${^in_exts[@]} --color=always $icase)
+	opts+=(--color=always $icase)
 	if [[ -n $sudo ]]; then
 		prefix='sudo'
 	else
@@ -619,6 +644,7 @@ function mkcp()
 # Added 2019-04-11 01:43
 function logs()
 {
+	[[ $1 == 'off' ]] && { killall tail; return }
 	run tail $(git root)/logs/{api,debug,php}.txt -f &
 }
 

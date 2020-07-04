@@ -133,9 +133,7 @@ function debug()
 				ret=$?
 				if catch '*'; then
 					techo "CAUGHT: $CAUGHT"
-					ret=$CAUGHT
-				elif (($?==130)); then
-					ret=130
+					[[ $CAUGHT == <-> ]] && ret=$CAUGHT || ret=2
 				fi
 			}
 		fi

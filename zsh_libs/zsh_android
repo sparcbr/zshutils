@@ -1,36 +1,104 @@
-VERSION=1.0.0
+VERSION=1.0.1
 
-export ANDROID_SDK_ROOT=$(getfullpath $HOME/androidSDK)
-if ! [[ -d $ANDROID_SDK_ROOT && -d $ANDROID_SDK_ROOT/tools ]]; then
-	echo "Android SDK not found"
-	return 1
+integer ret
+local dir dirs location
+
+include file
+include functions
+
+location=$HOME/androidSDK # will be the sdk dir or a symlink to it
+ANDROID_SDK_ROOT=$(getfullpath $location)
+
+function isAndroidSDK()
+{
+	local desc
+	[[ -n $1 && -d $1/tools && -f $1/tools/source.properties ]] || return 1
+	desc="$(egrep '^Pkg.Desc' $1/tools/source.properties)"
+	[[ $desc == 'Pkg.Desc=Android SDK Tools' ]]
+}
+
+if ! isAndroidSDK $ANDROID_SDK_ROOT; then
+	ANDROID_SDK_ROOT=
+	dirs=$(run -v6 find $HOME -type d -iname android\* -and -not -iname androidSDK)
+	for dir in $dirs; do
+		if isAndroidSDK $dir; then
+			ANDROID_SDK_ROOT=$dir
+			break
+		fi
+	done
+
+	[[ -z $ANDROID_SDK_ROOT && ! -o interactive ]] && abort 127 'Android SDK not found'
 fi
+
+while ! isAndroidSDK $ANDROID_SDK_ROOT; do
+	#chooser -p 'Android SDK not found.' 'Copy from external drive' Download
+	#list=($HOME /usr/lib/android-sdk )
+
+	if [[ -n $ANDROID_SDK_ROOT ]]; then
+		techo -c warn "'$ANDROID_SDK_ROOT' does not look like an Android SDK folder. It should contain the subfolder $C[lred]\"tools\""
+	fi
+
+	[[ -o interactive ]] || abort 127 'Android SDK not found'
+	chooser -v ANDROID_SDK_ROOT --dir; ret=$?
+	if ((ret)) ; then
+		((ret==130)) && cancel
+		((ret>=127)) && abort
+	fi
+done
+
+if [[ ! -d $location ]]; then
+	[[ -h $location ]] && rm -f $location
+	ln -s $ANDROID_SDK_ROOT $location
+fi
+
+export ANDROID_SDK_ROOT
 export ANDROID_HOME=$ANDROID_SDK_ROOT
 export ANDROID_PLATFORM_TOOLS=$ANDROID_SDK_ROOT/platform-tools
 path+=($ANDROID_HOME/emulator $ANDROID_HOME/tools $ANDROID_HOME/tools/bin $ANDROID_PLATFORM_TOOLS)
 
-tmp=($ANDROID_HOME/build-tools/*(/On[1]))
-export ANDROID_BUILD_TOOLS=$tmp
+techo -c head ANDROID_HOME$C_="$C[warn]'$ANDROID_HOME'$C_"
+
+[[ -f /lib/udev/rules.d/51-android.rules ]] || { techo "Installing udev rules"; run apt install android-sdk-platform-tools-common & }
+
+ANDROID_BUILD_TOOLS=($ANDROID_HOME/build-tools/*(/On[1]))
+export ANDROID_BUILD_TOOLS
 if [[ -d $ANDROID_BUILD_TOOLS ]]; then
 	alias aapt=$ANDROID_BUILD_TOOLS/aapt
+	techo -c head ANDROID_BUILD_TOOLS$C_="$C[warn]'$ANDROID_BUILD_TOOLS'$C_"
 else
-	echo 'Build tools dir not found'
+	techo -c warn 'Build tools dir not found'
 fi
 
-alias gcloud='source $HOME/google-cloud-sdk/completion.zsh.inc; path+=($HOME/google-cloud-sdk/bin); unalias gcloud'
+#alias gcloud='source $HOME/google-cloud-sdk/completion.zsh.inc; path+=($HOME/google-cloud-sdk/bin); unalias gcloud'
 
 # Get package name from apk file
 function getPkg()
 {
     #chkCmdInst aapt
-    aapt dump badging $1 | grep package:\ name | cut -f2 -d\'
+    aapt dump badging $1 | grep 'package: name' | cut -f2 -d"'"
 }
-return
+
+function vscode()
+{
+	code &
+}
+
+function androidenv()
+{
+	local var vars=()
+	for var in ANDROID_SDK_ROOT ANDROID_HOME ANDROID_PLATFORM_TOOLS; do
+		var+=($var="'${(P)var}'")
+	done
+
+	echo $var
+	echo "export PATH=$PATH"
+
+}
 
 #APPS="${ANDROID_APPS:-$HOME/PeD/android}"
 #[ -d "$APPS" ] || APPS="$HOME/apps"
 #ANDROID_APPS="$APPS"
-export ANDROID_APPS APPS CLOUD_APPS CLOUD_INBRAMED
+# export ANDROID_APPS APPS CLOUD_APPS CLOUD_INBRAMED
 
 #export TREADMILL=$APPS/Treadmill
 #export TREADMILL_RES=$TREADMILL/app/src/main/res

@@ -1,6 +1,6 @@
 VERSION=1.0.9
 [[ -v comp ]] || typeset -g -a comp
-
+autoload throw catch
 #alias _dbg_trap='[[ -o xtrace ]] && { unalias _dbg_trap; include debug && _dbg_trap $0 }'
 function _dbg_trap() { set +x }
 
@@ -170,8 +170,8 @@ function implode()
 function explode()
 {
 	_dbg_trap $0
-	local _var _str _sep uniq _list ifs _Asep stdin _tmp awk #@TODO awkWrapper...
-	zparseopts -D -M - v:=_var u=uniq A:=_Asep -stdin=stdin -awk:=awk
+	local _opts _var _str _sep uniq _list ifs _Asep stdin _tmp awk #@TODO awkWrapper...
+	zparseopts -D -M -A _opts - v:=_var u=uniq A:=_Asep -stdin=stdin -awk:=awk 'z' -unescape=z
 
 	[[ -n $_var[2] ]] && _var=$_var[2]
 
@@ -189,7 +189,11 @@ function explode()
 		[[ -n $3 && $3 != <1-> ]] && abort 1 "field specifier is not a number: \$3=$3"
 	fi
 
-	_list=(${(@ps/$_sep/)_str})
+	if [[ $_sep == ' ' && $+_opts[-z] == 1 ]]; then
+		_list=(${(Q)"${(@z)_str}"})
+	else
+		_list=(${(@ps/$_sep/)_str})
+	fi
 
 	[[ -n $uniq ]] && _list=(${(@u)_list})
 
@@ -223,9 +227,11 @@ function vartype() {
 # Set info for a lib
 function lib_set_info()
 {
-	local name info err _opts
-	zparseopts -D -A _opts - E=err 'l'
-	err=$#err; name=${(U)1}
+	local name info _opts
+	integer err
+	zparseopts -D -A _opts - E: 'l'
+	(($+_opts[-E])) && err=$_opts[-E]
+	name=${(U)1}
 	typeset -Ag "ZSH_${name}_INFO"
 	set -A "ZSH_${name}_INFO" 'ver' $2 'path' "$3" 'required' \
 		$4 'mtime' "$5" 'lazyload' $+_opts[-l] 'err' $err
@@ -359,6 +365,7 @@ function include()
 {
 	local quiet verbose lpath lazyload required force
 	local mtime info name
+	integer ret
 	zparseopts -D -M - l=lazyload p:=lpath -path:=lpath r=required -required=r \
 		f=force q=quiet v:=verbose
 
@@ -427,15 +434,41 @@ function include()
 			techo -P -r "Including %F{11}$name%f ("${lpath/$ZSH_LIBS/"\\$"ZSH_LIBS}") [%F{2}$VERSION%f]"
 		fi
 
-		coproc parseErrors
-		if source $lpath 2>&p; then
-			lib_set_info $name $VERSION "$lpath" $required "$mtime"
-			echo EOF >&p
+		{
+			if ((!LEVEL++)); then # prevent coproc running more than once (in nested include calls)
+				coproc parseErrors
+
+				source $lpath 2>&p; ret=$?
+
+			else
+				source $lpath; ret=$?
+			fi
+
+			if ((ret==0)); then
+				lib_set_info $name $VERSION "$lpath" $required "$mtime"
+			fi
 			#[[ -o interactive ]] &&
-		else
+		} always {
+			if ((!--LEVEL)); then
+				echo EOF >&p
+			fi
+
+			if catch '*'; then
+				if [[ $CAUGHT != <-> ]]; then
+					local _atmp=($=CAUGHT); ret=$_atmp[1]
+					techo -P "%F{3}Caught%f: $_atmp"
+					[[ $ret == <-> ]] || ret=1
+				else
+					ret=$CAUGHT
+				fi
+			fi
+		}
+
+		if ((ret)); then
 			local error error2 file line tmp split
-			lib_set_info -E $name $VERSION "$lpath" $required "$mtime"
-			echo EOF >&p
+			lib_set_info -E $ret $name $VERSION "$lpath" $required "$mtime"
+
+			if ((!LEVEL)); then
 			(
 				#@TODO sort errors by file before opening files
 				while read -p tmp; do
@@ -451,6 +484,7 @@ function include()
 					${EDITOR:-vim} $file +$line
 				fi
 			)
+			fi
 
 			if ((required)); then
 				techo -P "[%K{1}%F{15}FAIL%f%k] %F{9}Required %F{11}zsh_$name%F{9} not loaded%f"
