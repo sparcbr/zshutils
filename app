@@ -227,13 +227,16 @@ function getMainActivity()
 
 function listActivities()
 {
-	local pkg
+	local pkg action
 
 	(($#)) || return 10
 	pkg=$(choosePkg "$@") || return
-	shell dumpsys package $pkg | \
-		awk '/^Activity Resolver Table/,/^$/ { s = $0 } \
-			match(s, /([^: =]+\/[^: ]+)/, m) { print m[1]; s="" }'
+	action=${2:-MAIN}
+
+	# match(s, /(android.intent.action.'${action}'):/, m) { print m[1]; actFound=1; next } \
+	shell dumpsys package $pkg | awk '/^[ \t]*Non-Data Actions:/,/^$/ { s=$0 } \
+		match(s, /(android.intent.action.'${action}'):/, m) { actFound=1; next } \
+		actFound==1 && match(s, /([^: =]+\/[^: ]+)/, m) { print m[1]; s=""; exit; }'
 }
 
 function start()
@@ -579,7 +582,7 @@ function processLine()
 		(wifi)  ;;
 		(net) getDeviceIP  ;;
 		(list) listPkg "$@" ;;
-		(listactivities|listact|listacts|activities) listActivities "$@" ;;
+		(listactivities|listact|listacts|activities) getMainActivity "$@" ;;
 		(view|open|openurl|url)
 			shell am start -W -a android.intent.action.VIEW -d $1 $2
 		;;

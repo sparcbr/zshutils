@@ -10,7 +10,14 @@ setopt nomultios
 
 function getfilename()
 {
-	echo "${@:t}"
+	local opt name
+	zparseopts -D -M -A opt - 'p:' -prefix:=p
+	if (($+opt[-p])); then
+		name=("${@:t}")
+		echo ${opt[-p]}${(@)^name#${prefix}*}
+	else
+		echo "${@:t}"
+	fi
 }
 
 function getfullpath()
@@ -26,9 +33,13 @@ function getpath()
 	echo "${1:h}"
 }
 
-# ${file%%.old}
 function getext()
 {
+	local _opts
+	zparseopts -D -M -A _opts - 'a' -all=a n:
+	# TODO: specify how many suffixes to get (example: -n 3)
+
+	(($+_opts[-a])) && { echo "${f#.*}"; return }
 	# echo "${1##*.}"
 	echo "${1:e}"
 }
@@ -64,10 +75,18 @@ function isEmptyDir()
 }
 
 # @description: remove extension
-# @arg2: optional extension. If given remove only if extension = this
+# @arg2: optional extension. If given, remove only specifc extension
 # @returns: full path (or filename if no path given) without extension
 function noext()
 {
+	local _opts
+	zparseopts -D -M -A _opts - 'a' -all=a n:
+
+	if (($+_opts[-a])); then  # strip all suffixes
+		echo "${f%%.*}"
+		return
+	fi
+
 	if [[ -n $2 ]]; then
 		echo "${1%%.$2}"
 	else
@@ -212,10 +231,10 @@ function syncDirs()
 	integer n cod
 	local dir data checksum arg noDelete
 	local quiet sudo excludeFrom exclude dry reverse
-	local stat name noSlash sshCFG ret host p
+	local stat name noSlash sshCFG ret host p _copts
 	typeset -aU _opts src targets rsArgs extraArgs files excludePatterns
-	zparseopts -D -M -A _opts - q=quiet s=sudo d=dry 'r' -relative=r \
-		c=checksum r=reverse -no-add-slash=noSlash -no-delete=noDelete \
+	zparseopts -D -M -A _opts - q=quiet s=sudo d=dry 'R' -relative=R \
+		c=checksum -reverse=reverse -no-add-slash=noSlash -no-delete=noDelete \
 		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e
 
 	[[ -z "$sudo" ]] && sudo='-S'
@@ -257,6 +276,7 @@ function syncDirs()
 	else
 		rsArgs+=(-tu)
 	fi
+	(($+_opts[-R])) && rsArgs+=(--relative)
 
 	# analyse sources
 	for ((n=1; n<=$#src; n++)); do
@@ -295,29 +315,43 @@ function syncDirs()
 					;;
 				f) ;; # file
 				0)
-					confirm -c warn "@TODO Empty remote directory$C_: $C[lred]'$host:$p'. \
-						Create dir" || cancel
+					confirm -c warn "@TODO Empty remote directory$C_: '$C[lred]$host:$p$C_'. Create dir" || cancel
 					src[$n]=(); ((n--))
 					;;
 				'')
-					confirm -c warn "Source $host:$p not found. Ignore and continue" || cancel
+					confirm -c warn "Source '$C[lred]$host:$p$C_' not found. Ignore and continue" || cancel
 					src[$n]=(); ((n--))
 					;;
-				*) abort 1 "Invalid response from $host: '$ret'" ;;
+				*) abort 1 "Invalid response from $host: '$C[lred]$ret$C_'" ;;
 			esac
 		elif [[ -d $dir ]]; then
 			if isEmptyDir $dir; then
-				confirm -c warn "Empty directory$C_: $C[lred]'$dir'. \
-					Ignore and continue" || cancel
+				confirm -c warn "Empty directory$C_: '$C[lred]$dir$C_'. Ignore and continue" || cancel
 				src[$n]=(); ((n--))
 			else
-				((!$#noSlash)) && [[ ${dir: -1} != / ]] && { dir+='/'; src[$n]+='/' }
-				if [[ -f ${dir}rsync.ignore ]]; then
-					rsArgs+=(--exclude-from=${dir}rsync.ignore)
+				((!$#noSlash)) && [[ ${dir: -1} != / ]] && src[$n]+='/'
+				if [[ -f $dir/rsync.ignore ]]; then
+					excludePatterns+=("${(@f)$(< $dir/rsync.ignore)}")
 				fi
 			fi
 		fi
 	done
+
+	# exclusions
+	if [[ -n $exclude ]]; then
+		explode -v exclude $exclude[2] ','
+		excludePatterns+=($exclude)
+	fi
+	[[ -n $excludeFrom ]] && excludePatterns+=("${(@f)$(< $excludeFrom[2])}")
+	#(--exclude-from="${excludeFrom[2]}")
+	excludePatterns+=('backup*' '*.local' '.git' 'node_modules')
+	chooser -v excludePatterns --multi --selected "$excludePatterns" $excludePatterns
+	cod=$?
+	if ((cod && cod!=10)); then
+		confirm 'Cancel' && cancel
+	fi
+	(($#excludePatterns)) && rsArgs+=(--exclude=$^excludePatterns)
+
 	techo -c lcyan "Sources: ${(@qq)src}"
 	techo -c lcyan "Targets: ${(@qq)targets}"
 	# rsync arguments from command line
@@ -329,57 +363,84 @@ function syncDirs()
 	# # # # # #
 	local nothing=1 permFlags
 	for dir in $targets; do
-		host=''; p=''  #sshArgs
+		host=''; p='' #sshArgs
 		if [[ $dir =~ ([^:]+):(.*) ]]; then
 			host=$match[1]; p=$match[2]
 		elif ! isDir -m $dir; then
-			techo -c warn "Skipping $dir"
-			continue
+			#techo -c warn "Skipping $dir"
+			#continue
+			abort $? 'Error creating $dir'
 		fi
 
-		if ((1)); then
-			permFlags=''
-			#if (($#host)); then # remote
-			#	permFlags='-p' # og'
-			#else
-			#	[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-p' #og'
-			#fi
-			#data="$(run $sudo rsync -ni ${sshArgs[@]} ${rsArgs[@]} $permFlags "$src[@]" $dir)"
-			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
-			if (($#data)); then
-				nothing=0
-				echo $data
-				if confirm "Do it"; then
-					run $sudo rsync --info=PROGRESS2 $rsArgs $permFlags $src $dir || abort
-				else
-					cancel
+		permFlags=''
+		#if (($#host)); then # remote
+		#	permFlags='-p' # og'
+		#else
+		#	[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-p' #og'
+		#fi
+		#data="$(run $sudo rsync -ni ${sshArgs[@]} ${rsArgs[@]} $permFlags "$src[@]" $dir)"
+		data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
+		cod=$?
+		if ((cod)); then
+			techo $rsyncCodes[$cod]
+			return $cod
+		fi
+		if (($#data)); then
+			nothing=0
+			echo $data
+			if confirm "Do it"; then
+				run $sudo rsync --info=PROGRESS2 $rsArgs $permFlags "$src[@]" $dir ; cod=$?
+				if ((cod)); then
+					techo $rsyncCodes[$cod]
+					return $cod
 				fi
-
-				# @TODO((!isRemote && !noSync)) && _sync
+			else
+				cancel
 			fi
 
-			if ((!$#noDelete)); then
-				# # # # # # #
-				# Deletions #
-				# # # # # # #  @TODO: -J (omit-link-times) does not work on old rsync
-				data="$(run $sudo rsync -ni --delete --existing --ignore-existing \
-					-O ${rsArgs[@]} $src[@] $dir)" || abort
+			# @TODO((!isRemote && !noSync)) && _sync
+		fi
 
-				if [[ -n "$data" ]]; then
-					nothing=0
-					techo -c warn "Deletions:"
-					n=0
-					echo $data | while read stat name; do
-						echo "$dir/$name ${C[red]}❌$C_"
-						files+=($dir/$name)
-						((n++))
-					done
-					confirm -c warn "Delete these $n files" || continue
-					#@TODO rm $(chooser "$files[@]")
-					run $sudo rsync --delete --existing --ignore-existing \
-						--info=PROGRESS2 $rsArgs $src $dir || abort
-					_sync
+		if ((!$#noDelete)); then
+			# # # # # # #
+			# Deletions #
+			# # # # # # #  @TODO: -J (omit-link-times) does not work on old rsync
+			data="$(run $sudo rsync -ni --delete --existing --ignore-existing -O ${rsArgs[@]} \
+				"$src[@]" $dir)"; cod=$?
+			if ((cod)); then
+				techo $rsyncCodes[$cod]
+				confirm 'Cancel' && cancel
+				continue
+			fi
+			if [[ -n "$data" ]]; then
+				nothing=0
+				n=0
+				files=()
+				echo $data | while read stat name; do
+					files+=($dir/$name)
+					((n++))
+				done
+
+				_copts=(
+					-v keepFiles -f1 --head "$C[warn]Deletions:" \
+					--no-auto-select --multi --selected "$files" \
+					--marks $'0:ok:\u2714:Keep,1:red:\u274C:Delete' \
+					--foot "These files are only on \"$dir\""
+				)
+				chooser $_copts "$files[@]"; cod=$?
+				if ((cod)); then
+					((cod==10 || cod==130)) && continue
+					confirm 'Cancel' && cancel
 				fi
+
+				run $sudo rsync --delete --existing --ignore-existing --info=PROGRESS2 $rsArgs \
+					--exclude=$^keepFiles $src $dir ;
+				cod=$?
+				if ((cod)); then
+					techo $rsyncCodes[$cod]
+					return $cod
+				fi
+				_sync
 			fi
 		fi
 	done
@@ -430,7 +491,7 @@ function box()
 						run "$initCmd[@]" &
 					done
 				fi
-				[[ -d .git ]] && gst &
+				[[ -d .git ]] && gstatus &
 				[[ -d android ]] && include android
 				todo -d . #@TODO mv to cd hook
 				return 0
@@ -444,7 +505,7 @@ function box()
 					#@TODO: glob search name, if count==1 box=result
 					result=($base/(#i)*${box}*)
 					(($#result)) || abort 10
-					chooser --simple -v box $result:t || cancel
+					chooser -v box $result:t || cancel
 				fi
 				if [[ -d $base/$box/node_modules ]]; then
 					(cd $base/$box ; npm start)
@@ -465,7 +526,7 @@ function box()
 				fi
 				list=($base/*(-/omN[1,num]))
 				(($#list)) || return 10
-				chooser --simple -v box -f1 ${=box:+-S $search} $list:t 'New box' || cancel
+				chooser -v box -f1 ${=box:+-S $search} $list:t 'New box' || cancel
 				if [[ $box == 'New' ]]; then
 					cmd='new' ; box=''
 				elif [[ -d $base/$box ]]; then

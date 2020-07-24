@@ -11,7 +11,10 @@ alias sys="sudo systemctl"
 alias c='cod'
 alias wh='what'
 
-[[ -z $VIM && $SHELL == '/bin/zsh' ]] || return
+gExcludeDirs=(__tests__ .local)
+gNodeExcludeDirs=(node_modules)
+gRNExcludeDirs=(android ios $gNodeExcludeDirs)
+gPhPExcludeDirs=(vendor)
 
 function cod()
 {
@@ -32,10 +35,10 @@ function cod()
 	done
 }
 
+comp+=("what=which")
 function what()
 {
 	which $1
-
 }
 
 function hg()
@@ -58,13 +61,15 @@ function aptlist()
 function zindent()
 {
 	integer f
-	[[ $# -gt 1 ]] && {
+	(($#>1)) && {
 		f=1
 		echo "function $1()\n{"
 		shift
 	}
-	echo "$@" | sed -E 's/^([^{}])/\t\1/g'
+	eval "function temp() { "$@" }" || return 1
+	echo $functions[temp] # @TODO: comments are lost, find a way to re-add them
 	((f)) && echo "}"
+	return 0
 }
 
 function mkscript()
@@ -74,7 +79,7 @@ function mkscript()
 	zparseopts -D -K s:=shell f:=func n:=name e=edit
 
 	(($#func)) && func=$func[2]
-	data2="$@"
+	data2="$*"
 	while ((ret)); do
 		input -p "Function name" -v func || cancel
 		if (($#func)); then
@@ -84,7 +89,7 @@ function mkscript()
 				options=(Rename Append "Edit $func()" Cancel)
 				if [[ -z $tmp ]]; then
 					if explode -v tmp $functions[$func] $'\n' 1 && \
-						[[ $tmp == *'include '(#b)([a-zA-Z]##)" && {" ]]
+						[[ $tmp == *'include '(#b)([a-zA-Z]##)" && {" ]] # is it lazyload?
 					then
 						tmp=zsh_$match[1]
 					else
@@ -92,11 +97,11 @@ function mkscript()
 						options=(Rename 'Use it' Cancel)
 					fi
 				fi
+				# @TODO
 				#if [[ $arg[4] == 'autoload' ]]; then
 				#	autoload +X $1 && edfunc $1
 				#	return
 
-				techo -c warn "$func() already exists ($tmp)"
 				chooser -v tmp -f1 -p "$func() already exists ($tmp)" $options || cancel
 
 				case $tmp in
@@ -114,6 +119,7 @@ function mkscript()
 					Rename)
 						;;
 					Use)
+						# @TODO lookup comments (if not annonymous)
 						data2="$functions[$func]"
 						ret=0
 						;;
@@ -127,6 +133,7 @@ function mkscript()
 		fi
 	done
 
+	# Choose zsh lib
 	isLib=0
 	if [[ -n "$name" ]]; then
 		local err_exists="exists but isn't a shell script."
@@ -160,16 +167,15 @@ function mkscript()
 		fi
 	else
 		isLib=1
-		file="$(chooser $ZSH_LIBS/zsh_*(-N) "New zsh library" "Browse full path")" || cancel
-		if [[ "$file" == "New zsh library" ]]; then
+		chooser -v file $ZSH_LIBS/{zsh_[a-z]##,zsh_*.*}(-N) "New zsh library" "Browse full path" || cancel
+		if [[ $file == "New zsh library" ]]; then
 			input -v file -p "Enter new library name" 'zsh_' || cancel
-		elif [[ "$file" == "Browse full path" ]]; then
+		elif [[ $file == "Browse full path" ]]; then
 			#@TODO
-			chooser -v file --head "Choose path of zsh library" --dir || cancel
+			chooser -v file --file --head "Choose path of zsh library" || cancel
 		fi
 
-		name=$(getfilename $file)
-		name='zsh_'${name#zsh_*}
+		name=$(getfilename -p 'zsh_' $file)
 		if [[ $file == */* ]]; then
 			file=$(getpath $file)/$name
 		else
@@ -180,7 +186,7 @@ function mkscript()
 	if [[ ! -f "$file" ]]; then
 		# Create library
 		if ((isLib)); then
-			data=$(< $ZSH_LIBS/zsh_blank)
+			data="$(< $ZSH_LIBS/zsh_blank)"
 		else
 			# Create script
 			[[ -n $shell ]] && shell="/bin/"$shell[2] || shell=$SHELL
@@ -190,22 +196,23 @@ function mkscript()
 
 	# add data
 	# TODO: append to function in case of existing function
+	# ((apend)) zindent $data2
 	data+="\n# Added "$(date "+%F %R")"\n"
     if [[ -n $func ]]; then
-		data+=$(zindent $func "$data2")
+		data+="$(zindent $func "$data2")" ||
 	else
 		line=$(wc -l $file)
-		data+=$(zindent "$data2")
+		data+="$(zindent "$data2")"
 	fi
 
-	echo -n $data >> $file
+	echo -n "$data" >> $file
 	((isLib)) && source $file && { type $func ; which $func; }
 
 	# setup file
 	[[ -x $file || $isLib -eq 1 ]] || chmod +x $file
 
 	# edit
-	if [[ -n $edit || -z $data2 ]] || confirm "Edit file"; then
+	if [[ -n $edit || -z $data2 ]] || { sleep 1; confirm "Edit file" }; then
 		if (($#func && isLib)); then
 			edfunc $func
 		else
@@ -337,7 +344,7 @@ function edfunc()
 	edalias ${2:+-l $2} -f "$1" "$file"
 }
 
-comp+=("vw=exec")
+comp+=("vw=which")
 function vw()
 {
 	local array mime cpath name linenum
@@ -474,10 +481,10 @@ function forvim()
 }
 function f()
 {
-	local d i s p g base args name n=1
-	zparseopts -D - d:=d i=i s=s p=p g:=g b:=base
-	[[ -n $s ]] && s="sudo"
-	[[ -n $d ]] && d[1]='-maxdepth'
+	local base maxDepth args name s opts ex_dirs n=1 fopts=()
+	zparseopts -D -M -A opts - d: e: 'i' 's' 'p' g: b:=base
+	(($+opts[-s])) && s="sudo"
+	(($+opts[-d])) && maxdepth=(-maxdepth $opts[-d])
 	[[ -n "$base" ]] && explode -v base "$base[2]" ',' || base=(.)
 	#[[ $1 = - ]] && shift
 	#$s find ${=d} \( -path ./bckup_extensions -or -path ./extensions \) -prune -or $name $@ -print
@@ -489,14 +496,44 @@ function f()
 
 	if ((found==0 || found>1)); then
 		((found==0)) && args=("$@") || args=(${@:1:$found-1})
-		[[ -n $i ]] && name="-iname" || name="-name"
+		(($+opts[-i])) && name="-iname" || name="-name"
 		name=($name' '${^args})
 		shift $#args
 	fi
+	#  #  #  #  #
+	# exclusion #
+	#  #  #  #  # @TODO read box cfg
+	ex_dirs=()
+	if (($+opts[-e])); then
+		IFS=',;: ' read -rA ex_dirs <<<$opts[-e]
+	fi
+	# EXCLUDE DIRS
+	# hasNode node_modules
+	# hasAndroid android/app/build
+	local prefix='./'
+	# if [[ ${base:0:1} != '.' ]]; then
+	# fi
+	if [[ -f 'App.js' ]]; then
+		ex_dirs+=($gRNExcludeDirs)
+	elif [[ -f 'package.json' ]]; then
+		ex_dirs+=($gNodeExcludeDirs)
+	fi
+	ex_dirs+=($gExcludeDirs)
+	chooser -p 'Exclude dirs' -v ex_dirs --multi --selected "$ex_dirs" $ex_dirs
+	integer cod=$?
+	if ((cod && cod!=10)); then
+		confirm 'Cancel' && cancel
+	fi
+	if (($#ex_dirs)); then
+		tmp=('-path '$prefix${(@)^ex_dirs})
+		tmp=($(implode tmp ' -o '))
+		fopts=(-type d '(' $=tmp ')' -prune -false -o)
+	fi
 	[[ -n $g ]] && {
-		$s find -L $base ${=d} ${=name} $@ $p | group $g
-	} || $s find -L $base ${=d} ${=name} $@ $p
+		run ${opts[-s]:+-s} find $maxDepth -L $base $fopts $=name "$@" $p | group $g
+	} || run ${opts[-s]:+-s} find $maxDepth -L $base $fopts $=name "$@" $p
 }
+
 function aldd() {
 	local R=$USER_HOME/clp
 	if [[ $# -gt 1 ]]; then
@@ -528,26 +565,53 @@ function send()
 
 function ge()
 {
-	local sudo icase in_exts ex_exts ex_dirs width prefix
+	local sudo icase in_exts ex_exts width prefix
 	local opts args defExDirs defExExts _opts
-	zparseopts -D -E -M -A _opts - i=icase s=sudo -exclude:=ex_exts E:=ex_dirs \
-		W::=width -cols::=W
+	integer cod
+	typeset -aU ex_dirs ex_files
+	zparseopts -D -E -M -A _opts - i=icase s=sudo e: -exclude:=e E: W::=width -cols::=W
 
+	(($#)) || return 10
 	opts=()
-	IFS=',;: ' read -rA in_exts <<<"$1"
-	shift
-	#	exc=("--exclude-dir=extensions" "--exclude-dir=bckup_extensions")
+
+	#  #  #  #  #
+	# inclusion #
+	#  #  #  #  #
+	IFS=',;: ' read -rA in_exts <<<"$1"; shift
 	opts+=('--include=*.'${^in_exts[@]})
-	if (($#ex_exts)); then
-		IFS=',;: ' read -rA ex_exts <<<$ex_exts[2]
+
+	#  #  #  #  #
+	# exclusion #
+	#  #  #  #  #
+	if (($+_opts[-e])); then
+		IFS=',;: ' read -rA ex_exts <<<$_opts[-e]
 		opts+=('--exclude=*.'${^ex_exts[@]})
 	fi
-	(($#ex_dirs)) || ex_dirs=(- node_modules,android,vendor)
-	if (($#ex_dirs)); then
-		IFS=',;: ' read -rA ex_dirs <<<$ex_dirs[2]
-		techo "Excluding dirs: $ex_dirs"
-		opts+=('--exclude-dir='${^ex_dirs[@]})
+
+	if (($+_opts[-E])); then
+		IFS=',;: ' read -rA ex_dirs <<<$_opts[-E]
 	fi
+	# TODO read box cfg
+	# EXCLUDE DIRS
+	if [[ -f 'App.js' ]]; then
+		ex_dirs+=($gRNExcludeDirs)
+	elif [[ -f 'package.json' ]]; then
+		ex_dirs+=($gNodeExcludeDirs)
+	fi
+	ex_dirs+=($gExcludeDirs)
+
+	# EXCLUDE FILE PATTERN
+	ex_files=('*.dev.*' .local)
+
+	chooser -p 'Exclude dirs' -v ex_dirs --multi \
+		--selected "$ex_dirs $ex_files" -n "$(($#ex_dirs+1))" \
+		$ex_dirs "${C[head]}Exclude files:$C_" $ex_files; cod=$?
+	if ((cod && cod!=10)); then
+		confirm 'Cancel' && cancel
+	fi
+	(($#ex_dirs)) && opts+=('--exclude-dir='${^ex_dirs[@]})
+
+	# other options
 	opts+=(--color=always $icase)
 	if [[ -n $sudo ]]; then
 		prefix='sudo'
