@@ -7,34 +7,49 @@ function urlfollow() {
 	curl -Ls -I -o /dev/null -w %{url_effective} $1
 }
 
+# Choose which parts of given url to return, or save in array (-v varname)
+# Note, no decoding is done.
+# All requested parts are returned in the order they appear in the url.
+# TODO break query into key val parts or associative array
 function urlinfo()
 {
 	local schemes=(ssh git https http ftp ftps file)
-	local getscheme getuser getport gethost getpath getquery
-	local userpat hostpat pathpat querypat argpat out var
+	local opts schemepat userpat hostpat pathpat querypat argpat out var
 	userpat='[[:alnum:]]+'
 	hostpat='[[:alnum:]][-.[:alnum:]]*\.[[:alpha:]]+'
 	pathpat='~?[-_./[:alnum:]]+'
 	argpat='[^&]+'
 	querypat="$argpat(&$argpat)*"
 	out=()
-	zparseopts -D -M - v:=var \
-		s=getscheme h=gethost u=getuser p=getpath q=getquery a=getall
+	zparseopts -D -M -A opts - v:=var 's' 'h' 'u' 'p' 'P' 'q' 'a' -all-schemes \
+		-getscheme=s -getuser=u -getport=P -gethost=h -getpath=p -getquery=q \
+		-setscheme: -setuser: -setport: -sethost: -setpath: -setquery:
 
-	if [[ $1 =~ (${(j.|.)schemes})'://'($~userpat'@')?($~hostpat)(':'[0-9]+)?('/'$~pathpat)?('\?'$~querypat)? ]]; then
-		(($#getscheme)) && out+=($match[1])
-		(($#getuser)) && out+=(${match[2]%@})
-		(($#gethost)) && out+=($match[3])
-		(($#getport)) && out+=(${match[4]#:})
-		(($#getpath)) && out+=($match[5])
-		(($#getquery)) && out+=(${match[6]#\?})
+	if (($+opts[--all-schemes])); then
+		schemepat='[a-z]+'
+	else
+		schemepat=${(j.|.)schemes}
+	fi
+
+	# parts=($scheme'://' $user'@' $host ':'$port '/'$_path '?'$query)
+	# ${(j..)parts}
+
+	if [[ $1 =~ ($schemepat)'://'($~userpat'@')?($~hostpat)(':'[0-9]+)?('/'$~pathpat)?('\?'$~querypat)? ]]
+	then
+		(($+opts[-s])) && { scheme=($match[1]); out+=$scheme }
+		(($+opts[-u])) && { user=(${match[2]%@}); out+=$user }
+		(($+opts[-h])) && { host=($match[3]); out+=$host }
+		(($+opts[-P])) && { port=(${match[4]#:}); out+=$port }
+		(($+opts[-p])) && { _path=($match[5]); out+=$_path }
+		(($+opts[-q])) && { query=(${match[6]#\?}); out+=$query }
 	elif [[ $1 =~ (${~userpat}'@')?(${~hostpat}):($~pathpat)? ]]; then
-		if (($#getscheme)); then
-			[[ $match[1] == 'git' ]] && out+=(git) || out+=(ssh)
+		if (($+opts[-s])); then
+			[[ $match[1] == 'git' ]] && scheme=(git) || scheme=(ssh)
+			out=($scheme)
 		fi
-		(($#getuser)) && out+=(${match[1]%@})
-		(($#gethost)) && out+=($match[2])
-		(($#getpath)) && out+=($match[3])
+		(($+opts[-u])) && { user=(${match[1]%@}); out+=$user }
+		(($+opts[-h])) && { host=($match[2]); out+=$host }
+		(($+opts[-p])) && { _path=($match[3]); out+=$_path }
 	else
 		return 1
 	fi
@@ -219,5 +234,17 @@ function google()
 # Added 2020-03-07 00:57
 function vnc()
 {
-	DISPLAY=:0 x0vncserver -rfbport 5555 -rfbauth ~/.vnc/passwd
+	local dir passfile
+	#cfgget -v passfile -D "$HOME/.vnc/passwd" vncpassfile
+	passfile="$HOME/.vnc/passwd"
+	type x0vncserver || aptinst tigervnc-scraping-server
+	while ! [[ -f $passfile ]]; do
+		#input -p "Choose passfile" -v passfile || cancel
+		#[[ $passfile != $default ]] && cfgset vncpassfile $passfile
+		dir="$(getpath $passfile)"
+		[[ -d $dir ]] || mkdir -p $dir
+		vncpasswd $passfile
+	done
+	#DISPLAY=:0
+	x0vncserver -display :0 -rfbport 5555 -rfbauth $passfile
 }

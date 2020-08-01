@@ -1,6 +1,7 @@
 VERSION=1.0.9
 [[ -v comp ]] || typeset -g -a comp
 autoload throw catch
+setopt extendedglob
 #alias _dbg_trap='[[ -o xtrace ]] && { unalias _dbg_trap; include debug && _dbg_trap $0 }'
 function _dbg_trap() { set +x }
 
@@ -20,18 +21,16 @@ function techo()
 {
 	local c _O _topts nonl print noesc ts msg
 	integer i dashGiven
-	_dbg_trap $0
 	zparseopts -M -D - c:=c n=nonl P=print r=noesc T=ts
 	_topts=()
 	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
 	[[ -n $nonl ]] && _topts+=('-n')
 
 	i=${@[(i)^-*|-##]} # find first non option or -- or -
-	((i<=$#)) && [[ $@[i] == -## ]] && dashGiven=1 # found -- or -
 	((i--))
 	_topts+=("$@[1,i]")
-	((dashGiven)) && ((i++))
 	shift $i
+	[[ $@[i] == -## ]] && { shift ; dashGiven=1 } # skip -- or -
 
 	if [[ -n $c ]]; then
 		c=$c[2]
@@ -421,6 +420,7 @@ function include()
 				explode -v llfuncs ${HEADER[lazyload]} ','
 				for func in $llfuncs; do
 					functions[$func]="include $quiet $name && {
+						[[ -n \$functions_source[$func] ]] || abort 127 \"function \\\"$func\\\" not found in lib zsh_$name\"
 						$func \"\$@\"
 					}"
 				done
@@ -763,9 +763,10 @@ function libmonitor()
 		t=$(date '+%s.%3N')
 		((diff = t - lastt))
 		if ((diff < 1.5)); then
-			((diff = 1.5 - diff))
-			sleep $diff
-			((t += diff))
+			continue
+			#((diff = 1.5 - diff))
+			#sleep $diff
+			#((t += diff))
 		fi
 		((lastt = t))
 		killall -HUP zsh

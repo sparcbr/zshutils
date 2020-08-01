@@ -825,7 +825,8 @@ function chkCmd()
 	fi
 
 	if (($+_opts[--git])); then
-		pkgList+=($_opts[--git] - git $cmd)
+		include -q git
+		pkgList+=($_opts[--git] ${_opts[-b]:-'-'} git $cmd)
 		# i:pkg   |   i+1:version   |   i+2:packager   |   i+3:cmd
 	fi
 

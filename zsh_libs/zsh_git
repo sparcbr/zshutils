@@ -1,5 +1,5 @@
 VERSION=1.0.5
-#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow,gitgetrepo,glog,gstaged,grestore,gstatus
+#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow,gitgetrepo,glog,gstaged,grestore,gstatus,gpull
 alias pull="gpull"
 alias push="gpush"
 alias gadd="git add"
@@ -26,7 +26,23 @@ export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 function gconfig()
 {
+	local _opts _opt _gopts
+	#zparseopts -D -M -A _opts -
+	git config --list --show-scope || return
+
+	return
+	chooser -v _opt -p 'git config' -f1 'Unset' 'Cancel' || return
+	case $_opt in
+		Unset)
+			git pull --no-commit "$@"
+			;;
+		Cancel) cancel ;;
+			*)	;;
+	esac
+
 	git config --global core.excludesfile $CFG/.gitignore_global
+	git config --global diff.algorithm histogram
+	git config --global merge.conflictstyle diff3
 	# or in repopath/.git/info/exclude
 	#if [[ -z $PAGER && -z $GITPAGER ]]; then
 	#	chooser -v PAGER -f1 'less' 'bat' '- *no pager*'
@@ -40,9 +56,22 @@ function gconfig()
 
 function gpull()
 {
-	local _opts gopts=()
+	local tmp _opts _opt gopts=()
 	#zparseopts -D -M -A _opts -
-	git pull --no-commit "$@"
+	tmp=$(git pull --ff-only "$@" 2>&1) || {
+		if [[ $tmp =~ 'fatal: Could not read from remote' ]]; then
+			# on network=1 gpull
+			return 1
+		fi
+		chooser -v _opt -p 'No fast-forward possible' -f1 'Merge pull' 'Cancel' || return
+		case $_opt in
+			Merge)
+				git pull --no-commit "$@"
+				;;
+			Cancel) cancel ;;
+				*)	;;
+		esac
+	}
 }
 
 function gshow()
@@ -74,70 +103,97 @@ function gunstage()
 
 function gselect()
 {
-	local lines _opts _copts=() gopts noSelect head=()
-	integer ret i idx nlimit=20
+	local msgsearch search filePattern revisions
+	integer ret i idx nlimit=20 hasDashDash
+	typeset -a lines _opts _copts g1opts gFixedOpts noSelect head gargs
 	setopt extendedglob
-	zparseopts -D -M -A _opts - 'l' -nograph=l -oneline=l n: -follow g: -grep:=g G:=g
+	zparseopts -D -M -A _opts - 'l' -nograph=l -oneline=l n: -follow g: -grep:=g G:
 
 	(($+_opts[-n])) && nlimit=$_opts[-n]
-	gopts=(-n $nlimit)
-	(($+_opts[--follow])) && gopts+=('--follow')
-	(($+_opts[-g])) && gopts+=('--grep' $_opts[-g])
-	((! $+_opts[-l])) && gopts+=('--graph')
-	#	while [[ ${1[1]} == '-' ]]; do
-	#		if [[ $1 == '-' || $1 == '--' ]]; then
-	#			shift
-	#			break
-	#		fi
-	#		gopts+=("$1")
+	(($+_opts[--follow])) && glopts+=(--follow)
+	(($+_opts[-g])) && msgsearch=$_opts[-g]
+	(($+_opts[-G])) && search=$_opts[-G]
+	((! $+_opts[-l])) && gFixedOpts+=('--graph')
+	gFixedOpts+=(--relative)
+
+	# separate revisions(branches/commits) and paths
+	#while [[ ${1[1]} == '-' ]]; do
+	#	if [[ $1 == '-' || $1 == '--' ]]; then
 	#		shift
-	#	done
-
-	glog -v lines --relative $gopts "$@"
-	# mark lines without content as non-selectable
-	for ((i=1; i<=$#lines; i++)); do
-		if [[ ! $lines[i] =~ [a-f0-9]{5,} ]]; then
-			noSelect+=($i)
+	#		hasDashDash=1
+	#		break
+	#	fi
+	#	gargs+=("$1")
+	#	shift
+	#done
+	while ((ret==0)); do
+		_copts=()
+		noSelect=()
+		head=()
+		glopts=($gFixedOpts)
+		if (($#msgsearch)); then
+			glopts+=(--grep "$msgsearch")
+			#TODO input -P Search -v search
+			head+=("$C[head]Search message:$C_ $msgsearch")
 		fi
-	done
-	(($#noSelect)) && _copts+=(-n "$noSelect")
+		if (($#filePattern)); then
+			#TODO multiple files
+			glopts+=(--follow)
+			head+=("$C[head]Following:$C_ $filePattern")
+		fi
+		((nlimit)) && glopts+=(-n $nlimit)
 
-	_copts+=(
-		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision (D) Diff (M) Meld (Q) Quit'
-		--events '[ve] EDIT f FULL d DIFF m MELD'
-		--strip-color
-		-R '([a-f0-9]{5,40} .*)' -f1
-	)
+		glog -v lines $glopts "$@" -- $filePattern
+		# mark lines without content as non-selectable
+		for ((i=1; i<=$#lines; i++)); do
+			if [[ ! $lines[i] =~ [a-f0-9]{5,} ]]; then
+				noSelect+=($i)
+			fi
+		done
+		(($#noSelect)) && _copts+=(-n "$noSelect")
 
-	if (($+_opts[-g])); then
-		#TODO input -P Search -v search
-		head+=("Search: $@")
-	fi
-	if (($+_opts[--follow])); then
-		head+=("Following: $@")
-	fi
-	(($#head)) && _copts+=(--head "$head")
+		_copts+=(
+			--foot '(Enter) Show (V|E) Vim (F) Full (D) Diff (M) Meld (Esc) Quit'
+			--events '[ve] EDIT f FULL d DIFF m MELD F3 GREP'
+			--strip-color
+			-R '([a-f0-9]{5,40} .*)' -f1
+		)
 
-	while { chooser -v hashes --items lines -D $idx -I idx $_copts ; ret=$? ; ((ret==0)) }
-	do
-		case $ACTION in
-			'')
-				gshow $gs_opts $hashes $1
-				;;
-			'EDIT')
-				gshow $hashes $1 | gvim -
-				;;
-			'FULL')
-				gshow $hashes:$1 | gvim -
-				;;
-			'DIFF')
-				gvimdiff $1 <(gshow $hashes:$1)
-				;;
-			'MELD')
-				meld $1 <(gshow $hashes:$1)
-				;;
-			*) ;;
-		esac
+		(($#head)) && _copts+=(--head "$head")
+
+		while { chooser -v hashes --items lines -D $idx -I idx $_copts ; ret=$? ; ((ret==0)) }
+		do
+			case $ACTION in
+				'')
+					gshow $gs_opts $hashes $1
+					;;
+				'EDIT')
+					# save to:
+					gshow $hashes $1 | gvim -
+					#gvim -f $1
+					;;
+				'FULL')
+					gshow $hashes:$1 | gvim -
+					;;
+				'DIFF')
+					gvimdiff $1 <(gshow $hashes:$1)
+					#TODO choose HEAD, WORKDIR, or other review, etc
+					#TODO older_hash vs newer , or choose
+					;;
+				'MELD')
+					set -x
+					meld $1 <(gshow $hashes:$1)
+					set +x
+					;;
+				'GREP')
+					input -p 'Msg search' -v msgsearch && break
+					;;
+				'GGREP')
+					input -p 'Code search' -v search && break
+					;;
+				*) ;;
+			esac
+		done
 	done
 	return 0 # $ret
 }
@@ -153,6 +209,7 @@ function gtag() #@TODO
 {
 	local tag hash
 	echo TODO
+	techo -c warn "Current tag: $(git describe --always --tags)" #$(git rev-list --tags --max-count=1)'
 	return 1
 	hash=${2:-$(gselect -h)}
 	tag=$()
@@ -178,7 +235,7 @@ function gmergebase()
 	common=$(run -v3 git merge-base $_A $_B)
 	common2=$(run -v3 git merge-base --fork-point $_A $_B 2>/dev/null)
 	#[[ -n $common && $common != HEAD
-	#@TODO show glog graphic with shared commits and fork-point
+	#@TODO show g log graphic with shared commits and fork-point
 	if [[ -n $common || -n $common2 ]]; then
 		if [[ -z $common2 || $common == $common2 ]]; then
 			echo $common
@@ -561,14 +618,47 @@ function getbranch()
 	techo -c head "Current branch: $C[warn]$branch"
 }
 
+function gswitch()
+{
+	local name cmd opt gopt out create force
+	integer exists
+	zparseopts -M -D -A opt - c=create f=force
+
+	(($#)) && { name=$1; shift }
+	if ((!$#name)); then
+		#chooser 'New branch' $(lisbranch)
+		gbranch -l
+		input -p 'Branch' -v name || return
+	fi
+	gopt=($force)
+	gbranch --exists $name && exists=1
+	if ((!exists)); then
+		if ((!$+opt[-c])); then
+			confirm "No branch \"$name\" exists. Create it" || return
+		fi
+		gopt+=(-c)
+	fi
+	out=$(git switch $gopt $name 2>&1) && return
+	techo -c warn $out
+	return 1
+}
+
 function gbranch() #@TODO
 {
-	local list diff cmd get current
-	zparseopts -M -D - d=diff -diff=d l=list -list=l c=current
+	local list diff cmd get current opts
+	zparseopts -M -D -A opts - d=diff -diff=d l=list -list=l c=create 'e' -exists=e
 
-	cmd=($list $current)
+	#if (($#)) && [[ ${1:0:1} != '-' ]]; then
+
+	#fi
+	(($+opts[-e])) && {
+		(($#1)) && git show-ref --verify --quiet refs/heads/$1
+		return
+	}
+	cmd=($list $create)
 	case $cmd in
-		-c) getbranch "$@" ;;
+		-c) #getbranch "$@" ;;
+			gswitch -c "$@" ;;
 		-l) listbranch "$@" ;;
 		*) listbranch "$@" ;;
 	esac
@@ -578,6 +668,7 @@ function listbranch()
 {
 	local _cols head merged to compare_to all _opts opts=()
 	zparseopts -M -D -A _opts - -no-merged::=merged -merged::=merged a -all=a O:
+	#zparseopts -M -D -A _opts - -no-merged::=N m:: -merged::=m 'a' -all=a O:
 	#compare_to="$remote[1]/master"
 	#@TODO get "main" branch
 	compare_to='master'
@@ -982,30 +1073,32 @@ function gstatus()
 		#diff_changed_dev=''
 		if [[ -f $fn.dev.js ]]; then
 			dev_diff=$(diff -u --color=never $fn.dev.js $f)
-			if (($#changed && $#dev_diff)); then
-				diff_changed_dev=$(diff -u <(<<<"$changed") <(<<<"$dev_diff"))
-				#e $changed $dev_diff
-			fi
+		#	if (($#changed && $#dev_diff)); then
+		#		diff_changed_dev=$(diff -u <(<<<"$changed") <(<<<"$dev_diff"))
+		#		(f - git)
+		#		#e $changed $dev_diff
+		#	fi
 		fi
 		#diff_stg_dev = changed_ - changes_in_.dev  # $#diff_stg_dev
-		techo $mod $f $#dev_diff $diff_changed_dev #$(($#changed - $#dev_diff)) $diff_changed_dev
+		techo $stat $f $#dev_diff #$(($#changed - $#dev_diff)) $diff_changed_dev
 	done
 
 }
 
 gFormat=(
-	'%C(yellow)%h'		# short hash
-	'¬%<(3,trunc)%cn' # author
-	'%C(auto)%d'		# ref names
-	'%Creset%s'			# subject
-	'%Creset(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
+	'%h'		# short hash
+	'%<(3,trunc)%cn' # author
+	'%C(auto)%d%Creset'		# ref names
+	'%s'			# subject
+	'(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
 )
 # Added 2020-04-06 16:43
 alias _glog='git log'
 comp+=('glog=_glog')
 function glog()
 {
-	local _gopts _opts buf line _vname
+	local _gopts _opts buf line _vname hashP authorP refsP subjectP dateP
+	local aline author
 	integer n=10 i
 	zparseopts -D -M -A _opts - -date: 'r' -relative=r v: 'l' n:
 
@@ -1014,19 +1107,39 @@ function glog()
 	(($+_opts[-n])) && n=$_opts[-n]
 	_gopts+=(-n $n)
 
-	if (($+_opts[-v])); then
-		_vname=${_opts[-v]}
+	if [[ -n $_opts[-v] ]]; then
+		_vname=$_opts[-v]
 		typeset -ga $_vname
-		while read -r line; do
-			# _glsub=(¬P.. "$C[warn]P$C_" ¬E.. "$C[ok]$EC_")
-			((i++))
-			typeset -g "${_vname}[$i]=${(@)line/¬P../"${C[warn]}P"}"
-		done < <(git log --date=${_opts[--date]:-iso} $_gopts "$@")
-	else
-		while read -r line; do
-			echo -E - ${(@)line/¬P../"${C[warn]}P"}
-		done < <(git log --date=${_opts[--date]:-iso} $_gopts "$@")
 	fi
+
+	hashP='[a-f0-9]{5,}'
+	authorP='[A-Z]'
+	refsP='\(.*\)'
+	subjectP='.*'
+	dateP='\(.*\)'
+	typeset -A authorColor=('E' yellow 'P' warn '*' lcyan)
+	lcolors=('' yellow '' '' '')
+	while read -r line; do
+		((i++))
+		# _glsub=(¬P.. "$C[warn]P$C_" ¬E.. "$C[ok]$EC_")
+		if [[ $line =~ '(.*) ('$~hashP') ('$~authorP').. ('$~refs')? ?('$subjectP') ('$~dateP')' ]]
+		then
+			#author=$match[3]
+			#color=$C[$authorColor[$author]]
+			#match[3]=$color$author$C_
+			#match[2]=$colo
+			#TODO save colors and data in separated arrays
+			aline="$match"
+		else
+			aline="$line"
+		fi
+
+		if [[ -n $_vname ]]; then
+			typeset -g "${_vname}[$i]=\"$aline\""
+		else
+			echo -E - "$aline"
+		fi
+	done < <(git log --date=${_opts[--date]:-iso} $_gopts "$@")
 }
 
 # Added 2020-04-29 14:25
@@ -1075,3 +1188,26 @@ function grestore()
 	git restore "$@"
 }
 #TODO unstage error: pathspec '.*' did not match any file(s) known to git
+#gpick() { e TODO .git/CHERRY_PICK_HEAD }
+#gstash() {
+  #TODO: -R: git stash show stash@\{0\} -p | git apply -R
+#}
+
+# Added 2020-07-19 23:56
+function jira() {
+	#TODO infere board from git repofunction jira() {
+	#TODO infere board from git repo
+	#TODO list issues, default filters: sprint=current AND (!assignee OR assignee=me) AND status<>Done
+	#chooser Start task
+	input -v issueId -p 'Issue id' || return
+	# TODO: suggest branch name from issue id
+	repo=$(gitgetrepo)
+	repoPrefix=${(L)repo##*/}
+	bName="feat/$repoPrefix-$issueId-"
+	input -v bName -p 'Branch name'
+	[[ $bName =~ feat/$repoPrefix-([0-9]##) && $match[1] -eq $issueId ]] || abort 2 "Incorrect branch name. Must start with \"feat/$repoPrefix-$issueId-\""
+	gbranch -c $bName || return
+	# TODO: set assignee=me; set status=InProgress
+
+}
+

@@ -181,7 +181,7 @@ function sql()
 		if read -p errCode sqlState line tmp; then
 			if [[ $errCode == '-' ]]; then
 				#@TODO
-				DEBUG=9 abort --ex SqlEx_Unknown 99 - ${sqlState:--} ${line:--} $tmp
+				DEBUG=9 abort --ex SqlEx_Unknown 99 - ${sqlState:-'-'} ${line:-'-'} $tmp
 			fi
 			split=(${(Q)${(z)tmp}})
 			if in_array -v i - '-' split; then # after '-' is the msg

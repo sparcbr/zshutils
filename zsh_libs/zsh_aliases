@@ -13,7 +13,7 @@ alias wh='what'
 
 gExcludeDirs=(__tests__ .local)
 gNodeExcludeDirs=(node_modules)
-gRNExcludeDirs=(android ios $gNodeExcludeDirs)
+gRNExcludeDirs=(android android/app/build ios $gNodeExcludeDirs)
 gPhPExcludeDirs=(vendor)
 
 function cod()
@@ -89,7 +89,7 @@ function mkscript()
 				options=(Rename Append "Edit $func()" Cancel)
 				if [[ -z $tmp ]]; then
 					if explode -v tmp $functions[$func] $'\n' 1 && \
-						[[ $tmp == *'include '(#b)([a-zA-Z]##)" && {" ]] # is it lazyload?
+						[[ $tmp == *'include '(#b)([a-zA-Z]##)" && {" ]] # lazyload
 					then
 						tmp=zsh_$match[1]
 					else
@@ -384,7 +384,7 @@ function vw()
 					echo "$cpath is binary executable"
 					return 1
 				fi
-				v $cpath ${linenum:++$linenum}
+				v $cpath${linenum:+:$linenum}
 			else
 				echo Invalid path \"$cpath\"
 			fi
@@ -518,6 +518,7 @@ function f()
 	elif [[ -f 'package.json' ]]; then
 		ex_dirs+=($gNodeExcludeDirs)
 	fi
+	[[ -d vendor ]] && ex_dirs+=($gPhPExcludeDirs)
 	ex_dirs+=($gExcludeDirs)
 	chooser -p 'Exclude dirs' -v ex_dirs --multi --selected "$ex_dirs" $ex_dirs
 	integer cod=$?
@@ -598,6 +599,7 @@ function ge()
 	elif [[ -f 'package.json' ]]; then
 		ex_dirs+=($gNodeExcludeDirs)
 	fi
+	[[ -d vendor ]] && ex_dirs+=($gPhPExcludeDirs)
 	ex_dirs+=($gExcludeDirs)
 
 	# EXCLUDE FILE PATTERN

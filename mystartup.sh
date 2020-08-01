@@ -7,6 +7,7 @@ if [[ $1 == 'post' ]]; then
 	if ! ping -i 0.2  -w 2 -W 0.1 -c 2 -rn 192.168.1.1; then
 		notify-send 'Restarting networking'
 		sudo service networking restart
+		sudo service network-manager restart
 	fi
 else
 	xhost +
@@ -21,6 +22,10 @@ else
 	#		xdotool search --all --sync --onlyvisible --pid $rpid --name 'Radeon Profile'  mousemove --sync --window '%1' 20 265 click 1 key Down key Return mousemove --sync --window '%1' 20 170 click 1 #windowminimize
 	#	}
 	#fi
-	sudo cpuconfig &
 	redshift-gtk&
+	if [[ $USER == 'sparc' ]]; then
+		dropbox start &
+		sudo cpuconfig &
+	fi
 fi
+brightness
