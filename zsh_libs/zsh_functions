@@ -223,7 +223,7 @@ function chooser()
 	zparseopts -D -M -A _opts - n:=noSelect S: \
 		 I: -save-index:=I v: D:=current -ifs: -items: \
 		 s:=sep f:=field R:=regex b:=bytes ofs:=ofs \
-		 H:=head -head:=H p:=H F:=foot -foot:=F -marks: \
+		 H:=head -head:=H -header:=H p:=H F:=foot -foot:=F -footer:=F -marks: \
 		 -multi -use-keys -selected: E:=events -events:=E \
 		 -file -files -dir -no-auto-select -strip-color
 
@@ -739,7 +739,7 @@ function chooser()
 		selected_idx=1
 	fi
 
-	(($#chosenList)) || return 10
+	#(($#chosenList)) || return 10
 
 	typeset -a _olist=()
 	# Filter output
@@ -805,7 +805,9 @@ function chooser()
 function chkCmd()
 {
 	local _opts cmd tmp verbose list pkgs pkg packager
-	zparseopts -D -M -A _opts - v=verbose l=list -list=l -pkg:=pkgs p:=pkg -git: g:=git
+	zparseopts -D -M -A _opts - v=verbose l=list -list=l -pkg:=pkgs p:=pkg \
+		-git: g:=git b: -branch=b
+
 	(($#1)) || abort -v 1 "$0: empty command"
 	cmd=$1
 	if command -v $cmd >/dev/null; then
@@ -1120,7 +1122,7 @@ function run()
 
 			((ret==130)) && throw $ret
 			if ((ret==127)); then
-				chkCmd -p $cmdinst[2] $cmd && continue || throw 127
+				chkCmd ${cmdinst[2]:+-p$cmdinst[2]} $cmd && continue || throw 127
 			fi
 
 			break
@@ -1143,13 +1145,14 @@ function run()
 			local data=(${=CAUGHT})
 			ret=$data[1]
 			if ((ret==130)); then
-				cancel $verbose "$print $CANCEL"
-				return
+				cancel $noEx $verbose "$print $CANCEL"
+				return $ret
 			fi
 			((verbose)) && techo "$print $FAIL ($data)"
 			[[ -n $alert ]] && error "$print error: $data"
 			abort $noEx $ret
-			return
+			echo "ret=$ret,?=$?"
+			return $ret
 		fi
 	}
 
@@ -1169,39 +1172,28 @@ function run()
 # medium: smblock
 function banner()
 {
-	local cmd c
-	if type toilet >/dev/null; then
-		cmd='toilet'
-	elif type figlet>/dev/null; then
+	local cmd c='warn'
+	if type figlet >/dev/null; then
 		cmd='figlet'
+	elif type toilet>/dev/null; then
+		cmd='toilet'
 	else
-		if type apt-get 2>&1 >/dev/null && aptinst toilet lolcat; then
-			if type toilet >/dev/null; then
-				cmd='toilet'
-			fi
+		if type apt-get 2>&1 >/dev/null; then
+			aptinst figlet && cmd='figlet'
+			aptinst toilet && [[ -z $cmd ]] && cmd='toilet'
 		elif type yum >&/dev/null; then
 			sudo yum install figlet && cmd='figlet'
+			sudo yum install toilet && [[ -z $cmd ]] && cmd='toilet'
 		fi
 	fi
-	if [ "$1" = '-c' ]; then
-		c=$2 ; shift 2
-	fi
-	if [ -z "$cmd" ]; then
-		if [ -n "$c" ]; then
-			techo -c $c "$@"
-		elif type lolcat >/dev/null; then
-			echo "$@" | lolcat -F 0.3 -a -s 40 -d 4 >$TTY
-		fi
+	[[ "$1" == '-c' ]] && { c=$2; shift 2 }
+
+	if [[ -z "$cmd" ]]; then
+		techo -c $c "$@"
 		return
 	fi
 
-	if [ -n "$c" ]; then
-		$cmd -f pagga "$@" | colorify -c $c >$TTY
-	elif type lolcat >/dev/null; then
-		$cmd -f pagga "$@" | lolcat -F 0.3 -a -s 40 -d 4 >$TTY
-	else
-		$cmd -f pagga "$@" >$TTY
-	fi
+	$cmd "$@" | colorify -c $c >$TTY
 }
 function group()
 {
@@ -1273,7 +1265,7 @@ function colorify()
 				if [[ $line =~ ^\\+([0-9]?)\<?$cmd:([0-9]+)\>\ (.*) ]]; then
 					techo -c lcyan $cmd:$match[2] $C_$match[3]
 				elif [[ $line =~ ^\\+([0-9]?)\<?([[:alnum:]]+):([0-9]+)\>\ (.*) ]]; then
-					((DEBUG)) && techo -c blue $match[1]:$match[2] $C_$match[3]
+					dbgecho -c blue $match[1]:$match[2] $C_$match[3]
 				else
 					techo -c lred $line
 				fi

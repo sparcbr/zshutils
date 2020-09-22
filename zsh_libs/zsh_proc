@@ -1,6 +1,6 @@
 VERSION=1.0.2
 #lazyload=p,k
-unalias p k
+unalias p 2>/dev/null
 
 # Process handling. Stuff like pid, kill, lsof, etc...
 
@@ -29,9 +29,8 @@ function p()
 	local cols appendcols args
 
 	[[ -o interactive ]] || { command ps "$@" ; return }
-	zparseopts -D -M - c:=cmd k=kern u::=user t::=tty \
-		p:=pid P:=ppid -ppid:=P o:=cols O:=appendcols
-	
+	zparseopts -D -M - c:=cmd k=kern u::=user t::=tty p:=pid P:=ppid -ppid:=P o:=cols O:=appendcols
+
 	# # # # # # #
 	# selection #
 	# # # # # # #
@@ -70,7 +69,7 @@ function p()
 		cols=($(explode "$cols[2]" ','))
 		#elif in_array args --any '-o,-O'; then
 	else
-		cols=(pid ppid %cpu stat cmd tty)
+		cols=(pid ppid %cpu stat pmem command)
 		[[ -n $user[2] ]] && cols+=() # euid if not -u or -u $x with $x != $UID
 	fi
 	if [[ -n $appendcols ]]; then

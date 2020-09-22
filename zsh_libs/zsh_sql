@@ -7,17 +7,7 @@ alias sqlmaq="noglob sql --ssh maquina"
 DB_DATA_DIR=/var/lib/mysql
 DBNAME='idiomus'
 
-typeset -gA sqlPass=(
-	# user  pass
-	'sparc' 'my!7866'
-	'idiomus' '#58dhAms$3xx'
-)
-typeset -gA sqlUser=(
-	# root user
-	'root' 'sparc'
-	# Dbname    User
-	'idiomus' 'idiomus'
-)
+source $CFG/sql.cfg.zsh
 
 typeset -gA rowIndex
 
@@ -28,12 +18,12 @@ function dbtstamp()
 	usedb "$@"
 	sudo ls -lrt --time-style=+"%Y-%m-%d %H:%M:%S" $DB_DATA_DIR/$db/ | \
 		awk '{print $6,$7,$8}' | sort --numeric-sort
-}
+	}
 
 function todosql__()
 {
-	sql --ssh maquina 'SELECT review_version_id, sequence, length, texts, timestamps, status FROM review_track WHERE review_version_id=184 ORDER BY updated_at' | {          
-		read cols ; while IFS=$'\t\t' read -r version_id sequence length texts timestamps _status ; do 
+	sql --ssh maquina 'SELECT review_version_id, sequence, length, texts, timestamps, status FROM review_track WHERE review_version_id=184 ORDER BY updated_at' | {
+		read cols ; while IFS=$'\t\t' read -r version_id sequence length texts timestamps _status ; do
 			sqlQuote -v _texts $texts; sqlQuote -v _timestamps $timestamps
 			sql "insert into review_track (review_version_id,sequence, length, texts, timestamps,status) values ($version_id, $sequence, $length, '$_texts', '$_timestamps', '$_status')"
 		done
@@ -74,21 +64,22 @@ function sql()
 
 	if [[ -n $host ]]; then # remote
 		OPT_CHK file -f for remote
-		#(($+file)) && 
-		opts=() # TODO
+		#(($+file)) &&
+		opts=(-d idiomus) # TODO
+		#(($+_opts[-n])) || choose remote database
 		if (($+_opts[-o])); then
 			#@TODO
-			#ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p | \
+			#ssh $host[2] "noglob sql $opts ${(qq)sql}" 2>&p | \
 			#	awkWrapper -F '\\t' --inc printFields -E - - - - 'printFields(1,-1)'
 		else
-			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p
+			ssh $host[2] "include sql; noglob sql $opts ${(qq)sql}" 2>&p
 		fi
 		ret=$?
 	else
 		opts=()
-
 		(($+_opts[-n])) || usedb $name[2]
 
+		# credentials
 		if [[ -n $db ]]; then
 			user=${_opts[-u]:-${sqlUser[$db]:-$sqlUser[root]}}
 			pass=${pass[2]:-$sqlPass[$user]}
@@ -124,42 +115,42 @@ function sql()
 					((i--))
 				fi
 			} < <(mysql $opts -e $sql $db) 2>&p
-			#mysql $opts -e $sql $db 2>&p | IFS=$'\t\t' read -A $_out[2]
-				#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
-			ret=$?
-			if ((i)); then
-				if (($#_colsOut)); then
-					_colsOut=$_colsOut[2]
-					typeset -gA $_colsOut
-					integer colN=1
-					for col in $_cols; do
-						typeset -g "${_colsOut}[$col]=$colN"
-						((colN++))
-					done
-				fi
+		#mysql $opts -e $sql $db 2>&p | IFS=$'\t\t' read -A $_out[2]
+		#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
+		ret=$?
+		if ((i)); then
+			if (($#_colsOut)); then
+				_colsOut=$_colsOut[2]
+				typeset -gA $_colsOut
+				integer colN=1
+				for col in $_cols; do
+					typeset -g "${_colsOut}[$col]=$colN"
+					((colN++))
+				done
+			fi
+		fi
+	else
+		#@TODO: no error handling: redirect stderr to null
+		if (($#file)); then
+			if [[ -f $file ]]; then
+				(($#verbose)) && techo -r -c head mysql ${(qq)opts} ${(qq)sql} $db '<' $file
+				mysql $opts $sql $db 2>&p < $file
+			else
+				techo -c err "File not found$C_: $file"
+				false
 			fi
 		else
-			#@TODO: no error handling: redirect stderr to null
-			if (($#file)); then
-				if [[ -f $file ]]; then
-					(($#verbose)) && techo -r -c head mysql ${(qq)opts} ${(qq)sql} $db '<' $file
-					mysql $opts $sql $db 2>&p < $file
-				else
-					techo -c err "File not found$C_: $file"
-					false
-				fi
+			if (($#_idVar)); then
+				# sql+="; SELECT ROW_COUNT(), LAST_INSERT_ID()"
+				sql+="; SELECT LAST_INSERT_ID()"
+				(($#verbose)) && techo -r -c head mysql $opts -s -e ${(qq)sql} $db
+				_id=$(mysql $opts -s -e $sql $db) 2>&p
 			else
-				if (($#_idVar)); then
-					# sql+="; SELECT ROW_COUNT(), LAST_INSERT_ID()"
-					sql+="; SELECT LAST_INSERT_ID()"
-					(($#verbose)) && techo -r -c head mysql $opts -s -e ${(qq)sql} $db
-					_id=$(mysql $opts -s -e $sql $db) 2>&p
-				else
-					(($#verbose)) && techo -r -c head mysql $opts -e ${(qq)sql} $db
-					mysql $opts -e "$sql" $db 2>&p
-				fi
+				(($#verbose)) && techo -r -c head mysql $opts -e ${(qq)sql} $db
+				mysql $opts -e "$sql" $db 2>&p
 			fi
-			ret=$?
+		fi
+		ret=$?
 		fi
 	fi
 	echo EOF >&p ; wait $p
@@ -230,20 +221,20 @@ function sqlError()
 	((_v)) && msg="SQL Error $cod ($state)$C_ at line $line: "
 	case $cod in
 		1049) msg+="Can't connect to database $C[warn]'$1'$C_"
-		;;
+			;;
 		1062) #uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
 			msg+="Duplicate entry $C[warn]'$1'$C_ for key $C[warn]'$2'"
-		;;
+			;;
 		1064) msg+="Syntax error near $C[warn]'$@'"
-		;;
+			;;
 		145[12]) msg+="Constraint violation $C[warn]$3$C_: $C[warn]$2.$4$C_ REFERENCES $C[warn]$5.$6"
-		;;
+			;;
 		*) local _args=("$@")
 			# printf -v _args $msg"$(perror -s $cod)" $C[warn]$^_args$C_
 			printf -v _args $msg"$(perror -s $cod)" $_args
 			techo -c lred $_args
 			return
-		;;
+			;;
 	esac
 	techo -c lred $msg
 }
@@ -270,35 +261,35 @@ function parseSqlErrors()
 			#  https://mariadb.com/kb/en/mariadb-error-codes/
 			#  sql/share/errmsg-utf8.txt
 			case $errCode in
-			1062)
-				#uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
-				msgFormat="Duplicate entry '(.*)' for key '(.*)'"
-				;;
-			1064)
-				msgFormat="near '(.*)'"
-				;;
-			145[12])
-				msgFormat='^[^(]+\(`([^`]+)`.`([^`]+)`, CONSTRAINT `([^`]+)` FOREIGN KEY \(([^)]+)\) REFERENCES `([^`]+)` \(([^)]+)\)'
-				#msgFormat="^[^(]+\\(\`([^\`]+)\`.\`([^\`]+)\`, CONSTRAINT \`([^\`]+)\` FOREIGN KEY \\(\`([^\`]+)\`\\) REFERENCES \`([^\`]+)\` \\(\`([^\`]+)\`"
-			#	msgFormat="Cannot add or update a child row: a foreign key constraint fails (`¬tbl¬`.`#¬sql¬`, CONSTRAINT `#¬fk¬` FOREIGN KEY (`¬col¬`) REFERENCES `¬tbl¬` (`¬col¬`))"
-	#ERROR 1452 (23000) at line 1: Cannot add or update a child row: a foreign key constraint fails (`idiomus`.`#sql-426_49`, CONSTRAINT `#sql-426_49_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`))
-				;;
-			*)
-				if msgFormat=${"$(perror $errCode)"#*: }; then
-					msgFormat=${msgFormat//(#m)[()]/'\'$MATCH}
-					rx=(
-						'%l#[du]'       '(-?[0-9]+)'
-						'%-#.#[0-9]#[sM]' '(.*)'
-						'\).' ')\.'
-					)
-					msgFormat=${msgFormat//${~rx[1]}/$rx[2]}
-					msgFormat=${msgFormat//${~rx[3]}/$rx[4]}
-					msgFormat='^'${msgFormat//${~rx[5]}/$rx[6]}
-				else
-					techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState)"
-					continue
-				fi
-				;;
+				1062)
+					#uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
+					msgFormat="Duplicate entry '(.*)' for key '(.*)'"
+					;;
+				1064)
+					msgFormat="near '(.*)'"
+					;;
+				145[12])
+					msgFormat='^[^(]+\(`([^`]+)`.`([^`]+)`, CONSTRAINT `([^`]+)` FOREIGN KEY \(([^)]+)\) REFERENCES `([^`]+)` \(([^)]+)\)'
+					#msgFormat="^[^(]+\\(\`([^\`]+)\`.\`([^\`]+)\`, CONSTRAINT \`([^\`]+)\` FOREIGN KEY \\(\`([^\`]+)\`\\) REFERENCES \`([^\`]+)\` \\(\`([^\`]+)\`"
+					#	msgFormat="Cannot add or update a child row: a foreign key constraint fails (`¬tbl¬`.`#¬sql¬`, CONSTRAINT `#¬fk¬` FOREIGN KEY (`¬col¬`) REFERENCES `¬tbl¬` (`¬col¬`))"
+					#ERROR 1452 (23000) at line 1: Cannot add or update a child row: a foreign key constraint fails (`idiomus`.`#sql-426_49`, CONSTRAINT `#sql-426_49_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`))
+					;;
+				*)
+					if msgFormat=${"$(perror $errCode)"#*: }; then
+						msgFormat=${msgFormat//(#m)[()]/'\'$MATCH}
+						rx=(
+							'%l#[du]'       '(-?[0-9]+)'
+							'%-#.#[0-9]#[sM]' '(.*)'
+							'\).' ')\.'
+						)
+						msgFormat=${msgFormat//${~rx[1]}/$rx[2]}
+						msgFormat=${msgFormat//${~rx[3]}/$rx[4]}
+						msgFormat='^'${msgFormat//${~rx[5]}/$rx[6]}
+					else
+						techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState)"
+						continue
+					fi
+					;;
 			esac
 
 			if [[ $msg =~ $msgFormat ]]; then
@@ -404,12 +395,27 @@ function dbsize()
 # Added 2019-03-23 23:36
 function sqldbdump()
 {
+	local opts
+
 	usedb "$@"
 	if [[ -f $db.sql.bkup ]]; then
 		techo -c warn "Saving backup $db.sql.bkup"
 		mv $db.sql $db.sql.bkup
 	fi
-	mysqldump $db --no-data --single-transaction --skip-add-drop-table | \
+
+	# credentials
+	if [[ -n $db ]]; then
+		user=${_opts[-u]:-${sqlUser[$db]:-$sqlUser[root]}}
+		pass=${pass[2]:-$sqlPass[$user]}
+	else
+		user=${_opts[-u]:-$sqlUser[root]}
+		pass=${pass[2]:-$sqlPass[$user]}
+	fi
+	(($+_opts[-p])) && pass=$_opts[-p]
+	opts+=(${user:+-u$user} ${pass:+-p"$pass"})
+#--no-data 
+	mysqldump $db $opts --single-transaction --skip-add-drop-table | \
 		sed -e 's/ AUTO_INCREMENT=[0-9]*\b//g' | \
 		grep -v '^\/\*![0-9]\{5\}.*character_set_client.*\/;$' > $db.sql
+	#t=calculo; mysqldump --no-create-info --extended-insert --password='Churr!4as678' -u $
 }

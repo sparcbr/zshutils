@@ -38,7 +38,7 @@ function cod()
 comp+=("what=which")
 function what()
 {
-	which $1
+	builtin which $1
 }
 
 function hg()
@@ -52,8 +52,7 @@ function hg()
 	fc -li ${=fopt} | egrep ${=gopt} -- $1
 }
 
-# Added 2019-04-12 11:45
-function aptlist()
+function aptlist() # Added 2019-04-12 11:45
 {
 	zgrep 'install ' /var/log/dpkg.log* | sort | cut -f1,2,4,6 -d' ' | less
 }
@@ -206,7 +205,7 @@ function mkscript()
 	fi
 
 	echo -n "$data" >> $file
-	((isLib)) && source $file && { type $func ; which $func; }
+	((isLib)) && source $file && { type $func ; what $func; }
 
 	# setup file
 	[[ -x $file || $isLib -eq 1 ]] || chmod +x $file
@@ -228,13 +227,15 @@ function mkscript()
 
 function gvimdiff()
 {
+	local gopts
 	integer ret
+	zparseopts -D -M - f=gopts
 	diff -u $1 $2
 	ret=$?
 	if ((ret==0)); then
 		techo "$1 == $2"
 	elif ((ret == 1)); then
-		command gvimdiff $1 $2
+		command gvimdiff $gopts $1 $2
 	fi
 }
 
@@ -255,11 +256,17 @@ function add_key()
 function edalias()
 {
 	local linenum pat file var isFunc
+	integer col
 	zparseopts -D -M l:=linenum f=isFunc
 	[[ -n $1 ]] || return 1
 	if (($#isFunc)); then
 		pat="(function +)?$1\(\)"
 		linenum=${linenum[2]:-2}
+		[[ $linenum != <-> ]] && {
+			local array=($(explode "$linenum" ':'))
+			linenum=$array[1]
+			col=$array[2]
+		}
 	else
 		pat="alias +$1=['\"].*['\"]"
 		linenum=0
@@ -275,7 +282,7 @@ function edalias()
 	fi
 
 	if [[ -n $var[1] ]]; then
-		local result line col=0 opts i=1
+		local result line opts i=1
 		typeset -a tmp opts
 
 		if (($#var > 1)); then
@@ -318,7 +325,7 @@ function edfunc()
 	local arg file
 	arg=($(type $1)) || return 1
 	if [[ "${arg[4]}" == 'autoload' ]]; then
-		autoload +X $1 && edfunc $1
+		autoload +X $1 && edfunc $1 $2
 		return
 	elif [[ $arg[5] != 'function' ]]; then
 		if [[ $arg[4] == 'alias' ]] && (($#functions[$1])); then
@@ -330,7 +337,7 @@ function edfunc()
 		file=$arg[-1]
 	else
 		techo "$1 is anonymous function:"
-		local tmp=$(which $1)
+		local tmp=$(what $1)
 		techo -c warn $tmp
 		if [[ $tmp =~ 'include ([-a-z_]+)' ]]; then
 			file=$match[1]
@@ -341,50 +348,51 @@ function edfunc()
 			fi
 		fi
 	fi
-	edalias ${2:+-l $2} -f "$1" "$file"
+	edalias ${2:+-l$2} -f "$1" "$file"
 }
 
 comp+=("vw=which")
 function vw()
 {
-	local array mime cpath name linenum
-	array=($(explode "$1" ':')) ; name=$array[1]; linenum=$array[2]
+	local array mime cpath name position
+	array=($(explode "$1" ':')) ; name=$array[1]; position=${(j.:.)array[2,-1]}
 	array=($(type -w "$name"))
 	case "${array[2]}" in
 		none)
 			[[ -f $name ]] || abort 127 'Command not found'
-			v $name:$linenum
+			v $name:$position
 			;;
 		function)
-			edfunc $name $linenum
+			edfunc $name $position
 			;;
 		alias)
 			local func
 			if (( $+functions[$name] )); then # also a function exists
 				local opt
-				(( $#linenum )) && { edfunc $name $linenum ; return }
+				(( $#position )) && { edfunc $name $position ; return }
 				func=$name
 			else
 				if [[ $(type $name) =~ "^$name is an alias for (.*)$" ]]; then
+					#func=$(inAlias -f $name)
 					func=$(inAlias -f $name)
 				fi
 			fi
 
 			if (($#func)); then
-				opt=$(chooser -f1 "alias $name" "function $func()") || cancel
-				[[ $opt == 'function' ]] && { edfunc $func $linenum ; return }
+				chooser -v opt -f1 "alias $name" "function $func()" || cancel
+				[[ $opt == 'function' ]] && { edfunc $func $position ; return }
 			fi
-			edalias $name $linenum
+			edalias ${position:+:-l$position} $name
 			;;
 		command)
-			cpath=$(which "$name")
+			cpath=$(what "$name")
 			if [[ -f $cpath ]]; then
 				mime=$(getmime $cpath)
 				if [[ $mime == 'application/x-sharedlib' ]]; then
 					echo "$cpath is binary executable"
 					return 1
 				fi
-				v $cpath${linenum:+:$linenum}
+				v $cpath${position:+:$position}
 			else
 				echo Invalid path \"$cpath\"
 			fi
@@ -396,7 +404,7 @@ function vw()
 # file1:l4 file2:l66
 function v()
 {
-	local opts sudo arg args vim linenum
+	local opts=() sudo arg args vim
 	#typeset -aU
 	if [[ -n $DISPLAY ]]; then
 		vim=gvim
@@ -406,13 +414,19 @@ function v()
 	while (($#)); do
 		if [[ ${1:0:1} == '-' ]]; then
 			case $1 in
+				-h) techo -h -s -f -dis-all -dis-plug -dis-conf
+					;;
 				-s) sudo=(sudo)
 					;;
 				-#) opts+=('+/^\s*[^#]')
 					;;
 				-f) [[ -n $DISPLAY ]] && opts+=(-f)
 					;;
-				-) opts+=(-u NONE -N)
+				--dis*-conf) opts+=(-u NONE -N -i NONE)
+					;;
+				--dis*-all) opts+=(-u NONE -N -i NONE --noplugin)
+					;;
+				--dis*-plug*) opts+=(-N --noplugin -i NONE)
 					;;
 				*) opts+=($1)
 					;;
@@ -426,18 +440,25 @@ function v()
 	for arg in $args; do
 		if [[ "$arg" =~ ":" ]]; then
 			local tmp pos file
+			integer i j linenum col
 			explode -v tmp $arg ':'
-			file=$tmp[1]
-			linenum=$tmp[2]
-			if ((tmp[3])); then
-				pos="+call cursor($linenum,$tmp[3])"
-			elif ((linenum)); then
-				pos=+$linenum
+			i=$#tmp
+			while [[ $tmp[i] == <-> && $i -gt 1 ]]; do ((i--)); done
+			if ((i < $#tmp)); then
+				((i++))
+				(($#tmp - i)) && col=$tmp[i+1]
+				linenum=$tmp[i]
+				if ((col)); then
+					pos="+call cursor($linenum,$tmp[3])"
+				elif ((linenum)); then
+					pos="+$linenum"
+				fi
+				file=$tmp[1,i-1]
+				$sudo $vim $opts $pos $file
+				continue
 			fi
-			$sudo $vim $opts $pos $file
-		else
-			$sudo $vim $opts $arg
 		fi
+		$sudo $vim $opts $arg
 	done
 }
 
@@ -483,7 +504,6 @@ function f()
 {
 	local base maxDepth args name s opts ex_dirs n=1 fopts=()
 	zparseopts -D -M -A opts - d: e: 'i' 's' 'p' g: b:=base
-	(($+opts[-s])) && s="sudo"
 	(($+opts[-d])) && maxdepth=(-maxdepth $opts[-d])
 	[[ -n "$base" ]] && explode -v base "$base[2]" ',' || base=(.)
 	#[[ $1 = - ]] && shift
@@ -503,6 +523,7 @@ function f()
 	#  #  #  #  #
 	# exclusion #
 	#  #  #  #  # @TODO read box cfg
+	#[[ -n $BOX ]] && projRoot=$HOME/repos/$BOX ||
 	ex_dirs=()
 	if (($+opts[-e])); then
 		IFS=',;: ' read -rA ex_dirs <<<$opts[-e]
@@ -513,7 +534,7 @@ function f()
 	local prefix='./'
 	# if [[ ${base:0:1} != '.' ]]; then
 	# fi
-	if [[ -f 'App.js' ]]; then
+	if [[ -f $root/App.js ]]; then
 		ex_dirs+=($gRNExcludeDirs)
 	elif [[ -f 'package.json' ]]; then
 		ex_dirs+=($gNodeExcludeDirs)
@@ -531,8 +552,8 @@ function f()
 		fopts=(-type d '(' $=tmp ')' -prune -false -o)
 	fi
 	[[ -n $g ]] && {
-		run ${opts[-s]:+-s} find $maxDepth -L $base $fopts $=name "$@" $p | group $g
-	} || run ${opts[-s]:+-s} find $maxDepth -L $base $fopts $=name "$@" $p
+		run ${opts[-s]+-s} find $maxDepth -L $base $fopts $=name "$@" $p | group $g
+	} || run ${opts[-s]+-s} find $maxDepth -L $base $fopts $=name "$@" $p
 }
 
 function aldd() {
@@ -603,7 +624,7 @@ function ge()
 	ex_dirs+=($gExcludeDirs)
 
 	# EXCLUDE FILE PATTERN
-	ex_files=('*.dev.*' .local)
+	ex_files=(dev '*.dev.*' .local local)
 
 	chooser -p 'Exclude dirs' -v ex_dirs --multi \
 		--selected "$ex_dirs $ex_files" -n "$(($#ex_dirs+1))" \
@@ -628,7 +649,7 @@ function ge()
 			return
 		fi
 	else
-		((width=$(tput cols)+50))
+		((width=$(tput cols)*3))
 	fi
 	$prefix grep -rn $opts "$@" | cut -c1-$width
 
@@ -647,8 +668,7 @@ function duh()
 	$sudo du -csh "$@" | sort -h
 }
 
-# Added 2019-01-11 16:33:46
-function stripcolors()
+function stripcolors() # Added 2019-01-11 16:33:46
 {
 	local sreg="s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]//g"
 	if (($#)); then
@@ -662,22 +682,12 @@ function stripcolors()
 	fi
 }
 
-# Added 2019-01-11 17:00:37
-function shpydf()
+function shpydf() # Added 2019-01-11 17:00:37
 {
     output=`pydf`; devs=`echo $output | cut -f1 -d' ' `; labels=`sudo lsblk --noheadings -o LABEL $devs|stripcolors`; for line in $output; do i=1; echo "${labels[$i]} $line"; i++; done
 }
 
-# Added 2019-02-20 15:38:03
-function hidrivemount()
-{
-    local mnt="/mnt/webdav.$USER"
-    [[ -d $mnt ]] || sudo mkdir -p $mnt
-    sudo mount -t davfs https://webdav.hidrive.strato.com/ $mnt
-}
-
-# Added 2019-02-25 08:36:38
-function find_dupes()
+function find_dupes() # Added 2019-02-25 08:36:38
 {
 	local dupes
 	echo TODO: test against fdupes speed
@@ -685,39 +695,52 @@ function find_dupes()
 	#getpath $(printf "%s\n" "$string1" "$string2" | sed -e 'N;s/^\(.*\).*\n\1.*$/\1/'
 }
 
-# Added 2019-03-30 20:31
-function lastarg()
-{
-	echo ${@: -1}
-}
+function lastarg() echo ${@: -1} # Added 2019-03-30 20:31
 
-# Added 2019-03-30 20:31
-function mkcd()
-{
-	local dir=$(lastarg "$1")
-	mkdir -p "$dir"
-	cd "$dir"
-}
-
-# Added 2019-03-30 20:31
-function mkcp()
-{
-	local dir=$(lastarg "$@")
-	mkdir -p "$dir"
-	cp "$@"
-}
-
-# Added 2019-04-11 01:43
-function logs()
+function logs() # Added 2019-04-11 01:43
 {
 	[[ $1 == 'off' ]] && { killall tail; return }
 	run tail $(git root)/logs/{api,debug,php}.txt -f &
 }
 
-# Added 2020-01-14 21:06
-function fixtty()
+function fixtty() # Added 2020-01-14 21:06
 {
 	# show cursor
 	tput cnorm # or echo -en "\e[?25h"
 	confirm 'Reset terminal' && tput reset
 }
+up() { xdotool key Ctrl+Shift+F sleep 0.4 type ❯ ; xdotool key Shift+F3 }
+zle -N myComp myComp
+myComp() {
+	local cmd _type
+	cmd=${${(z)BUFFER}[1]}
+	_type=$(typeOf $cmd)
+	if [[ $_type=='alias' ]]; then
+		local tmp=($(inAlias $cmd)) || return
+		cmd=$tmp[1]
+		_type=$tmp[2]
+	fi
+	[[ $_type!='function' ]] && return
+	what $cmd | grep zparseopts -A 3
+}
+
+#bindkey '^X@sr' redo
+zle -N up_prompt up
+bindkey '^[[1;3A' up_prompt  # alt-up
+bindkey ' ' myComp
+#bindkey '^[OP' brightness # F1
+bindkey '^[r' redo
+
+copy-to-xclip() {
+	((REGION_ACTIVE)) && zle copy-region-as-kill
+    print -rn -- $CUTBUFFER | xclip -selection clipboard -i
+}
+zle -N copy-to-xclip
+bindkey "^Xw" copy-to-xclip
+paste-xclip() {
+    killring=("$CUTBUFFER" "${(@)killring[1,-2]}")
+    CUTBUFFER=$(xclip -selection clipboard -o)
+    zle yank
+}
+zle -N paste-xclip
+bindkey "^Xy" paste-xclip

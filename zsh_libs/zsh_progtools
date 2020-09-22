@@ -1,32 +1,37 @@
 VERSION=1.0.0
-#lazyload=pretty,tags,finderror
-alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags'
-alias pytags="ctags -R --python-kinds=-i ."
+#lazyload=pretty,tags,finderror,phpcheck,tools
+alias jtags='tags js'
+alias pytags='tags py'
 alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ignore-trailing-space --ignore-blank-lines"
 
 [[ -v comp ]] || typeset -ga comp
+groot=$(git root) && [[ -d $groot/node_modules ]] && path=($groot/node_modules/.bin/prettier $path)
 
 # Added 2019-12-19 12:43
 function pretty()
 {
-	local F Fname f files args prettyF tmpBasePath basePath baseName _s
-	#zparseopts -D -M - 
+	local F Fname f prettyF tmpBasePath basePath baseName _s _opt
+	typeset -a gfiles files _opts args
+	zparseopts -D -M -A _opts -
+
 	basePath=$(git root)
 
-	#@TODO specify extension.. and have a default
+	(($#)) && args=("$@")
+	#@TODO specify extension.. and have a default, in case no arguments are given
 	#@TODO if any dirs are given, add a file glob and use them below
-	files=($(prettier -l "$@"))
-	glist=($(git ls-files $files))
-	
+	#(($#)) # && files=($(prettier -l "$@")) || return
+	gfiles=($(gdiff -ls $args; gdiff -l $args)) # non pretty and in the index or modified
+	(($#gfiles==0)) && { techo -c ok 'No files needed formatting'; return }
+	#(($#files==0)) && { techo -c ok 'No files needed formatting'; return }
 	# non git files are after git files
-	for f in $glist ${files:|glist}; do
+	for f in $gfiles ${files:|gfiles}; do
 		F=$(getfullpath -r $basePath $f)
 		if [[ ${F:0:1} == '/' ]]; then
 			#F=$(getfullpath -r . $f)
 			techo TODO skipped $f
 			continue
 		fi
-		baseName=$(basename $basePath)
+		baseName=$basePath:t
 		tmpBasePath=$TMP/$baseName
 		prettyF=$tmpBasePath/$F.pretty
 		if [[ ! -f $prettyF || ! -s $prettyF || $f -nt $prettyF ]]; then
@@ -47,13 +52,13 @@ function pretty()
 			fi
 		fi
 		while ! cmp --quiet $f $prettyF; do
-			diff -u --ignore-space-change $f $prettyF | head -n 20
-			(($pipestatus[1]==0)) && techo -c head 'Only space changes'
+			if [[ $_opt != Diff ]]; then
+				diff -u --ignore-space-change $f $prettyF | head -n 20
+				(($pipestatus[1]==0)) && techo -c head 'Only space changes'
+			fi
 
-			local _opt
-			if chooser --simple -f1 -v _opt --use-keys 'S' "Save changes to $F" \
-				'M' 'Meld files' 'D' 'Diff'
-			then
+			if chooser -f1 -v _opt --footer 'Esc) Skip to next file' \
+				--use-keys 'S' "Save changes to $F" 'M' 'Meld files' 'D' 'Diff'; then
 				case $_opt in
 					Meld)
 						meld $f $prettyF
@@ -101,7 +106,7 @@ function tags()
 	elif [[ -n $lang[2] ]]; then
 		lang=$lang[2]
 	else
-		chooser -v lang --simple --use-keys 'J' 'Javascript' 'P' 'PHP' 'Y' 'Python' 'S' 'Shell' || cancel
+		chooser -v lang --use-keys 'J' 'Javascript' 'P' 'PHP' 'Y' 'Python' 'S' 'Shell' || cancel
 	fi
 
 	explode -v excludePatterns "${(@)exclude[2]}" ','
@@ -109,7 +114,7 @@ function tags()
 	args=("$@")
 	case ${(L)lang} in
 		javascript|js)
-			type jsctags >/dev/null || npm install -g git+https://github.com/ramitos/jsctags.git
+			type jsctags >/dev/null || npm install -g git+https://github.com/sergioramos/jsctags
 
 			run -v6 jsctags -f $(git ls-files **/*.js) | sed '/^$/d' | LANG=C sort > tags
 			;;
@@ -117,7 +122,7 @@ function tags()
 			excludePatterns+=('vendor/*')
 			#@TODO box
 			(($#args)) || {
-				args=(v?(N) *.php(N))
+				args=(v[0-9]##/*.php(N) *.php(N))
 				(($#args)) || args=(.)
 			}
 			args=($(git ls-files $args))
@@ -160,4 +165,43 @@ function phpcheck()
 	(($#)) && { report=$1; shift }
 	(($#)) && args=("$@")
 	run phpcs -p --colors --extensions=php --standard=PHPCompatibility --report-full=$report --runtime-set testVersion 7.3 $args
+}
+
+function tools()
+{
+	local _url
+	chooser -f2 -v _url -S "$*" 'RegExp https://regexr.com/' && open $_url
+}
+
+#function composer()
+#{
+#	#all versions info
+#	command show -a "$@"
+#}
+
+# Added 2020-05-15 20:15
+function countfunclines()
+{
+	local expr f _cfl_out
+
+	for f in "$@"; do
+		techo $f
+			#- '/^(function .*|\$app->(post|get))/' m
+			#'i=NR; print $0; if ($1=="function") { b=1; } else { b=2; c=1; }'
+			#'/v' . $API_VERSION . '/email/validate/:email'
+		expr=(
+			- '/^function (.*)\(/' m
+				'i=NR; print m[1]; b=1; c=0;'
+			- '/^\$app->(post|get)\(/' m
+				'i=NR; printf "%s_", m[1]; b=2; c=1;'
+			'c' '/('\''/v'\'' ?\. ?\$API_VERSION \. '\''(.*)'\'')?),/' m
+				'c=0; if (NR!=i) print m[1]; next;'
+			1 '/^}$/' m
+				'print NR-i; next'
+			2 '/^}?);$/' m
+				'print NR-i; next'
+		)
+		awkWrapper -e expr -o sum $f
+	done
+	echo $_cfl_out
 }

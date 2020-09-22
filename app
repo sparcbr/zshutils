@@ -295,13 +295,19 @@ function getPkgVersion()
 
 function getPackageName()
 {
-	if [[ -f config.js ]]; then
-		local expr
-		expr=(- "/appDomain: '[^']+'/" m 'print m[1]')
-		pkg=$(awkWrapper -e expr config.js) || return
-		[[ -n $pkg ]] || return 10
-		echo $pkg
-		return 0
+	getConfig 'pkgName'
+}
+
+typeset -A cfgMap=(pkg googlePlayAppId)
+function getConfig()
+{
+	local opts cfgFile='config.js' cfg=$1 val
+	#zparseopts -D -M -A opts -
+	if [[ -f $cfgFile && -n $cfg ]]; then
+		local val
+		expr=(- "/'$cfg': '[^']+'/" m 'print m[1]')
+		val=$(awkWrapper -e expr $cfgFile) || return
+		[[ -n $val ]] && { echo $val; return 0 }
 	fi
 	return 10
 }
@@ -563,7 +569,9 @@ function processLine()
 		(apkinfo)
 			getLocalApkVersion $(git root)/android/app/build/outputs/apk/**/*.apk || return
 		;;
-		(info) pkg=$(choosePkg "$@") && info $pkg ;;
+		(info)
+			(($#)) && [[ "$(getext $1)" == 'apk' ]] && { $0 apkinfo $1; return }
+			pkg=$(choosePkg "$@") && info $pkg ;;
 		(install|inst)
 			if [[ $(getext "$1") != "apk" ]]; then
 				techo -c warn $1 is not a APK
@@ -584,7 +592,11 @@ function processLine()
 		(list) listPkg "$@" ;;
 		(listactivities|listact|listacts|activities) getMainActivity "$@" ;;
 		(view|open|openurl|url)
-			shell am start -W -a android.intent.action.VIEW -d $1 $2
+			{ urlinfo -v scheme --all-schemes -s $1 && scheme+='://' } || {
+				scheme=$(getConfig 'schemePrefix')
+			}
+			pkg=${2:-$(getPackageName)}
+			shell am start -W -a android.intent.action.VIEW -d "${1:-"$(input -p 'Url' $scheme || cancel)"}"
 		;;
 		(poweroff)
 			shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN

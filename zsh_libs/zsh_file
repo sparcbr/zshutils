@@ -7,7 +7,7 @@ alias full='getfullpath'
 [[ -v comp ]] || typeset -ga comp
 
 setopt nomultios
-
+# (#ia1) allow 1 error
 function getfilename()
 {
 	local opt name
@@ -112,6 +112,23 @@ function backup()
 	} || run $sudo cp "$1" "$1.bkup"
 }
 
+function del()
+{
+	local f
+	for f do
+		if [[ -d $f ]]; then
+			confirm "Delete $C[lred]dir$C_ $f" && {
+				techo -c lred "Removing dir $f"
+				rm -rf $f
+			}
+		elif [[ -f $f ]]; then
+			confirm "Delete$C_ $f" && {
+				techo -c lred "Removing $f"
+				rm -f $f
+			}
+		fi
+	done
+}
 #@TODO
 function rename()
 {
@@ -190,15 +207,16 @@ function ddiff()
 		fi
 		if [[ -n $1 ]]; then
 			#@TODO
-			# for f in files 
-			#    cnd iots $dir1/$f $dir2/$f
+			# for f in files
+			# cnd iots $dir1/$f $dir2/$f
 			_dargs=($dir1/$1 $dir2/$1)
 		else
 			_dargs=($dir1 $dir2)
 		fi
 		#@TODO add pager option to run()
 		#@TODO add no-pager option to ddiff
-		run $sudo -p "$cmd $_dargs" $cmd $_dargs #| $PAGER
+		[[ "$cmd[1]" =~ 'diff|grep' ]] && _ropts+=('-N1')
+		run $_ropts $sudo -v3 -p "$cmd $_dargs" $cmd $_dargs #| $PAGER
 	fi
 }
 
@@ -235,7 +253,7 @@ function syncDirs()
 	typeset -aU _opts src targets rsArgs extraArgs files excludePatterns
 	zparseopts -D -M -A _opts - q=quiet s=sudo d=dry 'R' -relative=R \
 		c=checksum -reverse=reverse -no-add-slash=noSlash -no-delete=noDelete \
-		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e
+		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e -no-perms -no-user -no-group
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	(($# >= 2)) || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
@@ -448,18 +466,33 @@ function syncDirs()
 	return 0
 }
 
+function boxconfig()
+{
+	local cfgfile arg val opts
+	zparseopts -D -M -A opts - a -all=a
+	cfgfile='.box.cfg.json'
+	arg=$1
+	if [[ -f $cfgfile ]]; then
+		val="$(jq -rc "$arg | @sh" < $cfgfile)" || return $?
+		explode -v val -z $val
+	fi
+	#if [] && explode -v val -z $val; then
+		#explode -z -v initCmd $initCmd
+}
+
 # Added 2019-02-20 09:23:39 @TODO
 function box()
 {
 	local box base=$HOME/repos cmd search list _opts
-	#zparseopts -D -M - 
+	#zparseopts -D -M -
 	include -r functions
 	include -l network
-	#include boxes
+	#include 'boxes
 
 	zparseopts -D -M -A _opts - a -all=a
 
 	if (($#)); then
+	#	[[ $1 == 'cd' ]] && shift &&
 		cmd=$1 ; shift ; box="$*"
 	else
 		cmd='search'
@@ -481,10 +514,10 @@ function box()
 					 box=$BOX
 				fi
 				cd $base/$box || return
-				local cfg initCmd initList=()
+				local initCmd initList=()
 				BOX=$box
-				cfg='.box.cfg.json'
-				if [[ -f $cfg ]] && explode -v initList -z "$(jq -rc '.cmd.init | @sh' < $cfg)"; then
+				if boxconfig -v initList '.cmd.init'
+				then
 					for initCmd in $initList; do
 						#run -z "$initCmd"
 						explode -z -v initCmd $initCmd
@@ -542,7 +575,6 @@ function box()
 	done
 }
 
-
 # Added 2019-06-05 16:55
 function attributeSync()
 {
@@ -563,7 +595,7 @@ function attributeSync()
 	rsArgs=(${@:-'-u'})
 	while read stats name skip; do
 		#echo stat=$stats name=$name ;
-		#[[ $stats == skipping ]] 
+		#[[ $stats == skipping ]]
 		[[ $stats[5] == t ]] && $dry sudo touch --reference "$dir1/$name" $dir2/$name
 		[[ $stats[6] == p ]] && $dry sudo chmod --reference "$dir1/$name" $dir2/$name
 		if [[ $stats[7] == o || $stats[8] == g ]] && [[ $stats != skipping ]]; then
@@ -578,7 +610,7 @@ function attributeSync()
 function _sync() {
 	#run -w "isDirty" -p "Flushing caches to disk. Please wait." sync
 	run -p "Flushing caches to disk..." sync
-	#watch -n 1 -c -t  "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
+	#watch -n 1 -c -t "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
 }
 
 # Added 2019-08-21 00:27
@@ -615,7 +647,7 @@ function fordo() #TODO
 	local v cmd
 	cmd=$1; shift
 	for v; do
-		run - $=cmd $v
+		run -e - $=cmd $v
 	done
 }
 
@@ -715,7 +747,7 @@ function awkWrapper()
 			elif [[ $x != '-' ]]; then
 				prog+=$x
 			fi
-			
+
 			if [[ $pat != '-' ]]; then
 				if [[ $x != '-' ]]; then
 					prog+=' && '
@@ -774,7 +806,7 @@ function awkWrapper()
 
 function open()
 {
-	xdg-open "$@" &
+	xdg-open "$@" & sleep 1
 }
 
 # Added 2020-04-06 23:53
@@ -785,4 +817,57 @@ function open()
 function relpath()
 {
 	python -c 'import os, sys; print(os.path.relpath(*sys.argv[1:]))' $2 $1
+}
+
+# Added 2020-05-09 01:23
+# backup
+# restore
+# remove
+# disable=[backup,] remove
+# purge
+function apt-source()
+{
+	local f _opts _copts code bkup_suffix='.save' choices
+	integer saved disable purge backup
+
+	zparseopts -D -M -A _opts - 'd' -disable=d 'r' - -delete=r 'p' -purge=p -no-backup
+
+	code=${1:-$(lsb_release -sc)}
+
+	choices=('cancel')
+	for f in *$code.list *$code.list; do
+		name=${f%%$code.list}
+		if [[ -f $f.save ]]; then
+			if cmp $f $f.save; then
+				techo "$OK $f $C[ok]==$C_ $f.save"
+				saved=1
+			else
+
+				diff -u $f $f.save
+				if (($+_opts[-d])); then
+					choices+=("remove $f (keep $f.save)")
+					choices+=("remove $f => $f.save")
+				else
+					choices+=("remove $f (use $f.save)") ||
+				fi
+			fi
+		else
+			if (($+_opts[-d] && $+_opts[--no-backup]==0)); then
+			fi
+			_copts=("overwrite $f => $f.save")
+			_copts=("remove $f")
+			_copts=("rename $f (keep $f.save)")
+		fi
+
+		chooser -v choice -f1 $_copts
+		case $choice in
+			(b*) sudo cp $f $fsave ;;   # backup
+			(d*) sudo cp $f $fsave ;;   # disable
+			(pur*) sudo rm $f $fsave ;;  # purge
+			(res*) sudo cp $fsave $f ;;  # restore
+			(rem*) sudo rm $f ;;
+			(ren*) rename -s $f $fsave ;;
+			(*) techo Invalid choice ;;
+		esac
+	done
 }

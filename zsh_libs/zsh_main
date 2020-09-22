@@ -1,7 +1,7 @@
 VERSION=1.0.9
 [[ -v comp ]] || typeset -g -a comp
 autoload throw catch
-setopt extendedglob
+setopt EXTENDED_GLOB PIPE_FAIL NOMULTI_OS
 #alias _dbg_trap='[[ -o xtrace ]] && { unalias _dbg_trap; include debug && _dbg_trap $0 }'
 function _dbg_trap() { set +x }
 
@@ -127,7 +127,8 @@ function abort()
 		fstack 1
 	fi
 	[[ -n $ABORT ]] && $ABORT $_EX_TYPE $cod "$@"
-	((verbose+cod>=4)) && techo -c lred -r ${_EX:-ERROR} $cod: "${@}"
+	#((verbose+cod>=4)) &&
+		techo -c lred -r ${_EX:-ERROR} $cod: "${@}"
 
 	#@TODO $ZSH_EVAL_CONTEXT =~ toplevel* , does not seem to work
 	((EXIT)) && [[ ! -o interactive ]] && exit $cod
@@ -169,32 +170,44 @@ function implode()
 function explode()
 {
 	_dbg_trap $0
-	local _opts _var _str _sep uniq _list ifs _Asep stdin _tmp awk #@TODO awkWrapper...
-	zparseopts -D -M -A _opts - v:=_var u=uniq A:=_Asep -stdin=stdin -awk:=awk 'z' -unescape=z
+	local _opts _var _str _sep _list ifs _Asep _tmp awk #@TODO awkWrapper...
+	zparseopts -D -M -A _opts - v:=_var 'u' A: -stdin -awk:=awk 'z' -unescape=z
 
 	[[ -n $_var[2] ]] && _var=$_var[2]
+	(($+_opts[-A])) && _Asep=$_opts[-A]
 
-	if [[ -n $stdin ]]; then
+	if (($+_opts[--stdin])); then
 		_sep=${1:- }
-		#_str=()
+		_list=()
+		unset '_opts[--stdin]'
+		if [[ -n $_var ]]; then
+			_opts[-v]='_tmpList'
+			typeset -a _tmpList
+		fi
+		# uniq is not done globally, but line by line
 		while read -r _tmp; do
-			#_str+=($_tmp)
-			explode $_tmp $_sep $2
+			explode  ${(kv)_opts} $_tmp $_sep $2
+			[[ -n $_var ]] && _list+=("$_tmpList[@]")
 		done
+		if [[ -n $_var ]]; then
+			(($+_opts[-u])) && _list=(${(@u)_list})
+			[[ -v $_var ]] || typeset -ga $_var
+			set -A $_var $_list
+		fi
 		return
-	else
-		_str=$1
-		_sep=${2:- }
-		[[ -n $3 && $3 != <1-> ]] && abort 1 "field specifier is not a number: \$3=$3"
 	fi
 
-	if [[ $_sep == ' ' && $+_opts[-z] == 1 ]]; then
+	_str=$1
+	_sep=${2:- }
+	[[ -n $3 && $3 != <1-> ]] && abort 1 "field specifier is not a number: \$3=$3"
+
+	if [[ $_sep == ' ' && $+_opts[-z] == 1 ]]
+	then
 		_list=(${(Q)"${(@z)_str}"})
 	else
 		_list=(${(@ps/$_sep/)_str})
 	fi
-
-	[[ -n $uniq ]] && _list=(${(@u)_list})
+	(($+_opts[-u])) && _list=(${(@u)_list})
 
 	if [[ -n $_var ]]; then
 		if [[ -n $3 ]]; then
@@ -202,8 +215,8 @@ function explode()
 			eval $_var="'${_list[$3]}'"
 		else
 			if [[ -n $_Asep ]]; then
+				# split again each part
 				[[ -v $_var ]] || typeset -gA $_var
-				_Asep=$_Asep[2]
 				set -A $_var ${(@ps/$_Asep/)_list}
 			else
 				[[ -v $_var ]] || typeset -ga $_var
@@ -212,9 +225,9 @@ function explode()
 		fi
 	else
 		if [[ -n $3 ]]; then
-			print -r $_list[$3]
+			print -r - $_list[$3]
 		else
-			print -r $_list
+			print -r - $_list
 		fi
 	fi
 }
@@ -302,6 +315,7 @@ function typeOf()
 	local integer i=2
 	zparseopts -D -M - a=all p=_path
 
+	include -ql file
 	name=$1
 
 	if [[ $(getpath $name) != '.' || $name == ./* ]]; then # full path given
@@ -319,7 +333,7 @@ function typeOf()
 		return 0
 	fi
 
-	ret=($(which -w $all $_path $name))
+	ret=($(builtin which -w $all $_path $name))
 
 	for ((i=2 ; $+ret[i] ; i+=2)); do
 		type=$ret[i]
@@ -330,7 +344,7 @@ function typeOf()
 		fi
 
 		if [[ $type == 'command' ]]; then
-			tpath=$(which -p $name)
+			tpath=$(builtin which -p $name)
 			isScript $tpath && type='script'
 		fi
 
@@ -435,7 +449,7 @@ function include()
 		fi
 
 		{
-			if ((!LEVEL++)); then # prevent coproc running more than once (in nested include calls)
+			if ((!LEVEL++)); then # prevent coproc running more than once (nested calls)
 				coproc parseErrors
 
 				source $lpath 2>&p; ret=$?
@@ -542,20 +556,23 @@ function aptinst()
 
 # Added 2019-09-05 00:57
 # check if any item of array equals value
-# in_array value array_name
+# @usage: in_array value array_name
+#
+# @param value
+# @param array_name
 function in_array()
 {
 	_dbg_trap $0
-	local name val _var ret _i
-	zparseopts -D -M - v:=_var
+	local name val _var ret _i _exact
+	zparseopts -D -M - v:=_var e=_exact -exact=e
 
 	case $(vartype $2) in
 	association*)
-		_i=${(k)${(P)2}[(re)$1]}
+		(($#_exact)) && _i=${(k)${(P)2}[(re)$1]} || _i=${(k)${(P)2}[(r)(#1)$1]}
 		[[ -n $_i ]] || return 1
 		;;
 	array*)
-		_i=${${(P)2}[(rei)$1]}
+		(($#_exact)) && _i=${${(P)2}[(ie)$1]} || _i=${${(P)2}[(i)(#i)$1]}
 		((_i <= ${(P)#2})) || return 1
 		;;
 	*)
@@ -742,6 +759,12 @@ function rtrim() {
 function trim()
 {
 	echo "$(rtrim "$(ltrim "$*")")"
+}
+function reattach()
+{
+	local p='/proc/sys/kernel/yama/ptrace_scope'
+	(($(< $p))) && echo 0 | sudo tee $p
+	reptyr
 }
 
 # Added 2019-09-03 19:29
