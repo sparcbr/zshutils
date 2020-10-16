@@ -708,7 +708,7 @@ function gswitch()
 	gbranch --exists $name && exists=1
 	if ((!exists)); then
 		if ((!$+opt[-c])); then
-			confirm "No branch \"$name\" exists. Create it" || return
+			confirm "Branch \"$name\" does not exist. Create it" || return
 		fi
 		gopt+=(-c)
 	fi
@@ -1057,13 +1057,14 @@ function gdiff()
 		fi
 
 		_copts=(
-			--head "Diff $_dopts $hashes" -I 'idx' -v 'f'
+			--head "Diff $_dopts $hashes" -I 'idx' -v 'f' -f1
 			--foot '(Enter) Show diff in terminal  (V or E) Gvimdiff  (M) Meld (C) VS Code (R) Restore (U) Unstage (Esc) Quit'
 			--events "[ve] EDIT m MELD c VSCODE r RESTORE u UNSTAGE" --no-auto-select
 		)
 		# --src-prefix=
 		# Show the given source prefix instead of "a/".
 		# --dst-prefix=<prefix>
+		# TODO: zip flist with additional info
 		while chooser -D $idx $_copts $flist; do
 			cmd=()
 			case $ACTION in
@@ -1096,29 +1097,39 @@ function gdiff()
 						# workdir => index
 						C1=$C[warn] ; C2=$C[lcyan]
 						techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+						set -x
 						$cmd <(git show HEAD:$f) <(git show :$f)
+						set +x
 					else
 						# head => workdir
 						C1=$C[lred] ; C2=$C[warn]
 						techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+						set -x
 						$cmd <(gshow HEAD:$f) $f
+						set +x
 					fi
 				elif (($#hashes == 1)); then
 					if (($+_opts[-s])); then
 						# commit <=> index
 						C1=$C[lred] ; C2=$C[lcyan]
 						techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+						set -x
 						$cmd <(gshow $hashes[1]:$f) <(git show :$f)
+						set +x
 					else
 						# commit <=> workdir
 						C1=$C[lred] ; C2=$C[warn]
 						techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+						set -x
 						$cmd <(gshow $hashes[1]:$f) $f
+					set +x
 					fi
 				else
 					C1=$C[warn] ; C2=$C[ok]
 					techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+					set -x
 					$cmd <(gshow $hashes[1]:$f) <(gshow $hashes[2]:$f)
+					set +x
 				fi
 			fi
 		done
@@ -1143,40 +1154,77 @@ function gisupdated()
 	gdiff ..origin/$branch --quiet
 }
 
+function gdev()
+{
+	local langExt=${1:-js}
+	#for f in $(dev --base$langExt); do
+	for fdev in $(dev $langExt); do
+		fndev=$(getfilename $fdev)
+		fp=$(getpath $fdev)
+		fn=$(noext $fndev dev.$langExt)
+		[[ -f $fp/$fn.$langExt ]] && {
+			diff -q $fp/$fn.$langExt $fdev && df="$C[ok]==" || df="$C[warn]!="
+			echo $df $fp/$fn.$langExt $fdev
+		} || {
+			echo 0 $fdev
+		}
+	done
+}
+
+function dev()
+{
+	f \*.dev.$1
+}
+
 function gstatus()
 {
 	local _gopts _opts buf line _vname _gst stat fn f
-	local dev_diff staged changed diff_changed_dev
-	integer n=10 i
-	zparseopts -D -M -A _opts -
+	local dev_diff staged changed diff_changed_dev k
+	integer n=10 i ok
+	zparseopts -D -M -A _opts - -branch:
 	#TODO gselect
 	#flist=($(git status -uno --porcelain=v2 $_dopts $hashes -- "$args[@]")) || return
-	git status -uno --short "$@"
 	if ! gisupdated; then
-		gdi ..origin/$branch
-		return 1
+		#gdi ..origin/$branch
+		#return 1
+		techo -c warn Head not in sync with origin
 	fi
-	return 0
 	_gst=($(git status -uno --short "$@"))
 	for stat f in $_gst; do
-		fn=${f%.js}
+		ext=$(getext $f)
+		fn=$(noext $f)
 
 		staged="$(git diff --staged $f)"
 		changed="$(git diff --color=never $f)"
 		dev_diff=''
+		ndev_diff=
 		#diff_changed_dev=''
-		if [[ -f $fn.dev.js ]]; then
-			dev_diff=$(diff -u --color=never $fn.dev.js $f)
+		ok=0
+		if [[ -f $fn.dev.$ext ]]; then
+			dev_diff=$(diff -u --color=never $fn.dev.$ext $f)
+			ndev_diff=$#dev_diff
+			if ((!ndev_diff)); then
+				ndev_diff="$C[ok]== $fn.dev.$ext"
+				((ok++))
+			fi
 		#	if (($#changed && $#dev_diff)); then
 		#		diff_changed_dev=$(diff -u <(<<<"$changed") <(<<<"$dev_diff"))
 		#		(f - git)
 		#		#e $changed $dev_diff
 		#	fi
 		fi
-		#diff_stg_dev = changed_ - changes_in_.dev  # $#diff_stg_dev
-		techo $stat $f $#dev_diff #$(($#changed - $#dev_diff)) $diff_changed_dev
+		if (($+_opts[--branch])); then
+			dev_diff_b=$(git diff --color=never $_opts[--branch] -- $f)
+			ndev_diff_b=$#dev_diff_b
+			if ((!ndev_diff_b)); then
+				ndev_diff_b="$C[ok]== $_opts[--branch]"
+				((ok++))
+			fi
+		fi
+		k=($C_) ; ((ok)) || k=(-c warn)
+		techo $k $stat $f $ndev_diff $ndev_diff_b
+		#$(($#changed - $#dev_diff)) $diff_changed_dev
 	done
-
 }
 
 gFormat=(
@@ -1230,8 +1278,10 @@ function glog()
 
 		if [[ -n $_vname ]]; then
 			typeset -g "${_vname}[$i]=\"$aline\""
+			(($+_opts[-l])) && typeset -g "${_vname}_files[$i]=$(gd -l $match[2])"
 		else
 			echo -E - "$aline"
+			(($+_opts[-l])) && echo -E - $(gd -l $match[2])
 		fi
 	done < <(git log --date=${_opts[--date]:-iso} $_gopts "$@")
 }
@@ -1283,7 +1333,7 @@ function gexpirestash()
 	[[ -n $when ]] && run git reflog expire --expire=$when refs/stash
 }
 
-# confirm first to discard changes not saved in stash or some other place
+#tODO:  <16-10-20, yourname> #confirm first to discard changes not saved in stash or some other place
 # call this from gst -i
 function grestore()
 {
@@ -1319,7 +1369,12 @@ function jira()
 	typeset -a opts args
 
 	#TODO list issues, fetch filters from jira and save in jiraFilters.txt
-	(($#)) && { cmd=$1; shift } || cmd='start'
+	(($#)) && {
+		[[ $1 == <-> ]] && issueId=$1 || cmd=$1
+		shift
+	}
+	(($#cmd)) || cmd='start'
+
 	case $cmd in
 		api) open 'https://developer.atlassian.com/cloud/jira/platform/rest/v2'
 			return ;;
@@ -1347,14 +1402,13 @@ function jira()
 		start)
 			if (($#)) && [[ ${U)1} =~ '([A-Z]*)-?([0-9]*)' && -n $match[1] ]] &&
 				in_array $match[1]\* jiraPrefixes
-							(()) && issueId=$match[2]
-						then
-							jira proj "$match[1]" || return
-						else
-							jira proj || return
+			then
+				(($#match[2])) && issueId=$match[2]
+				jira proj "$match[1]" || return
+			else
+				jira proj || return
 			fi
-
-			jira tasks $project || return
+			#jira tasks $project || return
 			;;
 	esac
 
@@ -1362,12 +1416,12 @@ function jira()
 	# TODO: suggest branch name from issue id
 	repo=$(gitgetrepo)
 	repoPrefix=${(L)repo##*/}
+	(($#issueId)) || input -v issueId 'issue id' || return
 	bName="feat/$repoPrefix-$issueId-"
 	input -v bName -p 'Branch name'
 	[[ $bName =~ '^feat/'$repoPrefix'-([0-9]+)-' && $match[1] -eq $issueId ]] || abort 2 "Incorrect branch name. Must start with \"feat/$repoPrefix-$issueId-\""
 	gbranch -c $bName || return
 	# TODO: set assignee=me; set status=InProgress
-
 }
 
 # curl -s "https://api.github.com/repos/user/project-name/commits?path=filename&page=1&per_page=1" | jq -r '.[0].commit.committer.date'

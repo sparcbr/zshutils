@@ -5,7 +5,7 @@ VERSION=1.0.0
 
 function listAudio()
 {
-	trap 'throw 130' INT 
+	trap 'throw 130' INT
 
 	sql -v -o row 'SELECT review_id,version,sequence,profile,review_version_id, T.status,rough_freq,mean_amp FROM review_track_stats S INNER JOIN review_version As V USING (review_id, version) INNER JOIN review_track T using (review_version_id,sequence)  WHERE T.status!="processing" AND S.status="unchecked"  ORDER BY mid_amp DESC limit 15'
 	while sqlFetch row; do
@@ -24,16 +24,16 @@ function listAudio()
 function checkAudio()
 {
 	integer loop=1 bad=0
-	trap 'throw 130' INT 
+	trap 'throw 130' INT
 
 	reviewId=$1
 	version=$2
 	sequence=$3
 	profile=$4
-	versionId=$5 
+	versionId=$5
 	while ((loop)); do
 		{
-			f="rdata/reviews/$1/v$2/tracks/$3$4.mp3" 
+			f="rdata/reviews/$1/v$2/tracks/$3$4.mp3"
 			[[ -f $f ]] || abort --ex FileIoEx_NotFound 9 $f
 			mpg123 --stereo $f
 			confirm 'Mark as bad quality' && bad=1
@@ -51,4 +51,82 @@ function checkAudio()
 	sql -v "UPDATE review_track_stats SET status='$_status' WHERE review_id=$reviewId AND version=$version AND sequence=$sequence"
 
 	trap - INT
+}
+
+function accRemoteGetAccountIdByEmail()
+{
+	local val buf values
+	buf=("${(@f)$(
+		sqlmaq -t --nocolumns "select account_id, type, created_at, expire_at, name," \
+		"phone_country_code, phone_area_code, phone_number, password, admin" \
+		"from account where email='$1'"
+	)}") || return
+
+	(($#buf)) || return 10
+	echo $buf[1] # headers
+	rrow=(${(@s. | .)${${buf[2]#| }% |}}) # last one is just table bottom
+	array_dump -n rrow
+	typeset -g ${2:-accountId}'='$rrow[1]
+
+	values=()
+	for val in ${rrow:0:9}; do
+		values+=("$(sqlEscape $val)")
+	done
+	array_dump -n values
+	sql -v "insert into account (account_id, type, email, created_at, expire_at, name," \
+		"phone_country_code, phone_area_code, phone_number, password, admin)" \
+		"values ($rrow[1],$values[2],'$1',$values[3],$values[4],$values[5]," \
+		"$values[6],$values[7],$values[8],$values[9],$rrow[10])"
+}
+
+function accGetAccountIdByEmail()
+{
+	{
+		sql -v -o row "select account_id from account where email='$1'"
+		(($#row1)) || {
+			accRemoteGetAccountIdByEmail $1
+			return
+		}
+		typeset -g ${2:-accountId}'='$row1[1]
+	} always {
+		if catch '*'; then
+			techo $CAUGHT
+			return 1
+		fi
+	}
+	#sqlFetch row
+}
+
+csvfp='_support/corrigido_apenas_app.csv'
+function hotmartCSVImport()
+{
+	integer i accountId
+	local var
+
+	chooser -v csvfp $csvfp  _support/*.csv
+	cat $csvfp | explode --stdin --csv -v csv ';'
+	cat _support/corrigido_apenas_app.csv | explode --stdin --csv -v csv ';'
+
+	for ((i=1; i<=$csv_len; i++)); do
+        var="csv$i"
+		premium_at=${${(P)var}[7]}
+		cancel_at=${${(P)var}[8]}
+		email=${${(P)var}[9]}
+		(($#email)) || {
+			techo -c warn "Empty email: ${${(P)var}[@]}"
+			return 1
+		}
+
+        accGetAccountIdByEmail $email 'accountId' || {
+			techo -c warn "Account not found for email=$email index=$i"
+		return
+			continue
+		}
+
+		sql "select ('account_id','type', 'created_at') values account_event" \
+			"where type='became_premium', '$premium_at')"
+
+		sql "insert into account_event ('account_id','type', 'created_at') values ($accountId, 'became_premium', '$premium_at')"
+        (($#cancel_at)) && sql "insert into account_event ('account_id','type', 'created_at') values ($accountId, 'subscription_canceled', '$premium_at')"
+	done
 }

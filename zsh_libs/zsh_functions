@@ -562,7 +562,7 @@ function chooser()
 							found_idx=$i
 							techo "⮕ $C[ok]${(ml:opt_wid:)_opt}$C_)$sel_box $_olist[i]"
 						else
-							techo "  $C[ok]${(ml:opt_wid:)opt}$C_)$sel_box $_olist[i]"
+							techo "  $C[ok]${(ml:opt_wid:)_opt}$C_)$sel_box $_olist[i]"
 						fi
 
 						((j++))
@@ -746,7 +746,7 @@ function chooser()
 
 	typeset -a _olist=()
 	# Filter output
-	typeset +R opt
+	typeset +R _opt
 	for chosen in $chosenList; do
 		if (($+_opts[--strip-color])); then
 			chosen="$(stripcolors $chosen)"
@@ -1395,17 +1395,17 @@ function opts()
 }
 
 # Added 2019-09-20 15:55
-function pizza()
+function alarm()
 {
 	local integer mins=13
 	local msg
-
+	[[ $1 == <-> ]] && { mins=$1; shift }
+	msg=${*:-alarm}
 	{ while (( mins )); do
-		msg="$mins minutes left to pizza time"
-		techo $msg
+		techo -c warn "$mins minutes left to $msg"
 		sleep 60
 		((mins--))
-	done ; alert "pizza time" } &
+	done ; alert $msg } &
 }
 
 # Added 2019-10-23 21:53

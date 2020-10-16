@@ -79,12 +79,15 @@ function adb()
 	#run -c 0 $DRYRUN command adb $devOpts "$@" 2>&p
 
 	# while ! run -Ae $DRYRUN command adb $devOpts "$@" 2>&p; do
-	while ! command adb $devOpts "$@" 2>&p; do
+	#while ! command adb $devOpts "$@" 2>&p; do
+	if ! command adb $devOpts "$@" 2>&p; then
 	#@TODO sort errors by file before opening files
 		while read -p line; do
 			split=(${(z)line})
 			case $split[1] in
 				EMultDev)
+					chooseDevice
+					return
 					while ! chooseDevice; do
 						techo -c warn 'Connect an android device'
 						sleep 2
@@ -100,7 +103,7 @@ function adb()
 			esac
 		done
 		break
-	done
+	fi
 	#wait $pid; ret=$?
 	print -p EOF
 	return $ret
@@ -114,11 +117,13 @@ function shell()
 
 function chooseDevice()
 {
+	adb -d -s 13d8c281
+	return 0
 	local devList=("${(f)$(adb devices -l)}")
 
 	curDevice=
 	#@TODO device usb:1-5.3 product:surnia_retbr_ds model:MotoE2_4G_LTE_ device:surnia_uds stdbuf -o0 transport_id:1
-	chooser -v deviceID -H 'Select device' -D $curDevice -f1 $devList[2,-1] || return
+	#chooser -v deviceID -H 'Select device' -D $curDevice -f1 $devList[2,-1] || return
 	if [[ $deviceID != *:* ]]; then
 		connType=(-d -s $deviceID)
 	else
