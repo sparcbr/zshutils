@@ -10,6 +10,7 @@ alias apt="sudo apt"
 alias sys="sudo systemctl"
 alias c='cod'
 alias wh='what'
+alias pizza='alarm 13 pizza time'
 
 gExcludeDirs=(__tests__ .local)
 gNodeExcludeDirs=(node_modules)

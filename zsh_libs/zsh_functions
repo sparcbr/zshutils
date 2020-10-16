@@ -215,7 +215,7 @@ function chooser()
 {
 	local noSelect sep field bytes search current head foot
 	local _olist chosen selectors ofs
-	local file opt _opts selected selected_idx list_keys events items
+	local file _opt _opts selected selected_idx list_keys events items
 	integer multi i j noAutoSelect
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
@@ -227,7 +227,7 @@ function chooser()
 		 -multi -use-keys -selected: E:=events -events:=E \
 		 -file -files -dir -no-auto-select -strip-color
 
-	typeset -g ACTION=''
+	typeset -g ACTION='' # empty for the default event (SELECT)
 	typeset -a chosenList
 	multi=$+_opts[--multi]
 
@@ -237,6 +237,8 @@ function chooser()
 		_opts[--file]=1
 	fi
 	search=$_opts[-S]
+
+	# if there are other events of just "select", the default action/event, forbit auto-select
 	(($#events || $+_opts[--no-auto-select])) && noAutoSelect=1
 
 	[[ -n $ofs ]] && ofs=$ofs[2]
@@ -388,6 +390,7 @@ function chooser()
 			typeset -A keys=(
 				'UP' $'\e[A' 'PGUP' $'\e[5~' 'HOME' $'\e[1~'
 				'DOWN' $'\e[B' 'PGDOWN' $'\e[6~' 'END' $'\e[4~'
+				'DEL' $'\033[3~'
 			)
 			for i in $selected_idx; do
 				#(($+selected[i])) && selected[i]=1
@@ -400,16 +403,16 @@ function chooser()
 			for ((i=j=1; i<=$#_olist; i++)); do
 				if [[ -z ${(k)list_keys[(r)$i]} && -z ${noSelect[(r)$i]} ]]; then
 					if ((j <= 9)); then
-						opt=$j # number as key binding
+						_opt=$j # number as key binding
 					elif ((j < 36)); then
-						opt=$(inttochar $j + 55) # letter
+						_opt=$(inttochar $j + 55) # letter
 					else
 						#techo '@TODO - ran out of key shortcuts: j='$j
 						continue
 					fi
-					list_keys+=($opt $i)
-					if (($#opt>opt_wid)); then
-						opt_wid=$#opt
+					list_keys+=($_opt $i)
+					if (($#_opt>opt_wid)); then
+						opt_wid=$#_opt
 					fi
 					((j++))
 				fi
@@ -538,9 +541,9 @@ function chooser()
 							techo "  ${(l:noSelectAlign:)} $_olist[i]"
 							continue
 						fi
-						opt=${(k)list_keys[(r)$i]}
-						if [[ -z $opt ]]; then
-							opt=' '
+						_opt=${(k)list_keys[(r)$i]}
+						if [[ -z $_opt ]]; then
+							_opt=' '
 						fi
 
 						if ((multi)); then
@@ -557,7 +560,7 @@ function chooser()
 
 						if ((i==current_key)); then
 							found_idx=$i
-							techo "⮕ $C[ok]${(ml:opt_wid:)opt}$C_)$sel_box $_olist[i]"
+							techo "⮕ $C[ok]${(ml:opt_wid:)_opt}$C_)$sel_box $_olist[i]"
 						else
 							techo "  $C[ok]${(ml:opt_wid:)opt}$C_)$sel_box $_olist[i]"
 						fi
@@ -749,8 +752,8 @@ function chooser()
 			chosen="$(stripcolors $chosen)"
 		fi
 
-		for opt in $selectors; do
-			case $opt in
+		for _opt in $selectors; do
+			case $_opt in
 			R)
 				if [[ $chosen =~ $regex[2] ]]; then
 					chosen=$match

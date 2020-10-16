@@ -127,7 +127,7 @@ function chooseDevice()
 }
 
 adbhost='cell'
-adbport=5555
+ADB_TCPPORT=5555
 function connect()
 {
 	local err line _connArgs
@@ -582,6 +582,8 @@ function processLine()
 		(port|redirect)
 			adb reverse tcp:8081 tcp:8081
 			adb reverse tcp:8097 tcp:8097 # for flipper
+			adb tcpip $ADB_TCPPORT
+			#adb connect 192.168.25.
 			;;
 		(input) shell input text "$*" ;;
 		(keyb|hidekeyb|hidekeyboard) sendkey 111 ;;

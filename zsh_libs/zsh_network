@@ -32,7 +32,7 @@ zmodload zsh/langinfo # Required for $langinfo
 function urlencode()
 {
 	emulate -L zsh
-	zparseopts -D -E -a opts r m P
+	zparseopts -D -E -a opts 'r' 'm' 'P'
 
 	local in_str=$1
 	local url_str=""

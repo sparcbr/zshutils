@@ -1,5 +1,5 @@
 VERSION=1.0.5
-#lazyload=sql,gettable,tableshow,tablelist,sqlError,usedb,dblist,dbtstamp,dbsize,sqldbdump
+#lazyload=sql,gettable,tableshow,tablelist,sqlError,usedb,dblist,dbtstamp,dbsize,sqldbdump,sqlEscape
 alias sql="noglob sql"
 alias sqlmaq="noglob sql --ssh maquina"
 
@@ -30,6 +30,15 @@ function todosql__()
 	}
 }
 
+function sqlEscape()
+{
+	if [[ $1 == 'NULL' ]]; then
+		echo 'NULL'
+	else
+		echo ${(qq)"$(trim $1)"}
+	fi
+}
+
 function sqlQuote()
 {
 	zparseopts -D -M - v:=var
@@ -41,15 +50,15 @@ function sqlQuote()
 # sql [-d dbname] [-f file.sql] SELECT ...
 function sql()
 {
-	local file name verbose user pass silent host ret _out opts
-	local _colsOut _cols p _idVar _raw _opts
-	integer i _id
+	local file name verbose user pass silent host ret _out mysqlopts
+	local _colsOut _cols _idVar _raw _opts
+	integer p i _id
 
 	typeset -g sql
 
-	zparseopts -D -M -A _opts - f: d:=name n v=verbose u: -user:=u p: -pass:=p \
-		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw \
-		i --pager #s=silent
+	zparseopts -D -M -A _opts - f: d:=name n v=verbose u: -user:=u p: -pass:=p 't' -table=t \
+		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw 'i' --pager -nocolumns \
+		-force 's'
 
 	sql="$*"
 
@@ -58,25 +67,28 @@ function sql()
 		[[ -f $file ]] || abort --ex FileIoEx_NotFound 127 $file
 	fi
 
-	if ((! $+_opts[-i])); then # interactive mode
+	if ((! $+_opts[-i] && ! $+_opts[-s])); then # doesnt show in interactive or silent modes
 		coproc parseSqlErrors; p=$!
 	fi
 
 	if [[ -n $host ]]; then # remote
 		OPT_CHK file -f for remote
 		#(($+file)) &&
-		opts=(-d idiomus) # TODO
+		mysqlopts=(-d idiomus) # TODO
 		#(($+_opts[-n])) || choose remote database
 		if (($+_opts[-o])); then
 			#@TODO
-			#ssh $host[2] "noglob sql $opts ${(qq)sql}" 2>&p | \
+			#ssh $host[2] "noglob sql $mysqlopts ${(qq)sql}" 2>&p | \
 			#	awkWrapper -F '\\t' --inc printFields -E - - - - 'printFields(1,-1)'
 		else
-			ssh $host[2] "include sql; noglob sql $opts ${(qq)sql}" 2>&p
+			unset '_opts[--ssh]'
+			remote_opts=("${(@kv)_opts}") # bypass local otions to remote
+			if ((p)); then ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}" 2>&p
+			else; ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}"; fi
 		fi
 		ret=$?
 	else
-		opts=()
+		mysqlopts=()
 		(($+_opts[-n])) || usedb $name[2]
 
 		# credentials
@@ -88,72 +100,85 @@ function sql()
 			pass=${pass[2]:-$sqlPass[$user]}
 		fi
 		(($+_opts[-p])) && pass=$_opts[-p]
-		opts+=(${user:+-u$user} ${pass:+-p"$pass"})
+		mysqlopts+=(${user:+-u$user} ${pass:+-p"$pass"})
 
 		if (($+_opts[-i])); then # interactive mode
-			mysql $opts $db
+			mysql $mysqlopts $db
 			return
 		fi
 
-		opts+=(-B $_raw --safe-updates --disable-auto-rehash) # batch mode, $silent
+		mysqlopts+=(-B $_raw --disable-auto-rehash) # batch mode, $silent
+		mysqlopts+=(${_opts[--nocolumns]+--skip-column-names} ${_opts[-t]+-t} ${_opts[--force]+-f})
+
+		# Safety
+		(($+_opts[--limit])) && sqllimit=$_opts[--limit] || {
+			[[ -v sqllimit ]] || sqllimit=2000
+		}
+		input -v sqllimit -p 'Row count limit (-1 for unlimited):'
+		mysqlopts+=(--safe-updates --select-limit=$sqllimit)
 
 		if (($+_opts[-o])); then
 			i=1
 			_out=$_out[2]
+			if [[ $_out[-1] == <-> ]]; then
+				input -v _out -p "Not allowed: $_out ends with a number. Ex: use an underscore" ${_out}_
+			fi
 			unset $_out$i
-			rowIndex[$_out]=0
+			rowIndex[$_out]=0 # track row index
 			#@TODO: no error handling mode: redirect stderr to null
-			(($#verbose)) && techo -r -c head mysql $opts -e ${(qq)sql} $db
+			(($#verbose)) && techo -r -c head mysql $mysqlopts -e ${(qq)sql} $db
 			{
 				# column names
 				if IFS=$'\t\t' read -r -A _cols; then
-					typeset -ga $_out$i
-					while IFS=$'\t\t' read -r -A $_out$i; do
-						((i++)); typeset -ga $_out$i
+					while { typeset -ga $_out$i ; IFS=$'\t\t' read -r -A $_out$i }; do
+						((i++));
 					done
 					unset $_out$i
 					((i--))
 				fi
-			} < <(mysql $opts -e $sql $db) 2>&p
-		#mysql $opts -e $sql $db 2>&p | IFS=$'\t\t' read -A $_out[2]
-		#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
-		ret=$?
-		if ((i)); then
-			if (($#_colsOut)); then
-				_colsOut=$_colsOut[2]
-				typeset -gA $_colsOut
-				integer colN=1
-				for col in $_cols; do
-					typeset -g "${_colsOut}[$col]=$colN"
-					((colN++))
-				done
-			fi
-		fi
-	else
-		#@TODO: no error handling: redirect stderr to null
-		if (($#file)); then
-			if [[ -f $file ]]; then
-				(($#verbose)) && techo -r -c head mysql ${(qq)opts} ${(qq)sql} $db '<' $file
-				mysql $opts $sql $db 2>&p < $file
-			else
-				techo -c err "File not found$C_: $file"
-				false
+			} < <(mysql $mysqlopts -e $sql $db) 2>&p
+			#mysql $mysqlopts -e $sql $db 2>&p | IFS=$'\t\t' read -A $_out[2]
+			#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
+			ret=$?
+			if ((i)); then
+				if (($#_colsOut)); then
+					_colsOut=$_colsOut[2]
+					typeset -gA $_colsOut
+					integer colN=1
+					for col in $_cols; do
+						typeset -g "${_colsOut}[$col]=$colN"
+						((colN++))
+					done
+				fi
 			fi
 		else
-			if (($#_idVar)); then
-				# sql+="; SELECT ROW_COUNT(), LAST_INSERT_ID()"
-				sql+="; SELECT LAST_INSERT_ID()"
-				(($#verbose)) && techo -r -c head mysql $opts -s -e ${(qq)sql} $db
-				_id=$(mysql $opts -s -e $sql $db) 2>&p
+			#@TODO: no error handling: redirect stderr to null
+			if (($#file)); then
+				if [[ -f $file ]]; then
+					(($#verbose)) && techo -r -c head mysql ${(qq)mysqlopts} $db '<' $file
+					if ((p)); then mysql $mysqlopts $db < $file 2>&p
+					else mysql $mysqlopts $db < $file; fi
+					techo ret=$?
+				else
+					techo -c err "File not found$C_: $file"
+					false
+				fi
 			else
-				(($#verbose)) && techo -r -c head mysql $opts -e ${(qq)sql} $db
-				mysql $opts -e "$sql" $db 2>&p
+				if (($#_idVar)); then
+					# sql+="; SELECT ROW_COUNT(), LAST_INSERT_ID()"
+					sql+="; SELECT LAST_INSERT_ID()"
+					(($#verbose)) && techo -r -c head mysql $mysqlopts -s -e ${(qq)sql} $db
+					_id=$(mysql $mysqlopts -s -e $sql $db) # 2>&p
+				else
+					(($#verbose)) && techo -r -c head mysql $mysqlopts -e ${(qq)sql} $db
+					if ((p)); then mysql $mysqlopts -e "$sql" $db 2>&p
+					else mysql $mysqlopts -e "$sql" $db; fi
+				fi
 			fi
-		fi
-		ret=$?
+			ret=$?
 		fi
 	fi
-	echo EOF >&p ; wait $p
+	((p)) && { echo EOF >&p ; wait $p }
 
 	if ((ret==0)); then
 		if (($#_idVar)); then
@@ -295,10 +320,9 @@ function parseSqlErrors()
 			if [[ $msg =~ $msgFormat ]]; then
 				print -Pr $errCode $sqlState $line ${(@qqq)match} - #@ $msg
 			else
-				techo -c lred "$C[warn]$errCode$C_ ($sqlState)\n" \
-					"Message format doesn't match line"
-									techo "format: $msgFormat"
-									print -Pr $errCode $sqlState $line - #@ $msg
+				techo -c lred "$C[warn]$errCode$C_ ($sqlState)\n" "Message format doesn't match line"
+				techo "format: $msgFormat, msg: $msg"
+				print -Pr $errCode $sqlState $line - #@ $msg
 			fi
 		elif [[ $data =~ $'^Warning: (.*)' ]]; then
 			techo -c warn $data
@@ -413,9 +437,24 @@ function sqldbdump()
 	fi
 	(($+_opts[-p])) && pass=$_opts[-p]
 	opts+=(${user:+-u$user} ${pass:+-p"$pass"})
-#--no-data 
+#--no-data
 	mysqldump $db $opts --single-transaction --skip-add-drop-table | \
 		sed -e 's/ AUTO_INCREMENT=[0-9]*\b//g' | \
 		grep -v '^\/\*![0-9]\{5\}.*character_set_client.*\/;$' > $db.sql
 	#t=calculo; mysqldump --no-create-info --extended-insert --password='Churr!4as678' -u $
+}
+
+# Added 2020-10-15 11:36
+alias sqldbshow='sqldbstat'
+function sqldbstat()
+{
+	local opts
+
+	usedb "$@"
+
+	tables=($(tablelist))
+	user=$sqlUser[root]
+	pass=$sqlPass[$user]
+	opts+=(-u$user -p"$pass" --count)
+	mysqlshow $opts $db
 }

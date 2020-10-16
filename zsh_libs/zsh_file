@@ -132,14 +132,18 @@ function del()
 #@TODO
 function rename()
 {
-	local orig name dir fullpath
+	local orig name dir fullpath sudo
 	(( $# )) || usage $0
 	#@TODO is link? confirm rename link or link target
 	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
 	orig="$(getfilename "$1")"
 	dir="$(getpath "$(getfullpath $1)")"
 	fullpath="$dir/$orig"
-	[[ -f "$1" || -d "$1" ]] || abort 127 "$1 doesn't exist or no file permission"
+	if [[ -n $sudo ]]; then
+		sudo zsh -c "[[ -f '$1' || -d '$1' ]]" || abort 127 "$1 doesn't exist"
+	else
+		[[ -f "$1" || -d "$1" ]] || abort 127 "$1 doesn't exist or no file permission"
+	fi
 	name=${2:-$orig}
 	if input -r -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -v name && \
 		[[ -n $name && $name != $orig ]]
@@ -251,9 +255,10 @@ function syncDirs()
 	local quiet sudo excludeFrom exclude dry reverse
 	local stat name noSlash sshCFG ret host p _copts
 	typeset -aU _opts src targets rsArgs extraArgs files excludePatterns
-	zparseopts -D -M -A _opts - q=quiet s=sudo d=dry 'R' -relative=R \
+	zparseopts -D -M -A _opts - q=quiet s=sudo d=dry 'R' -relative=R 'z' -compress=z \
 		c=checksum -reverse=reverse -no-add-slash=noSlash -no-delete=noDelete \
-		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e -no-perms -no-user -no-group
+		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e \
+		-no-perms -no-user -no-group
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	(($# >= 2)) || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
@@ -295,6 +300,7 @@ function syncDirs()
 		rsArgs+=(-tu)
 	fi
 	(($+_opts[-R])) && rsArgs+=(--relative)
+	(($+_opts[-z])) && rsArgs+=(-z)
 
 	# analyse sources
 	for ((n=1; n<=$#src; n++)); do

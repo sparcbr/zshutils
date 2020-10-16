@@ -176,6 +176,7 @@ function array_dump()
 {
 	local key val _type
 
+	[[ $1 == '-n' ]] && { integer ln; shift }
 	[[ -v $1 ]] || abort 127 'Not a variable'
 
 	_type="$(vartype $1)"
@@ -189,7 +190,7 @@ function array_dump()
 	  array*)
 		techo -c head "dump of \"$1\" ($_type size: ${(P)#1}):"
 		for val in "${(P@)1}"; do
-			techo -r - ${(q)val}
+			techo -r - ${ln+$((++ln)): }${(q)val}
 		done
 		;;
 	  *)

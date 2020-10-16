@@ -1,5 +1,5 @@
 VERSION=1.0.5
-#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow,gitgetrepo,glog,gstaged,grestore,gstatus,gpull,jira,jiraRequest,gconfig
+#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow,gitgetrepo,glog,gstaged,grestore,gstatus,gpull,jira,jiraRequest,gconfig,gstash,gexpirestash,gselect,getbranch,gisupdated,gremote,gswitch,gtag,
 alias pull="gpull"
 alias push="gpush"
 alias gadd="git add"
@@ -64,6 +64,7 @@ function gpull()
 	local tmp _opts _opt gopts=()
 	#zparseopts -D -M -A _opts -
 	tmp=$(git pull --ff-only "$@" 2>&1) || {
+		techo -c warn $tmp
 		if [[ $tmp =~ 'fatal: Could not read from remote' ]]; then
 			# on network=1 gpull
 			return 1
@@ -1239,11 +1240,11 @@ function glog()
 function gstash()
 {
 	local _gopts cmd
-	#zparseopts -D -M -A _opts - -date:
+	zparseopts -D -M -A _opts - 'l'  # -date:
 	# --date=${_opts[--date]:-iso}
 	_gopts=(--color=always --format=tformat:"$gFormat")
 
-	if (($#==0)); then
+	if (($#==0 || $+_gopts[-l])); then
 		cmd='list'
 	else
 		cmd=$1
@@ -1253,7 +1254,18 @@ function gstash()
 	case $cmd in
 		list)
 			_gopts+=(--dirstat)
-			run -v3 git stash list $_gopts "$@"
+			if (($+_gopts[-l])); then
+				run -v3 git stash list $_gopts "$@"
+				return
+			fi
+			local opt events=('Esc' 'Cancel' 'X' 'Expire old stashes' 'Del' 'Delete')
+			chooser -v opt -f1 --ifs $'\n' --foot 'X) Expire old stashes' \
+				--events "$events" "$(git stash list $_gopts "$@")" || return
+			case $ACTION in
+				X) run git stash drop $opt ;;
+				Delete) run git stash drop $opt ;;
+				'') run git stash show $_gopts $opt ;;
+			esac
 			;;
 		show)
 			run -v3 git stash show $_gopts "$@"
@@ -1276,9 +1288,11 @@ function gexpirestash()
 function grestore()
 {
 	local files
-	((!$#)) && gst
-
-	git restore "$@"
+	(($#)) && {
+		git restore "$@"
+		return
+	}
+	gst
 }
 #TODO unstage error: pathspec '.*' did not match any file(s) known to git
 #gpick() { e TODO .git/CHERRY_PICK_HEAD }
