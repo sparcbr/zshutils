@@ -69,6 +69,7 @@ function cancel() {
 	ExTree=(Ex -
 	  IoEx Ex
 		FileIoEx IoEx
+		NetIoEx IoEx
 	  SqlEx Ex
 		  ConstraintSqlEx SqlEx
 	)
@@ -182,7 +183,7 @@ function explode()
 		_sep=${1:- }
 		_list=()
 		unset '_opts[--stdin]'
-		integer i _has_headers=1
+		integer i _has_headers
 		(($+_opts[--csv] && !$+_opts[--noheaders])) && _has_headers=1
 		if ((_has_headers)); then
 			read -r _tmp || return 10
@@ -633,8 +634,8 @@ function aptinst()
 function in_array()
 {
 	_dbg_trap $0
-	local name val _var ret _i _exact
-	zparseopts -D -M - v:=_var e=_exact -exact=e
+	local name val _var ret _i _exact _opts
+	zparseopts -D -M -A _opts - v:=_var e=_exact -exact=e 'i'
 
 	case $(vartype $2) in
 	association*)
@@ -652,8 +653,16 @@ function in_array()
 		return 2
 	esac
 
-	(($#_var)) && typeset -g "$_var[2]=$_i"
+	(($#_var)) && typeset -g "$_var[2]=$_i" || {
+		(($+_opts[-i])) && echo $_i
+	}
 	return 0
+}
+
+alias indexof='indexOf'
+function indexOf()
+{
+	in_array -i $1 $2
 }
 
 #TODO call this within chooser

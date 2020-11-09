@@ -27,7 +27,7 @@ function chartoint()
     # {
     #     printf %d \'$1\n
     # }
-    # Does not work for T: 
+    # Does not work for T:
     #   chartoint T
     #   0
 
@@ -47,14 +47,14 @@ function chartoint()
     #   chartoint 'T'
     #   84
     # works: for l in {A..Z}; do [[ "$l" == "T" ]] && e "Attention:"; echo -n "$l="; chartoint $l; echo ; done
-    #   
+    #
     # What is this sorcery?
 }
 
 function hextochar()
 {
     local i str
-	for ((i=0; i<$#1 ; i+=2)); do 
+	for ((i=0; i<$#1 ; i+=2)); do
 		str+="\x${1:$i:2}"
 	done
     printf "$str"
@@ -74,7 +74,7 @@ function inttochar()
 function tobytes()
 {
 	integer factor=1
-	
+
 	case $1 in
 		-k) factor=1024; shift ;;
 		-m) factor=1024*1024; shift ;;
@@ -86,4 +86,42 @@ function tobytes()
 	if [[ $1 == <-> ]]; then
 		calc $1*factor
 	fi
+}
+
+function parsedatetime()
+{
+	if [[ $1 =~ '^([0-9]{4})-?([0-9]{2})-?([0-9]{2})([T ])?([0-9]{2}):?([0-9]{2}):?([0-9]{2})(.*)$' ]]
+	then
+		echo $match[1] $match[2] $match[3] $match[5] $match[6] $match[7] ${match[8]:-Z}
+		return 0
+	fi
+
+	if [[ $1 =~ '^([0-9]{2})/([0-9]{2})/([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2})(.*)$' ]]; then
+		echo $match[3] $match[2] $match[1] $match[4] $match[5] $match[6] ${match[7]:--03:00}
+		return 0
+	fi
+
+	return 1
+}
+
+function datetime()
+{
+	local _opts _dt
+	zparseopts -D -M -A _opts - -sql -tz
+	typeset -a _dopts
+
+	if (($# == 7)); then
+		_dt=("$@")
+	else
+		_dt=($(parsedatetime "$*")) || return 1
+	fi
+
+	if (($+_opts[--sql])); then # mysql datetime format YYYY-MM-DD HH:mm:ss
+		_dopts+=('--utc' '+%F %T')
+	else
+		(($+_opts[--tz])) && _dopts+=(TZ=$_opts[--tz]) || _dopts+=('--utc')
+		_dopts+=('--iso-8601=seconds')
+	fi
+
+	date $_dopts -d "$_dt[1]-$_dt[2]-$_dt[3] $_dt[4]:$_dt[5]:$_dt[6]$_dt[7]"
 }

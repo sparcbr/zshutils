@@ -1,5 +1,5 @@
 VERSION=1.0.5
-#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow,gitgetrepo,glog,gstaged,grestore,gstatus,gpull,jira,jiraRequest,gconfig,gstash,gexpirestash,gselect,getbranch,gisupdated,gremote,gswitch,gtag,
+#lazyload=gconfig,getbranch,gisupdated,croot,gremote,gdiff,gclone,gpr,commit,github,gpush,gfollow,gstaged,gunstage,gchk,gbranch,gstatus,gshow,gitgetrepo,glog,grestore,gpull,gstash,gexpirestash,gselect,gswitch,gmerge,gtag,grebase,jira,jiraRequest
 alias pull="gpull"
 alias push="gpush"
 alias gadd="git add"
@@ -17,6 +17,8 @@ alias gstat='gstatus'
 alias grest='grestore'
 alias staged='gstaged'
 alias gds='gstaged'
+#local tmp=$(git rev-parse --short HEAD || echo '')
+typeset -gi hashAbbvLen=7
 
 export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
@@ -57,6 +59,94 @@ function gconfig()
 
 	#git config --global $opt $val
 	# 'color.ui' 'auto'
+}
+
+function croot()
+{
+	git config --global --get alias.root > /dev/null || git config --global --add alias.root '!pwd'
+	alias croot='cd $(git root)'
+	cd $(git root)
+}
+
+gFormat=(
+	'%h'				# short hash
+	'%<(3,trunc)%cn'	# author
+	'%C(auto)%d%Creset'	# ref names
+	'%s'				# subject
+	'(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
+)
+gRefsFormat=$gFormat[3]
+# Added 2020-04-06 16:43
+alias _glog='git log'
+comp+=('glog=_glog')
+function glog()
+{
+	local _gopts _opts buf line _vname hashP authorP refsP subjectP dateP
+	local aline author hashColor
+	integer n=10 i
+	zparseopts -D -M -A _opts - -date: 'r' -relative=r v: 'l' n: 'd' diff=d -all
+
+	_gopts=(--graph --color=always --format=tformat:"$gFormat")
+	(($+_opts[-r])) && _gopts+=(--relative)
+	(($+_opts[-n])) && n=$_opts[-n]
+	(($+_opts[--all])) && _gopts+=(--all)
+	_gopts+=(-n $n)
+
+	if [[ -n $_opts[-v] ]]; then
+		_vname=$_opts[-v]
+		typeset -ga $_vname
+	fi
+
+	hashP='[a-f0-9]{5,}'
+	authorP='[A-Z]'
+	refsP='\(.*\)'
+	subjectP='.*'
+	dateP='\(.*\)'
+	typeset -A authorColor=('E' yellow 'P' warn) # '*' lcyan)
+	for color in $authorColor; do colorSet $color; done  # setup colors
+	#lcolors=('' yellow '' '' '')
+	while read -r line; do
+		((i++))
+		# _glsub=(¬P.. "$C[warn]P$C_" ¬E.. "$C[ok]$EC_")
+		if [[ $line =~ '(.*) ('$~hashP') ('$~authorP').. ('$~refs')? ?('$subjectP') ('$~dateP')' ]]
+		then
+			author=$match[3]
+			color=$authorColor[$author]
+			match[3]=$C[$color]$author$C_
+
+			hash=$match[2]
+			match[2]=$(colorhash $hash)
+
+			#TODO save colors and data in separated arrays
+			aline="$match"
+		else
+			aline="$line"
+		fi
+
+		if [[ -n $_vname ]]; then
+			typeset -g "${_vname}[$i]=$aline"
+			(($+_opts[-l])) && typeset -g "${_vname}_files[$i]=$(gd -l $hash)"
+		else
+			echo -E - "$aline"
+			(($+_opts[-l])) && echo -E - $(gd -l $hash)
+		fi
+	done < <(git log --date=${_opts[--date]:-iso} $_gopts "$@")
+}
+
+function getrefs()
+{
+	git log -n1 --color=always --format=tformat:$gRefsFormat $1
+}
+
+function colorhash()
+{
+	integer color len=hashAbbvLen
+	local _opts
+	zparseopts -D -A _opts - -n:
+	(($+_opts[-n])) && len=$_opts[-n]
+	#does not work: ((color=[#10](0x$1 % 256)))
+	color=$(([#10](0x${1:0:2} % 256)))
+	echo - $'\033\['"38;5;${color}m${1:0:$len}"
 }
 
 function gpull()
@@ -492,13 +582,6 @@ function commit() #@TODO
 	git commit $amend $m $args || banner -c lred
 }
 
-function croot()
-{
-	git config --global --get alias.root > /dev/null || git config --global --add alias.root '!pwd'
-	alias croot='cd $(git root)'
-	cd $(git root)
-}
-
 # Added 2019-01-25 11:17:01
 # https://github.com/search?q=
 comp+=('github=cd')
@@ -753,9 +836,9 @@ function listbranch()
 	local _cols head merged to compare_to all _opts opts=()
 	zparseopts -M -D -A _opts - -no-merged::=merged -merged::=merged a -all=a O:
 	#zparseopts -M -D -A _opts - -no-merged::=N m:: -merged::=m 'a' -all=a O:
-	#compare_to="$remote[1]/master"
+	gremote || return
+	compare_to="$remote[1]/master"
 	#@TODO get "main" branch
-	compare_to='master'
 	if (($+_opts[-a])); then
 		opts+=(-a)
 	else
@@ -767,7 +850,7 @@ function listbranch()
 			fi
 		elif (($+_opts[--merged])); then
 			if (($#_opts[--merged])); then
-				opts+=(--merged $_opts[--no-merged])
+				opts+=(--merged $_opts[--merged])
 			else
 				opts+=(--merged $compare_to)
 			fi
@@ -797,13 +880,16 @@ function listbranch()
 		'(%(color:green)%(committerdate:iso) %(color:#4579aa)%(committerdate:relative)%(color:reset))'
 	)
 	git --no-pager branch --sort=committerdate --format="$glineFormat" --color=always $opts "$@"
+	#todo colorhash
 }
 function gremote()
 {
 	#local current
 	#zparseopts c=current
 
-	remote=($(git remote))
+	remote=($(git remote)) && {
+		(($#remote)) || return 10
+	} || abort 128 git repository not found
 }
 
 # Added 2019-09-03 19:04
@@ -846,11 +932,18 @@ function gpr()
 	local owner url dir _opts base=$HOME/repos
 	zparseopts -D -M -A _opts - b: 'f'
 
+	integer id=$1
 	(($+_opts[-f])) || confirm 'Open Pull Request' || return
 
 	if url=$(gitgetrepo "$*"); then
-		local args=($(urlinfo -hp $url))
-		open "https://$args[1]/$args[2]/pull/new/$branch"
+		local url args=($(urlinfo -hp $url))
+		url="https://$args[1]/$args[2]"
+		((id)) && {
+			open "$url/pull/$id"
+			return
+		}
+
+		open "$url/pull/new/$branch"
 	else
 	fi
 
@@ -1013,7 +1106,7 @@ function gdiff()
 		((i++))
 	done
 
-	(($+_opts[-s])) && _dopts+=(--staged)
+	(($+_opts[-s])) && _dopts+=(--cached)
 
 	if (($+_opts[-i])); then # interactive
 		local f name _copts _a _b head_hash hashes2=()
@@ -1144,151 +1237,145 @@ function gdiff()
 		#done
 	else
 		(($+_opts[-l])) && _dopts+=('--name-only')
-		git diff $_dopts "$@"
+		git diff $_dopts $hashes -- $args
 	fi
+}
+
+# find revision containing file (matching content)
+# @param $1 file
+# @return revision, if found
+function gfind()
+{
+	local rev revs file filehash hash since=(--since='34 days ago')
+	file="$1"; shift 1
+	# git hash for file
+	[[ -f file ]] && filehash=$(git hash-object $file) || filehash=$(git ls-tree HEAD $file)
+	revs=($(git log $since --all --pretty=%H -- "$file"))
+	for rev in $revs; do
+		# check each revision for checksum match
+		hash=$(git ls-tree $rev $file | explode -z --stdin ' ' 3)
+		if [[ $hash == $filehash ]]; then
+			echo "${rev:0:$hashAbbvLen}"
+			return 0
+		#elif git diff --exit-code --quiet $@ $rev -- $file; then
+			#echo "${rev:0:$hashAbbvLen} diff"
+			#return 0
+		#elif git diff --exit-code --quiet --ignore-space-change \
+			#--ignore-blank-lines --ignore-space-at-eol $@ $rev -- $file
+		#then
+			#echo "${rev:0:$hashAbbvLen} space"
+			#return 0
+		fi
+	done
+	return 1
 }
 
 function gisupdated()
 {
 	getbranch -q || return
-	gdiff ..origin/$branch --quiet
-}
-
-function gdev()
-{
-	local langExt=${1:-js}
-	#for f in $(dev --base$langExt); do
-	for fdev in $(dev $langExt); do
-		fndev=$(getfilename $fdev)
-		fp=$(getpath $fdev)
-		fn=$(noext $fndev dev.$langExt)
-		[[ -f $fp/$fn.$langExt ]] && {
-			diff -q $fp/$fn.$langExt $fdev && df="$C[ok]==" || df="$C[warn]!="
-			echo $df $fp/$fn.$langExt $fdev
-		} || {
-			echo 0 $fdev
-		}
-	done
-}
-
-function dev()
-{
-	f \*.dev.$1
+	gremote || { [ -t 1 ] && techo -c warn 'No remotes'; return 10 }
+	gdiff ..$remote[1]/$branch --quiet
 }
 
 function gstatus()
 {
 	local _gopts _opts buf line _vname _gst stat fn f
 	local dev_diff staged changed diff_changed_dev k
-	integer n=10 i ok
-	zparseopts -D -M -A _opts - -branch:
+	integer i ok warns alerts n=10
+	zparseopts -D -M -A _opts - -branch: 'u'
 	#TODO gselect
 	#flist=($(git status -uno --porcelain=v2 $_dopts $hashes -- "$args[@]")) || return
+	typeset -a diffs
 	if ! gisupdated; then
 		#gdi ..origin/$branch
 		#return 1
-		techo -c warn Head not in sync with origin
+		techo -c warn 'Head not in sync with origin'
 	fi
-	_gst=($(git status -uno --short "$@"))
-	for stat f in $_gst; do
+	_gst=("${(@f)$(git status -uno --porcelain=v1 "$@")}")
+	for line in $_gst; do
+		staged=$line[1]		# 1st char
+		modified=$line[2]	# 2st char
+		f=$line[4,-1]	# 4th til end
+
+		[[ $staged != ' ' ]] && stat=$C[ok]$staged || stat=' '
+		[[ $modified != ' ' ]] && stat+=$C[lred]$modified || stat+=' '
+
 		ext=$(getext $f)
 		fn=$(noext $f)
 
-		staged="$(git diff --staged $f)"
-		changed="$(git diff --color=never $f)"
 		dev_diff=''
 		ndev_diff=
+		diffs=()
 		#diff_changed_dev=''
 		ok=0
 		if [[ -f $fn.dev.$ext ]]; then
-			dev_diff=$(diff -u --color=never $fn.dev.$ext $f)
-			ndev_diff=$#dev_diff
-			if ((!ndev_diff)); then
-				ndev_diff="$C[ok]== $fn.dev.$ext"
-				((ok++))
+			if [[ -f $f ]]; then
+				dev_diff=$(diff -u --color=never $fn.dev.$ext $f)
+				ndev_diff=$#dev_diff
+				if ((!ndev_diff)); then
+					diffs+=("$C[ok]== $fn.dev.$ext")
+					((ok++))
+				else
+					diffs+=("$C[lred]$ndev_diff!= $fn.dev.$ext")
+				fi
+			elif [[ $modified == 'D' ]]; then
+				dev_diff=$(diff -u --color=never $fn.dev.$ext <(gshow :$f))
+				ndev_diff=$#dev_diff
+				if ((!ndev_diff)); then
+					diffs+=("$C[ok]== $fn.dev.$ext")
+					((ok++))
+				else
+					diffs+=("$C[lred]$ndev_diff!= $fn.dev.$ext")
+				fi
+				#	if (($#changed && $#dev_diff)); then
+				#		diff_changed_dev=$(diff -u <(<<<"$changed") <(<<<"$dev_diff"))
+				#		(f - git)
+				#		#e $changed $dev_diff
+				#	fi
 			fi
-		#	if (($#changed && $#dev_diff)); then
-		#		diff_changed_dev=$(diff -u <(<<<"$changed") <(<<<"$dev_diff"))
-		#		(f - git)
-		#		#e $changed $dev_diff
-		#	fi
 		fi
 		if (($+_opts[--branch])); then
 			dev_diff_b=$(git diff --color=never $_opts[--branch] -- $f)
 			ndev_diff_b=$#dev_diff_b
 			if ((!ndev_diff_b)); then
-				ndev_diff_b="$C[ok]== $_opts[--branch]"
+				diffs+=("$C[ok]== $_opts[--branch]")
 				((ok++))
+			else
+				diffs+=("$C[lred]$ndev_diff_b != $_opts[--branch]")
 			fi
 		fi
-		k=($C_) ; ((ok)) || k=(-c warn)
-		techo $k $stat $f $ndev_diff $ndev_diff_b
+		if revfound=($(gfind $f)); then
+			rev=$revfound[1]
+			diffs+=("$C[ok]== * $(colorhash $rev)")
+			case $revfound[2] in
+				space)
+					diffs+=("$C[warn]space changes only") ;;
+				diff)
+					diffs+=("$C[warn]diff") ;;
+			esac
+			diffs+=($(getrefs $rev))
+			((ok++))
+		fi
+		if ((ok)) && [[ $modified == ' ' ]]; then
+			k=$C[ok]
+		elif ((ok)); then
+			((warns++))
+			k=$C[warn]
+		else
+			((alerts++))
+			k=$C[lred]
+		fi
+		techo $stat $k$f $diffs
 		#$(($#changed - $#dev_diff)) $diff_changed_dev
 	done
-}
-
-gFormat=(
-	'%h'		# short hash
-	'%<(3,trunc)%cn' # author
-	'%C(auto)%d%Creset'		# ref names
-	'%s'			# subject
-	'(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
-)
-# Added 2020-04-06 16:43
-alias _glog='git log'
-comp+=('glog=_glog')
-function glog()
-{
-	local _gopts _opts buf line _vname hashP authorP refsP subjectP dateP
-	local aline author
-	integer n=10 i
-	zparseopts -D -M -A _opts - -date: 'r' -relative=r v: 'l' n:
-
-	_gopts=(--graph --color=always --format=tformat:"$gFormat")
-	(($+_opts[-r])) && _gopts+=(--relative)
-	(($+_opts[-n])) && n=$_opts[-n]
-	_gopts+=(-n $n)
-
-	if [[ -n $_opts[-v] ]]; then
-		_vname=$_opts[-v]
-		typeset -ga $_vname
-	fi
-
-	hashP='[a-f0-9]{5,}'
-	authorP='[A-Z]'
-	refsP='\(.*\)'
-	subjectP='.*'
-	dateP='\(.*\)'
-	typeset -A authorColor=('E' yellow 'P' warn '*' lcyan)
-	lcolors=('' yellow '' '' '')
-	while read -r line; do
-		((i++))
-		# _glsub=(¬P.. "$C[warn]P$C_" ¬E.. "$C[ok]$EC_")
-		if [[ $line =~ '(.*) ('$~hashP') ('$~authorP').. ('$~refs')? ?('$subjectP') ('$~dateP')' ]]
-		then
-			#author=$match[3]
-			#color=$C[$authorColor[$author]]
-			#match[3]=$color$author$C_
-			#match[2]=$colo
-			#TODO save colors and data in separated arrays
-			aline="$match"
-		else
-			aline="$line"
-		fi
-
-		if [[ -n $_vname ]]; then
-			typeset -g "${_vname}[$i]=\"$aline\""
-			(($+_opts[-l])) && typeset -g "${_vname}_files[$i]=$(gd -l $match[2])"
-		else
-			echo -E - "$aline"
-			(($+_opts[-l])) && echo -E - $(gd -l $match[2])
-		fi
-	done < <(git log --date=${_opts[--date]:-iso} $_gopts "$@")
+	if ((alerts)); then techo -c lred "Non $C[warn]recoverable changes found"; \
+	elif ((warns)); then techo -c warn "There are $C[lcyan]recoverable$C_ changes"; fi
 }
 
 # Added 2020-04-29 14:25
 function gstash()
 {
+  #TODO: -R: git stash show stash@\{0\} -p | git apply -R
 	local _gopts cmd
 	zparseopts -D -M -A _opts - 'l'  # -date:
 	# --date=${_opts[--date]:-iso}
@@ -1309,10 +1396,10 @@ function gstash()
 				return
 			fi
 			local opt events=('Esc' 'Cancel' 'X' 'Expire old stashes' 'Del' 'Delete')
-			chooser -v opt -f1 --ifs $'\n' --foot 'X) Expire old stashes' \
+			chooser -v opt -f1 --ifs $'\n' --foot 'X) Expire old stashes Del) Delete selected stashes' \
 				--events "$events" "$(git stash list $_gopts "$@")" || return
 			case $ACTION in
-				X) run git stash drop $opt ;;
+				X) gexpirestash ;;
 				Delete) run git stash drop $opt ;;
 				'') run git stash show $_gopts $opt ;;
 			esac
@@ -1346,9 +1433,6 @@ function grestore()
 }
 #TODO unstage error: pathspec '.*' did not match any file(s) known to git
 #gpick() { e TODO .git/CHERRY_PICK_HEAD }
-#gstash() {
-  #TODO: -R: git stash show stash@\{0\} -p | git apply -R
-#}
 
 JIRA_TOKEN='xqd6etzANstbl9JLlO1t0FBE'
 JIRA_USER='elizandro@idiomus.com'

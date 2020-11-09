@@ -7,6 +7,19 @@ alias full='getfullpath'
 [[ -v comp ]] || typeset -ga comp
 
 setopt nomultios
+
+function cdhere()
+{
+	local here=$(here 2) && cd $here || abort 127 "Could not find directory: $here"
+}
+
+function here()
+{
+	local fp
+	include -lq file
+	fp=$(getfullpath $(explode "$funcfiletrace[${1:-1}]" ':' 1)) || abort 127 "File not found: $fp"
+	getpath $fp
+}
 # (#ia1) allow 1 error
 function getfilename()
 {
@@ -366,7 +379,7 @@ function syncDirs()
 		explode -v exclude $exclude[2] ','
 		excludePatterns+=($exclude)
 	fi
-	[[ -n $excludeFrom ]] && excludePatterns+=("${(@f)$(< $excludeFrom[2])}")
+	[[ -n $excludeFrom ]] && excludePatterns+=("${(@f)$(egrep -v '^ *#' $excludeFrom[2])}")
 	#(--exclude-from="${excludeFrom[2]}")
 	excludePatterns+=('backup*' '*.local' '.git' 'node_modules')
 	chooser -v excludePatterns --multi --selected "$excludePatterns" $excludePatterns

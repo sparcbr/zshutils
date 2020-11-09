@@ -35,9 +35,9 @@ function colorSet()
 	[ -n "$c" ] && C[$1]="[${c}m" || return 1
 }
 
-CANCEL=" [${C[warn]}CANCEL$C_]"
-FAIL=" [${C[err]}FAIL$C_]"
-OK=" [${C[ok]}OK$C_]"
+CANCEL=" ${C_}[${C[warn]}CANCE$C_]"
+FAIL=" ${C_}[${C[err]}FAIL$C_]"
+OK=" ${C_}[${C[ok]}OK$C_]"
 
 # like grep with optional 'cut -fN'
 # regex pattern [Nfield]
@@ -1400,6 +1400,8 @@ function alarm()
 	local integer mins=13
 	local msg
 	[[ $1 == <-> ]] && { mins=$1; shift }
+	[[ $1 == 'off' ]] && { k play; return }
+
 	msg=${*:-alarm}
 	{ while (( mins )); do
 		techo -c warn "$mins minutes left to $msg"

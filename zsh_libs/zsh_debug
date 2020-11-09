@@ -167,7 +167,7 @@ function fstack()
 		# Comment next line to always show command line entry.
 		[[ $functrace[$n] == $SHELL:* ]] && ((n>1 && n--))
 		for ((i++; i<=n; i++)); do
-			techo -c lred $functrace[$i] $_C in $C[warn]$funcfiletrace[$i]
+			techo -c lred $functrace[$i]$_C in $C[warn]$funcfiletrace[$i]
 		done
 	fi
 }

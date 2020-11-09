@@ -1,5 +1,5 @@
 VERSION=1.0.0
-#lazyload=
+#lazyload=accRemoteGetAccountIdByEmail,accGetAccountIdByEmail,hotmartCSVImport
 
 [[ -v comp ]] || typeset -ga comp
 
@@ -7,7 +7,7 @@ function listAudio()
 {
 	trap 'throw 130' INT
 
-	sql -v -o row 'SELECT review_id,version,sequence,profile,review_version_id, T.status,rough_freq,mean_amp FROM review_track_stats S INNER JOIN review_version As V USING (review_id, version) INNER JOIN review_track T using (review_version_id,sequence)  WHERE T.status!="processing" AND S.status="unchecked"  ORDER BY mid_amp DESC limit 15'
+	sql -o row 'SELECT review_id,version,sequence,profile,review_version_id, T.status,rough_freq,mean_amp FROM review_track_stats S INNER JOIN review_version As V USING (review_id, version) INNER JOIN review_track T using (review_version_id,sequence)  WHERE T.status!="processing" AND S.status="unchecked"  ORDER BY mid_amp DESC limit 15'
 	while sqlFetch row; do
 	{
 		checkAudio "${(@)row[1,5]}"
@@ -45,10 +45,10 @@ function checkAudio()
 
 	if ((bad)); then
 		techo "Marking $f as bad"
-		sql -v "UPDATE review_track SET status='processing' WHERE review_version_id=$versionId AND sequence=$sequence"
+		sql "UPDATE review_track SET status='processing' WHERE review_version_id=$versionId AND sequence=$sequence"
 	fi
 	((bad)) && _status='bad' || _status='ok'
-	sql -v "UPDATE review_track_stats SET status='$_status' WHERE review_id=$reviewId AND version=$version AND sequence=$sequence"
+	sql "UPDATE review_track_stats SET status='$_status' WHERE review_id=$reviewId AND version=$version AND sequence=$sequence"
 
 	trap - INT
 }
@@ -57,23 +57,21 @@ function accRemoteGetAccountIdByEmail()
 {
 	local val buf values
 	buf=("${(@f)$(
-		sqlmaq -t --nocolumns "select account_id, type, created_at, expire_at, name," \
-		"phone_country_code, phone_area_code, phone_number, password, admin" \
-		"from account where email='$1'"
-	)}") || return
+		sql $sqlopts --ssh idiomus -t --nocolumns \
+			"select account_id, type, created_at, expire_at, name," \
+			"phone_country_code, phone_area_code, phone_number, password, admin" \
+			"from account where email='$1'"
+	)}") || abort -ex NetIoEx_Unreachable 9 idiomus 22
 
-	(($#buf)) || return 10
-	echo $buf[1] # headers
-	rrow=(${(@s. | .)${${buf[2]#| }% |}}) # last one is just table bottom
-	array_dump -n rrow
+	(($#buf && $#buf[1])) || return 10
+	rrow=(${(@s. | .)${${buf[2]#| }% |}}) #vw last one is just table bottom
 	typeset -g ${2:-accountId}'='$rrow[1]
 
 	values=()
 	for val in ${rrow:0:9}; do
 		values+=("$(sqlEscape $val)")
 	done
-	array_dump -n values
-	sql -v "insert into account (account_id, type, email, created_at, expire_at, name," \
+	sql $sqlopts "insert into account (account_id, type, email, created_at, expire_at, name," \
 		"phone_country_code, phone_area_code, phone_number, password, admin)" \
 		"values ($rrow[1],$values[2],'$1',$values[3],$values[4],$values[5]," \
 		"$values[6],$values[7],$values[8],$values[9],$rrow[10])"
@@ -82,51 +80,143 @@ function accRemoteGetAccountIdByEmail()
 function accGetAccountIdByEmail()
 {
 	{
-		sql -v -o row "select account_id from account where email='$1'"
-		(($#row1)) || {
-			accRemoteGetAccountIdByEmail $1
-			return
-		}
-		typeset -g ${2:-accountId}'='$row1[1]
+		sql $sqlopts -o row "select account_id from account where email='$1'"
+		(($#row1)) && typeset -g ${2:-accountId}'='$row1[1]
+		#|| {
+		#	accRemoteGetAccountIdByEmail $1
+		#		return 1
+		#}
 	} always {
 		if catch '*'; then
-			techo $CAUGHT
+			techo here $CAUGHT
 			return 1
 		fi
 	}
+	return
 	#sqlFetch row
 }
 
-csvfp='_support/corrigido_apenas_app.csv'
+csvfp='_support/hotmart.csv'
+refunded_csvfp='_support/reembolsadas_app.csv'
+getresp_csvfp='_support/getResponse.csv'
 function hotmartCSVImport()
 {
-	integer i accountId
-	local var
+	integer i j accountId adesao_idx cancel_idx email_idx event_exists
+	local var adesao cancelamento email out
 
-	chooser -v csvfp $csvfp  _support/*.csv
-	cat $csvfp | explode --stdin --csv -v csv ';'
-	cat _support/corrigido_apenas_app.csv | explode --stdin --csv -v csv ';'
+	typeset -A refunded_email_index
+	# like: refunded_email_index[email@something.com]=3
 
-	for ((i=1; i<=$csv_len; i++)); do
-        var="csv$i"
-		premium_at=${${(P)var}[7]}
-		cancel_at=${${(P)var}[8]}
-		email=${${(P)var}[9]}
+	include conversion
+	include sql
+	usedb idiomus
+	#chooser -v csvfp $csvfp  _support/*.csv
+	#explode --stdin --csv -v refunded_csv ';' < $refunded_csvfp || return
+	#refunded_email_idx=$(indexOf 'Email' '_headers')
+	#for ((i=1; i<=$refunded_csv_len; i++)); do
+    #    var="refunded_csv$i"
+	#	refunded_email_index+=($email $i)
+	#done
+
+	#############
+	## Hotmart ##
+	#############
+	#explode --stdin --csv -v csv ';' < $csvfp || return
+	#adesao_idx=$(indexOf 'Adesão' '_headers')
+	#cancel_idx=$(indexOf 'Cancelamento' '_headers')
+	#email_idx=$(indexOf 'Email' '_headers')
+	#for ((i=1; i<=$csv_len; i++)); do
+        #var="csv$i"
+		#premium_at=$(datetime --sql "${${(P)var}[adesao_idx]}")
+		#cancel_at=$(datetime --sql "${${(P)var}[cancel_idx]}")
+		#email=${${(P)var}[email_idx]}
+
+		#(($#email)) || {
+			#techo -c warn "Empty email: ${${(P)var}[@]}"
+			#return 1
+		#}
+
+        #accGetAccountIdByEmail $email 'accountId' || {
+			#echo $email >> missing.txt
+			#techo -c warn "Account not found for email=$email index=$i"
+			#continue
+		#}
+
+		#{
+			#if ((j % 20 == 0)); then
+				#((j)) && echo "$out;" # flush
+				#out="insert into account_event (account_id, type, created_at) values"
+				#j=0
+			#fi
+
+			#((j++)) && out+=','
+			#out+=" ($accountId, 'became_premium', '$premium_at')"
+
+			#(($#cancel_at)) && {
+				#out+=", ($accountId, 'subscription_canceled', '$cancel_at')"
+				#((j++))
+			#}
+		#} always {
+			#if catch '*'; then
+				#techo $CAUGHT
+				#confirm $'\nExit' && { return 1 }
+			#fi
+		#}
+	#done
+	#((j)) && echo "$out;" # flush
+
+	#################
+	## GetResponse ##
+	#################
+	explode --stdin --csv -v grcsv ',' < $getresp_csvfp || return
+	adesao_idx=$(indexOf 'sign_up' '_headers')
+	email_idx=$(indexOf 'email' '_headers')
+
+	j=0
+	for ((i=1; i<=$grcsv_len; i++)); do
+        var="grcsv$i"
+		freemium_at=$(datetime --sql ${(Q)${(P)var}[adesao_idx]}) # (Q) removes quoting
+		email=${${(P)var}[email_idx]}
+
 		(($#email)) || {
 			techo -c warn "Empty email: ${${(P)var}[@]}"
 			return 1
 		}
 
         accGetAccountIdByEmail $email 'accountId' || {
-			techo -c warn "Account not found for email=$email index=$i"
-		return
+			echo $email >> missing.txt
+			techo -c warn "Account not found for email=$email index=$i (GetResponse)"
 			continue
 		}
+		event_exists=0
+		{
+			sql $sqlopts -o row \
+				"SELECT account_id FROM account_event WHERE account_id=$accountId AND type='became_freemium'"
+			(($#row1)) && event_exists=1
+		} always {
+			if catch '*'; then
+				techo $CAUGHT
+				return 1
+			fi
+		}
+		((event_exists)) && continue
 
-		sql "select ('account_id','type', 'created_at') values account_event" \
-			"where type='became_premium', '$premium_at')"
+		{
+			if ((j % 20 == 0)); then
+				((j)) && echo "$out;" # flush
+				out="insert into account_event (account_id, type, created_at) values"
+				j=0
+			fi
 
-		sql "insert into account_event ('account_id','type', 'created_at') values ($accountId, 'became_premium', '$premium_at')"
-        (($#cancel_at)) && sql "insert into account_event ('account_id','type', 'created_at') values ($accountId, 'subscription_canceled', '$premium_at')"
+			((j++)) && out+=','
+			out+=" ($accountId, 'became_freemium', '$freemium_at')"
+		} always {
+			if catch '*'; then
+				techo $CAUGHT
+				confirm $'\nExit' && { return 1 }
+			fi
+		}
 	done
+	((j)) && echo "$out;" # flush
+
 }
