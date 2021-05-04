@@ -190,15 +190,21 @@ function listPkg()
 	pkgs=($(shell pm list packages $flags "$@" | stdbuf -o0 tr -d '\r')) || return
 	(($#pkgs)) || return 10
 	pkgs=(${pkgs#package:})
+	print -l $pkgs
+
+	return
+
+	set -x
 	for pkg in $pkgs; do
 		local _date=$(
 			shell dumpsys package $pkg | \
-				awk -F'=' '/lastUpdateTime/{print $2; exit}' | \
-				head -n1 | stdbuf -o0 tr -d '\r\n'
+				awk -F'=' '/lastUpdateTime/{print $2; exit}' | head -n1 | stdbuf -o0 tr -d '\r\n' \
+				|| techo -c warn "error pkg $pkg"
 		)
 		sorted+=("${(f)_date} $n")
 		((n++))
 	done
+		set +x
 
 	sorted=("${(@O)sorted}")
 
@@ -247,7 +253,9 @@ function listActivities()
 function start()
 {
 	local act
-
+	act=$(getMainActivity $1)
+	shell am start $act && sendkey WAKEUP
+return
 	if [[ $1 =~ "/" ]]; then
 		act=$1
 	elif [[ -n $2 ]]; then
@@ -325,9 +333,11 @@ function choosePkg()
 		pkgs="$(listRunning "$@")"
 	else
 		((!$#)) && getPackageName && return 0
-		pkgs="$(listPkg -d "$@")"
+		#pkgs="$(listPkg -d "$@")"
+		pkgs=($(listPkg "$@"))
 	fi
-	chooser -H 'Select package' -f1 --ifs $'\n' $pkgs
+	#chooser -H 'Select package' -f1 --ifs $'\n' $pkgs
+	chooser -H 'Select package' -f1 $pkgs
 }
 
 function clearData()
@@ -679,7 +689,7 @@ function processLine()
 		;;
 	esac
 }
-
+typeset -Tf start choosePkg listActivities
 if ((DEBUG)); then
 	set -x
 	debug -k adb processLine choosePkg sendkey
