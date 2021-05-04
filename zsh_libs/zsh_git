@@ -943,6 +943,12 @@ function gclone()
 			input -p $repo -t 'Clone into dir' -v dir $dir || return
 		fi
 		if git clone $_copts $repo $dir && [[ -d $dir ]] && cd $dir; then
+			local tag tags=($(git ls-remote --tags --sort=-v:refname))
+			chooser -v tag $tags && {
+				_copts=()
+				(($+_opts[-d])) && _copts+=(--depth $_opts[-d])
+				gtag --fetch $_copts $tag && gchk $tag
+			}
 			return 0
 		fi
 		techo -c lred Error cloning $repo
@@ -1518,14 +1524,14 @@ function jira()
 			return 0
 			;;
 		start)
-			if (($#)) && [[ ${U)1} =~ '([A-Z]*)-?([0-9]*)' && -n $match[1] ]] &&
-				in_array $match[1]\* jiraPrefixes
-			then
-				(($#match[2])) && issueId=$match[2]
-				jira proj "$match[1]" || return
-			else
-				jira proj || return
-			fi
+			#if (($#)) && [[ ${(U)1} =~ '([A-Z]*)-?([0-9]*)' && -n $match[1] ]] && \
+				#in_array $match[1]\* jiraPrefixes
+			#then
+				#(($#match[2])) && issueId=$match[2]
+				#jira proj "$match[1]" || return
+			#else
+				#jira proj || return
+			#fi
 			#jira tasks $project || return
 			;;
 	esac

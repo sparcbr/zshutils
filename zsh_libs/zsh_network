@@ -137,9 +137,9 @@ function netGetJson()
 {
 	local var jqFilter opts json tmp
 	integer ret
-	zparseopts -D -M -A opts - v: -var:=v -jq: -raw
+	zparseopts -D -M -A opts - v: -var: -jq: -raw
 
-	netGet --var json --header 'Accept: application/json' "$@" || return
+	netGet --var json --header 'Accept: application/json' $opts['v'] "$@" || return
 
 	if (($+opts[--raw])); then
 		if (($+opts[--jq])); then
@@ -156,8 +156,8 @@ function netGetJson()
 	else
 		tmp=$json
 	fi
-	if (($+opts[-v])); then
-		typeset -g "$opts[-v]=$tmp"
+	if (($+opts[--var])); then
+		typeset -g "$opts[--var]=$tmp"
 	else
 		print -r -- $tmp
 	fi
@@ -168,11 +168,12 @@ function netGet()
 	local checkEval ftemp fname url out opt
 	typeset -a opts cOpts
 	integer stdout verbose=1 ret minKbps=20
-	zparseopts -D -M -A opts - v: 'q' -var:=v -stdout -temp: -check-eval: -url: -user: -header: -post
+	zparseopts -D -M -A opts - v: 'q' -var: -stdout -temp: -check-eval: -url: -user: -header: -post
 
 	type -p curl git >/dev/null || sudo apt install curl git
 
 	#minKbps=${opts[--min-speed]:-}
+	#-w "\n¬ %{http_code}"
 	cOpts=(-L --speed-time 8 --speed-limit $((1000*minKbps)) --create-dirs)
 	(($+opts[-q])) && verbose=0 || { (($+opts[-v])) && verbose=${opts[-v]} }
 	((verbose)) || cOpts+=(-sS)
@@ -214,8 +215,8 @@ function netGet()
 	fi
 
 	if ((stdout)); then
-		if (($+opts[-v])); then
-			typeset -g "$opts[-v]=$out"
+		if (($+opts[--var])); then
+			typeset -g "$opts[--var]=$out"
 		else
 			echo -n - $out
 		fi

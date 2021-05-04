@@ -1,4 +1,4 @@
-VERSION=1.0.5
+VERSION=1.0.6
 #lazyload=sql,gettable,tableshow,tablelist,sqlError,usedb,dblist,dbtstamp,dbsize,sqldbdump,sqlEscape
 alias sql="noglob sql"
 alias sqlmaq="noglob sql --ssh idiomus"
@@ -122,6 +122,7 @@ function sql()
 		ret=$?
 
 	else #### Local ####
+		(($+_opts[--nocolumns] && $+_opts[-o])) && abort 2 "--nocolumns and -o options can't be used together"
 		mysqlopts=()
 		(($+_opts[-n])) || usedb $name[2]
 
@@ -189,7 +190,13 @@ function sql()
 			#@TODO: no error handling: redirect stderr to null
 			if (($#file)); then
 				if [[ -f $file ]]; then
-					(($#verbose)) && techo -r -c head mysql ${(qq)mysqlopts} $db '<' $file
+					if ((!$#presql)); then
+						confirm 'Turn off foreign key verification' && {
+							presql='SET GLOBAL FOREIGN_KEY_CHECKS=0;'
+							postsql='SET GLOBAL FOREIGN_KEY_CHECKS=0;'
+						}
+					fi
+					(($#verbose)) && techo -r -c head "mysql ${(qq)mysqlopts} $db < $file"
 					if ((p)); then mysql $mysqlopts $db < $file 2>&p
 					else mysql $mysqlopts $db < $file; fi
 					techo ret=$?
@@ -260,9 +267,11 @@ function sql()
 	}
 }
 
+# $1 is var name, which is array with row values
 function sqlFetch()
 {
 	integer N
+	# starts at 0
 	(($+rowIndex[$1])) || return 1
 
 	((N=++rowIndex[$1]))
@@ -465,7 +474,15 @@ function istable()
 
 function tablelist()
 {
-	sql 'show tables' | tail -n +2
+	#(($#)) && isdb $1 && { shift }
+	usedb $1 || return
+	sql --nocolumns 'show tables'
+}
+
+function viewlist()
+{
+	usedb $1 || return
+	sql "SHOW FULL TABLES IN $db WHERE TABLE_TYPE LIKE 'VIEW'"
 }
 
 function gettable()
@@ -550,4 +567,33 @@ function sqldbstat()
 	pass=$sqlPass[$user]
 	opts+=(-u$user -p"$pass" --count)
 	mysqlshow $opts $db
+}
+
+alias groupby='sqlgroupby'
+# Added 2020-11-10 20:41
+function sqlgroupby()
+{
+	local _opts groups
+	#zparseopts -D -M -A _opts -
+	tbl=$(gettable $1)
+	tbl=$1; shift
+	_opts=("$@")
+	explode -v cols "$(sql -t show columns from $tbl)" $'\n'
+	array_dump cols
+	dbg chooser --ifs '¬' --multi -s '|' -f 2 -v groups --head "         $cols[2]" ${(j.¬.)cols:4:-1}
+	e groups=$groups
+	sql $_opts "SELECT count(*), ${(j.,.)groups} FROM $tbl"   # ORDER BY ${(j.,.)groups}"
+}
+
+# Added 2020-12-06 12:55
+function sqlgrant()
+{
+	local _gdb _guser _gpass
+	zparseopts -D -M -A _opts - p: u: d:
+
+	(($+_opts[-d])) && $_gdb=$_opts[-d]
+	(($+_opts[-p])) && $_gpass=$_opts[-p]
+	(($+_opts[-u])) && $_guser=$_opts[-u]
+
+	sql -n "GRANT ALL ON $_gdb.* TO '$_guser'@'localhost' IDENTIFIED BY '$_gpass' WITH GRANT OPTION; FLUSH PRIVILEGES;"
 }

@@ -516,17 +516,22 @@ function imageof()
 #comp+=(image='')
 function imageMount()
 {
-	local img dir var dev
-	if [[ $# -ne 2 ]]; then
-		echo Usage: $0 imageFile mountDir
+	local img dir var dev _opt
+	(($#)) && { img=$1 ; dir=$2 }
+	(($#img)) && [[ -f $img ]] || {
+		#while [[ ! -f $img ]]; do
+			#chooser -v _opt --file --head 'Choose an image' $(f \*.iso)
+		#done
+		techo -c warn "Usage: $0 imageFile mountDir"
 		return 1
-	fi
-	img=$1 ; dir=$2
-	if [[ ! -f $1 ]]; then
-		techo -c lred "$1: file not found"
-		return 1
-	fi
-	isDir -m $dir || return 1
+	}
+	[[ -f $img ]] || { abort 2 "$img: file not found" }
+	[[ -n $dir ]] && isEmptyDir $dir || {
+		[[ -n $dir ]] && techo -c warn "$dir is not empty"
+		label="$(dd if=$img bs=1 skip=32808 count=32)"
+		isDir -m /m/$label
+		input -p "Mounting point directory" -v dir "/m/$label"
+	}
 	if dev=$(isDirMounted $dir); then
 		if var=$(isLoop $dev); then
 			var=$(imageof $var)

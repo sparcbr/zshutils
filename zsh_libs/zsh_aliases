@@ -612,11 +612,11 @@ function ge()
 	ex_dirs+=($gExcludeDirs)
 
 	# EXCLUDE FILE PATTERN
-	ex_files=(dev '*.dev.*' .local local)
+	ex_files=(dev '*.dev*.*' .local local)
 	techo "Searching in ${BOX:-$root}/$(getfullpath -r $root $PWD)"
 	chooser -p 'Exclude dirs' -v ex_dirs --multi \
 		--selected "$ex_dirs $ex_files" -n "$(($#ex_dirs+1))" \
-		$ex_dirs "${C[head]}Exclude files:$C_" $ex_files; cod=$?
+		$ex_dirs "¬${C[head]}Exclude\ files:$C_" $ex_files; cod=$?
 	if ((cod && cod!=10)); then
 		confirm 'Cancel' && cancel
 	fi
@@ -689,6 +689,26 @@ function logs() # Added 2019-04-11 01:43
 {
 	[[ $1 == 'off' ]] && { killall tail; return }
 	run tail $(git root)/logs/{api,debug,php}.txt -f &
+}
+function ut() { dt ${1:-now} }
+function dt() {
+	local date='now' fmt
+	if [[ $1[1] == '+' ]]; then
+		fmt=$1
+	else
+		if (($#>1)); then
+			fmt=+${2#+}
+		fi
+		if (($#)); then
+			if [[ $1 =~ [^0-9] ]]; then
+				date=$1
+				(($#fmt)) || fmt='+%s'
+			else
+				date=@$1
+			fi
+		fi
+	fi
+	date --date=$date --utc $fmt
 }
 
 function fixtty() # Added 2020-01-14 21:06

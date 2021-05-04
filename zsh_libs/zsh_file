@@ -489,13 +489,13 @@ function syncDirs()
 
 function boxconfig()
 {
-	local cfgfile arg val opts
-	zparseopts -D -M -A opts - a -all=a
+	local cfgfile arg val opts _var
+	zparseopts -D -M -A opts - a -all=a v:=_var
 	cfgfile='.box.cfg.json'
 	arg=$1
 	if [[ -f $cfgfile ]]; then
 		val="$(jq -rc "$arg | @sh" < $cfgfile)" || return $?
-		explode -v val -z $val
+		explode -v $_var[2] -z $val
 	fi
 	#if [] && explode -v val -z $val; then
 		#explode -z -v initCmd $initCmd
