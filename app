@@ -3,11 +3,11 @@ if [ -z "$ZSH_MAIN_INFO" ] || [ -z "$ZSH_LIBS" ]; then
 	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS="$PWD"
 	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; exit 127 }
 fi
-include -qr functions
-include -qr file
+include -r functions
+include -r file
 include -r android
-include -ql debug
-include -ql network
+include -l debug
+include -l network
 zparseopts -D -M - n=dryrun D::=debug d::=D i=interactive
 if [[ -n $dryrun ]] || { [[ -n $DRYRUN ]] && ((DRYRUN)) }; then
 	DRYRUN=-n
@@ -585,11 +585,13 @@ function processLine()
 			apkinstall $1
 		;;
 		(port|redirect)
-			adb reverse tcp:8081 tcp:8081
-			adb reverse tcp:8097 tcp:8097 # for flipper
-			adb tcpip $ADB_TCPPORT
-			#adb connect 192.168.25.
+			[[ -n "$(adb reverse --list)" ]] || {
+				adb reverse tcp:8081 tcp:8081
+				adb reverse tcp:8097 tcp:8097 # for flipper
+				confirm 'Open tcpip port' && adb tcpip $ADB_TCPPORT
+			}
 			;;
+		(tcp|tcpip) adb tcpip $ADB_TCPPORT ;;
 		(input) shell input text "$*" ;;
 		(keyb|hidekeyb|hidekeyboard) sendkey 111 ;;
 		(key|sendkey) sendkey "$@" ;;

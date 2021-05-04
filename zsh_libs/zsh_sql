@@ -2,7 +2,8 @@ VERSION=1.0.5
 #lazyload=sql,gettable,tableshow,tablelist,sqlError,usedb,dblist,dbtstamp,dbsize,sqldbdump,sqlEscape
 alias sql="noglob sql"
 alias sqlmaq="noglob sql --ssh idiomus"
-
+alias sqlps="sql -n 'show full processlist'"
+alias sqlkill="sql -n kill"
 # databases data dir
 DB_DATA_DIR=/var/lib/mysql
 DBNAME='idiomus'
@@ -65,14 +66,18 @@ function sqlType()
 function sql()
 {
 	local file name verbose user pass silent host ret _out mysqlopts
-	local _colsOut _cols _idVar _raw _opts
+	local _colsOut _cols _idVar _raw _opts presql=''
 	integer p i _id
 
 	typeset -g sql
 
 	zparseopts -D -M -A _opts - f: d:=name n v=verbose u: -user:=u p: -pass:=p 't' -table=t \
 		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw 'i' --pager -nocolumns \
-		-force 's'
+		-force 's' -limit:
+
+	if (($+_opts[--skip-foreign])); then
+		presql='SET GLOBAL FOREIGN_KEY_CHECKS=0;'
+	fi
 
 	sql="$*"
 
@@ -109,13 +114,14 @@ function sql()
 			if (($#file)); then
 				[[ -f $file ]] || abort --ex FileIoEx_NotFound 127 $file
 				rsync -a $file $host[2]:/tmp/sql_$file:t
-				(($#verbose)) && techo -r -c head ssh $host[2] $db '<' $file
+				(($#verbose)) && techo -r -c head "ssh $host[2] $db < $file"
 			fi
 			if ((p)); then ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}" 2>&p
 			else; ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}"; fi
 		fi
 		ret=$?
-	else
+
+	else #### Local ####
 		mysqlopts=()
 		(($+_opts[-n])) || usedb $name[2]
 

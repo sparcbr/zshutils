@@ -24,41 +24,42 @@ export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 [[ ! -v comp ]] && typeset -g -a comp
 
-#@TODO configs:
+type meld >/dev/null || { [[ -n $DISPLAY ]] && confirm 'Install meld' && aptinst meld }
 
+#@TODO configs:
+globalCfg=(
+	core.excludesfile $CFG/.gitignore_global
+	diff.algorithm histogram
+	merge.conflictstyle diff3
+	user.email sparcbr@gmail.com
+	user.name 'Elizandro G. Roos'
+	color.ui auto
+	credential.helper store
+)
 function gconfig()
 {
-	local _opts _opt _gopts
+	local _opts cfg val
 	#zparseopts -D -M -A _opts -
-	git config --list --show-scope || return
-
-	return
-	chooser -v _opt -p 'git config' -f1 'Unset' 'Cancel' || return
+	git config --global --list --show-scope
+	chooser -v _opt -p 'git config' -f1 'Global config' 'Cancel' || return
 	case $_opt in
 		Unset)
 			git pull --no-commit "$@"
 			;;
-		Cancel) cancel ;;
-			*)	;;
+		Cancel)
+			cancel
+			;;
+		Global) ;;
 	esac
-
-	git config --global core.excludesfile $CFG/.gitignore_global
-	git config --global diff.algorithm histogram
-	git config --global merge.conflictstyle diff3
-	git config --global user.email sparcbr@gmail.com
-	git config --global user.name 'Elizandro G. Roos'
-	git config --global color.ui auto
-	git config --global credential.helper store
-
 	# or in repopath/.git/info/exclude
 	#if [[ -z $PAGER && -z $GITPAGER ]]; then
 	#	chooser -v PAGER -f1 'less' 'bat' '- *no pager*'
 	#	[[ $PAGER == '-' ]] && PAGER=''
 	#	git config --global core.pager
 	#fi
-
-	#git config --global $opt $val
-	# 'color.ui' 'auto'
+	for cfg val in $globalCfg; do
+		run git config --global $cfg $val
+	done
 }
 
 function croot()
@@ -84,7 +85,7 @@ function glog()
 	local _gopts _opts buf line _vname hashP authorP refsP subjectP dateP
 	local aline author hashColor
 	integer n=10 i
-	zparseopts -D -M -A _opts - -date: 'r' -relative=r v: 'l' n: 'd' diff=d -all
+	zparseopts -D -M -A _opts - -date: 'r' -relative=r v: 'l' n: 'd' diff=d -all a=all
 
 	_gopts=(--graph --color=always --format=tformat:"$gFormat")
 	(($+_opts[-r])) && _gopts+=(--relative)
@@ -138,6 +139,7 @@ function getrefs()
 	git log -n1 --color=always --format=tformat:$gRefsFormat $1
 }
 
+# TODO: increase contrast
 function colorhash()
 {
 	integer color len=hashAbbvLen
@@ -151,13 +153,19 @@ function colorhash()
 
 function gpull()
 {
-	local tmp _opts _opt gopts=()
+	local upstream tmp _opts _opt gopts=()
 	#zparseopts -D -M -A _opts -
+	upstream=$(git for-each-ref --format='%(upstream:short)' "$(git symbolic-ref -q HEAD)") || {
+		techo -c warn 'No upstream branch set'
+		#todo
+		return 10
+	}
 	tmp=$(git pull --ff-only "$@" 2>&1) || {
 		techo -c warn $tmp
-		if [[ $tmp =~ 'fatal: Could not read from remote' ]]; then
+		if [[ $tmp =~ 'fatal: (.*)' ]]; then
 			# on network=1 gpull
-			return 1
+			techo -c lred $match[1]
+			return 3
 		fi
 		chooser -v _opt -p 'No fast-forward possible' -f1 'Merge pull' 'Cancel' || return
 		case $_opt in
@@ -294,7 +302,16 @@ function gfollow()
 function gtag() #@TODO
 {
 	local tag hash
+	zparseopts -D -M -A _opts - -fetch d: -depth:=d
 
+	gremote || { techo -c warn 'No remotes'; return 10 }
+	if (($+_opts[--fetch])); then
+		local _topts=()
+		tag=$1
+		(($+_opts[-d])) && _topts+=(--depth $_opts[-d])
+		git fetch $_topts $remote[1] tag $tag
+		return
+	fi
 	echo TODO
 	techo -c warn "Current tag: $(git describe --always --tags)" #$(git rev-list --tags --max-count=1)'
 	return 1
@@ -752,7 +769,7 @@ function gpush()
 			getbranch || { techo -c warn 'No branches'; return 10 }
 		fi
 		run git push --set-upstream ${(kv)_opts} $remote[1] $branch
-		gpr
+		[[ $branch != main && $branch != master ]] && gpr
 	fi
 }
 
@@ -806,7 +823,12 @@ function gbranch() #@TODO
 	#zparseopts -M -D -A opts - d=delete -delete=d l=list -list=l c=create \
 		#'r' -remote=r 'e' -exists=e
 	zparseopts -M -D -A opts - d=delete -delete=d l=list -list=l c=create \
-		'e' -exists=e
+		'e' -exists=e -upstream
+
+	(($+opts[--upstream])) && {
+		git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null
+		return
+	}
 
 	#if (($#)) && [[ ${1:0:1} != '-' ]]; then
 
@@ -895,12 +917,14 @@ function gremote()
 # Added 2019-09-03 19:04
 function gclone()
 {
-	local repo dir _opts base=$HOME/repos
-	zparseopts -D -M -A _opts - b:
+	local depth=20 repo dir _opts _copts=() base=$HOME/repos
+	zparseopts -D -M -A _opts - b: d: depth:=d -branch:
 
 	include -r network
 	repo=$1 ; dir=$2
 	(($+_opts[-b])) && base=$_opts[-b]
+	(($+_opts[-d])) && _copts+=(--depth $_opts[-d])
+	(($+_opts[--branch])) && _copts+=(--branch $_opts[--branch])
 	cd $base
 
 	{ [[ -n "$(urlinfo -s $repo)" ]] || repo="$(github -e $repo)" } || return
@@ -918,7 +942,7 @@ function gclone()
 			fi
 			input -p $repo -t 'Clone into dir' -v dir $dir || return
 		fi
-		if git clone $repo $dir && [[ -d $dir ]] && cd $dir; then
+		if git clone $_copts $repo $dir && [[ -d $dir ]] && cd $dir; then
 			return 0
 		fi
 		techo -c lred Error cloning $repo
@@ -1249,7 +1273,9 @@ function gfind()
 	local rev revs file filehash hash since=(--since='34 days ago')
 	file="$1"; shift 1
 	# git hash for file
-	[[ -f file ]] && filehash=$(git hash-object $file) || filehash=$(git ls-tree HEAD $file)
+	{
+		[[ -f file ]] && filehash=$(git hash-object $file) || filehash=$(git ls-tree HEAD $file) || return 1
+	} 2>/dev/null
 	revs=($(git log $since --all --pretty=%H -- "$file"))
 	for rev in $revs; do
 		# check each revision for checksum match
@@ -1274,6 +1300,11 @@ function gisupdated()
 {
 	getbranch -q || return
 	gremote || { [ -t 1 ] && techo -c warn 'No remotes'; return 10 }
+	(($#)) && {
+		in_array $1 remote || { techo -c warn "$1 is not a remote"; return 1 }
+		gdiff ..$1/$branch --quiet
+		return
+	}
 	gdiff ..$remote[1]/$branch --quiet
 }
 
@@ -1449,6 +1480,7 @@ jiraPrefixes=(API APP MAN INF)
 # Added 2020-07-19 23:56
 function jira()
 {
+	local cmd repo repoPrefix
 	integer issueId
 	typeset -a opts args
 
@@ -1461,7 +1493,8 @@ function jira()
 
 	case $cmd in
 		api) open 'https://developer.atlassian.com/cloud/jira/platform/rest/v2'
-			return ;;
+			return
+			;;
 		proj|projects*)
 			if (($#)); then
 				opts=(-S $1\*)
@@ -1474,10 +1507,11 @@ function jira()
 			#cmd='tasks'
 			;;
 		tasks)
+			(($#)) && project=$1
 			(($#project)) && project='project+%3D+'$project
-			status='status+in+(%22In+Progress%22,+%22To+Do%22)'
+			tstatus='status+in+(%22In+Progress%22,+%22To+Do%22)'
 			#jiraRequest 'filter/10007'
-			opts=($project $status 'assignee+in+(currentUser(),+EMPTY)+ORDER+BY+Rank+ASC')
+			opts=($project $tstatus 'assignee+in+(currentUser(),+EMPTY)+ORDER+BY+Rank+ASC')
 			jiraRequest -v issues --jq '' 'search?jql='${(j.+AND+.)opts} || return
 			#$issues == New && input -v is sueId -p 'Issue id' || return 10
 			chooser -v issueId -f1 $issues
@@ -1499,13 +1533,15 @@ function jira()
 	#"filters="
 	# TODO: suggest branch name from issue id
 	repo=$(gitgetrepo)
-	repoPrefix=${(L)repo##*/}
+	repoPrefix=${(U)${(L)repo##*/}%.git}
+
 	(($#issueId)) || input -v issueId 'issue id' || return
 	bName="feat/$repoPrefix-$issueId-"
 	input -v bName -p 'Branch name'
-	[[ $bName =~ '^feat/'$repoPrefix'-([0-9]+)-' && $match[1] -eq $issueId ]] || abort 2 "Incorrect branch name. Must start with \"feat/$repoPrefix-$issueId-\""
+	[[ $bName =~ '^feat/'$repoPrefix'-([0-9]+)-' && $match[1] -eq $issueId ]] || \
+		abort 2 "Incorrect branch name. Must start with \"feat/$repoPrefix-$issueId-\""
 	gbranch -c $bName || return
-	# TODO: set assignee=me; set status=InProgress
+	# TODO: set assignee=me; set tstatus=InProgress
 }
 
 # curl -s "https://api.github.com/repos/user/project-name/commits?path=filename&page=1&per_page=1" | jq -r '.[0].commit.committer.date'

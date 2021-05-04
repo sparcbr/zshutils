@@ -23,7 +23,9 @@ function techo()
 	integer i dashGiven
 	zparseopts -M -D - c:=c n=nonl P=print r=noesc T=ts
 	_topts=()
-	[[ -z $TTY || ! -c $TTY ]] && TTY=/dev/null # stdout
+	[[ -z $TTY || ! -c $TTY ]] && {
+		[[ -t 1 ]] && TTY=/dev/stdout || TTY=/dev/null
+	}
 	[[ -n $nonl ]] && _topts+=('-n')
 
 	i=${@[(i)^-*|-##]} # find first non option or -- or -

@@ -46,7 +46,7 @@ function p()
 	if [[ -z $pid && $1 == [0-9]## ]]; then
 		pid=(-p $1)
 		shift
-	elif ((! $#cmd )) && [[ ${1:0:1} = [[:alpha:]_]## ]]; then
+	elif ((!$#cmd)); then
 		cmd=(-C $1)
 		shift
 	fi

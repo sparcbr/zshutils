@@ -10,7 +10,7 @@ groot=$(git root) && [[ -d $groot/node_modules ]] && path=($groot/node_modules/.
 # Added 2019-12-19 12:43
 function pretty()
 {
-	local F Fname f prettyF tmpBasePath basePath baseName _s _opt
+	local F Fname f prettyF tmpBasePath basePath baseName _s _popt
 	typeset -a gfiles files _opts args
 	zparseopts -D -M -A _opts -
 
@@ -20,8 +20,19 @@ function pretty()
 	#@TODO specify extension.. and have a default, in case no arguments are given
 	#@TODO if any dirs are given, add a file glob and use them below
 	#(($#)) # && files=($(prettier -l "$@")) || return
-	gfiles=($(gdiff -ls $args; gdiff -l $args)) # non pretty and in the index or modified
-	(($#gfiles==0)) && { techo -c ok 'No files needed formatting'; return }
+	gfiles=(${(u)$(gdiff -ls $args; gdiff -l $args)}) # non pretty and in the index or modified
+	(($#gfiles==0)) && {
+		if ((!$#args)); then
+			techo -c ok 'No files needed formatting';
+			return
+		fi
+		gfiles=($args)
+	}
+	if [[ $PWD != $basePath ]]; then
+		relDir="$(getfullpath -r $basePath $PWD)"
+		#f=$relDir/$f
+		gfiles=(${gfiles#$relDir/})
+	fi
 	#(($#files==0)) && { techo -c ok 'No files needed formatting'; return }
 	# non git files are after git files
 	for f in $gfiles ${files:|gfiles}; do
@@ -52,24 +63,25 @@ function pretty()
 			fi
 		fi
 		while ! cmp --quiet $f $prettyF; do
-			if [[ $_opt != Diff ]]; then
+			if [[ $_popt != Diff ]]; then
 				diff -u --ignore-space-change $f $prettyF | head -n 20
 				(($pipestatus[1]==0)) && techo -c head 'Only space changes'
 			fi
 
-			if chooser -f1 -v _opt --footer 'Esc) Skip to next file' \
-				--use-keys 'S' "Save changes to $F" 'M' 'Meld files' 'D' 'Diff'; then
-				case $_opt in
+			if chooser -f1 -v _popt --footer 'Esc) Skip to next file' \
+				--use-keys 'S' "Save changes to $F" 'M' 'Meld files' 'D' 'Diff'
+			then
+				case $_popt in
 					Meld)
 						meld $f $prettyF
 						;;
 					Save)
-						cp $prettyF $f
+						confirm "cp $prettyF $f" && run -v2 cp $prettyF $f
 						;;
 					Diff)
 						diff -u $f $prettyF
 						;;
-					*)
+					*) techo -c warn "Invalid opt: $_popt"
 						;;
 				esac
 				cmp --quiet $f $prettyF && touch $prettyF

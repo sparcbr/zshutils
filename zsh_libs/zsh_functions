@@ -213,14 +213,14 @@ function readkey()
 
 function chooser()
 {
-	local noSelect sep field bytes search current head foot
+	local noSelect sep field bytes search current head foot section
 	local _olist chosen selectors ofs
 	local file _opt _opts selected selected_idx list_keys events items
-	integer multi i j noAutoSelect
+	integer multi i j noAutoSelect max_check=2 _len
 
 	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order
 
-	zparseopts -D -M -A _opts - n:=noSelect S: \
+	zparseopts -D -M -A _opts - n:=noSelect -section: S: \
 		 I: -save-index:=I v: D:=current -ifs: -items: \
 		 s:=sep f:=field R:=regex b:=bytes ofs:=ofs \
 		 H:=head -head:=H -header:=H p:=H F:=foot -foot:=F -footer:=F -marks: \
@@ -228,7 +228,7 @@ function chooser()
 		 -file -files -dir -no-auto-select -strip-color
 
 	typeset -g ACTION='' # empty for the default event (SELECT)
-	typeset -a chosenList
+	typeset -a chosenList sectionList
 	multi=$+_opts[--multi]
 
 	if (($+_opts[--dir])); then
@@ -318,8 +318,10 @@ function chooser()
 					 _olist=("${${(P)items}[i++]}")
 				done
 			else
+				#todo items=("${(z)@")
 				for ((i=1; i<=$#; )); do
 					local glob="$@[i++]"
+
 					if [[ -n $glob ]]; then
 						# keys are globs and value is element index
 						list_keys+=("$glob" $((i/2)))
@@ -334,11 +336,13 @@ function chooser()
 					explode -v _olist "${${(P)items}[*]}" $_opts[--ifs]
 				else
 					_olist=("${${(P)items}[@]}")
+					#_olist=("${(z)${(P)items}[@]}")
 				fi
 			elif (($+_opts[--ifs])); then
 				explode -v _olist "$*" $_opts[--ifs]
 			else
 				_olist=("$@")
+				#_olist=("${(z)@}")
 			fi
 		fi
 	fi
@@ -351,7 +355,7 @@ function chooser()
 			integer current_key=1
 			selected=()
 			if (($+_opts[--selected])); then
-				selected_idx=($=_opts[--selected])
+				selected_idx=("${(@z)${_opts[--selected]}}")
 
 				for ((i=1; i<=$#selected_idx; i++)); do
 					# make sure all index are integers
@@ -395,12 +399,19 @@ function chooser()
 			for i in $selected_idx; do
 				#(($+selected[i])) && selected[i]=1
 				selected[i]=1
+				#((b=selected[$i]+1)); ((b>selected[i]=1
 			done
 
 			(($#_olist >= 10)) && include -qr conversion
 
 			(($#noSelect)) && noSelect=($=noSelect[2])
 			for ((i=j=1; i<=$#_olist; i++)); do
+				tmp=$_olist[i]
+				if [[ $tmp[1] == '¬' ]]; then
+					_olist[i]=$tmp[2,-1]
+					section+=($i)
+				fi
+
 				if [[ -z ${(k)list_keys[(r)$i]} && -z ${noSelect[(r)$i]} ]]; then
 					if ((j <= 9)); then
 						_opt=$j # number as key binding
@@ -541,6 +552,12 @@ function chooser()
 							techo "  ${(l:noSelectAlign:)} $_olist[i]"
 							continue
 						fi
+
+						if [[ -n ${section[(r)$i]} ]]; then
+							techo -c head $tmp[2,-1]
+							continue
+						fi
+
 						_opt=${(k)list_keys[(r)$i]}
 						if [[ -z $_opt ]]; then
 							_opt=' '
@@ -705,6 +722,8 @@ function chooser()
 									# Toggle selection
 									# @TODO: cycle through multiple selection types
 									((b=1-selected[$i]))
+									#((b=selected[i]+1))
+									#((b>max_check)) && b=0
 									selected[i]=$b
 									next_key=$i
 								else
@@ -1369,7 +1388,7 @@ function todo()
 		#	id=$(noext $(getfilename $todo) $e)
 		#	run -p "Todo: $id" show $todo
 		#done
-		sqlite3 -batch test.db
+		#sqlite3 -batch test.db
 		;;
 	*)
 		techo -c err "Invalid command: $cmd"

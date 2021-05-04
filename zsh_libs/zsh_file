@@ -270,7 +270,7 @@ function syncDirs()
 	typeset -aU _opts src targets rsArgs extraArgs files excludePatterns
 	zparseopts -D -M -A _opts - q=quiet s=sudo d=dry 'R' -relative=R 'z' -compress=z \
 		c=checksum -reverse=reverse -no-add-slash=noSlash -no-delete=noDelete \
-		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e \
+		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e -port: \
 		-no-perms -no-user -no-group
 
 	[[ -z "$sudo" ]] && sudo='-S'
@@ -314,6 +314,7 @@ function syncDirs()
 	fi
 	(($+_opts[-R])) && rsArgs+=(--relative)
 	(($+_opts[-z])) && rsArgs+=(-z)
+	(($+_opts[--port])) && rsArgs+=(-e "ssh -p $_opts[--port]")
 
 	# analyse sources
 	for ((n=1; n<=$#src; n++)); do
@@ -387,6 +388,7 @@ function syncDirs()
 	if ((cod && cod!=10)); then
 		confirm 'Cancel' && cancel
 	fi
+	# Parameter Expansion -> $^ RC_EXPAND_PARAM
 	(($#excludePatterns)) && rsArgs+=(--exclude=$^excludePatterns)
 
 	techo -c lcyan "Sources: ${(@qq)src}"

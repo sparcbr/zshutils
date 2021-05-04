@@ -19,21 +19,7 @@ gPhPExcludeDirs=(vendor)
 
 function cod()
 {
-	local opts arg args linenum file pos tmp
-
-	for arg in "$@"; do
-		if [[ "$arg" =~ ":" ]]; then
-			explode -v tmp $arg ':'
-			file=$tmp[1]
-			linenum=$tmp[2]
-			if ((linenum)); then
-				pos=+$linenum
-			fi
-			code $opts $pos $file
-		else
-			code $opts $arg
-		fi
-	done
+	code --goto "$@"
 }
 
 comp+=("what=which")
@@ -505,7 +491,7 @@ function f()
 {
 	local base maxDepth args name s opts ex_dirs n=1 fopts=()
 	zparseopts -D -M -A opts - d: e: 'i' 's' 'p' g: b:=base
-	(($+opts[-d])) && maxdepth=(-maxdepth $opts[-d])
+	(($+opts[-d])) && fopts+=(-maxdepth $opts[-d])
 	[[ -n "$base" ]] && explode -v base "$base[2]" ',' || base=(.)
 	#[[ $1 = - ]] && shift
 	#$s find ${=d} \( -path ./bckup_extensions -or -path ./extensions \) -prune -or $name $@ -print
@@ -550,11 +536,11 @@ function f()
 	if (($#ex_dirs)); then
 		tmp=('-path '$prefix${(@)^ex_dirs})
 		tmp=($(implode tmp ' -o '))
-		fopts=(-type d '(' $=tmp ')' -prune -false -o)
+		fopts+=(-type d '(' $=tmp ')' -prune -false -o)
 	fi
 	[[ -n $g ]] && {
-		run ${opts[-s]+-s} find $maxDepth -L $base $fopts $=name "$@" $p | group $g
-	} || run ${opts[-s]+-s} find $maxDepth -L $base $fopts $=name "$@" $p
+		run ${opts[-s]+-s} find -L $base $fopts $=name "$@" $p | group $g
+	} || run ${opts[-s]+-s} find -L $base $fopts $=name "$@" $p
 }
 
 function aldd() {
@@ -588,7 +574,7 @@ function send()
 
 function ge()
 {
-	local sudo icase in_exts ex_exts width prefix
+	local sudo icase in_exts ex_exts width prefix root
 	local opts args defExDirs defExExts _opts
 	integer cod
 	typeset -aU ex_dirs ex_files
@@ -597,6 +583,7 @@ function ge()
 	(($#)) || return 10
 	opts=()
 
+	root=$(git root)
 	#  #  #  #  #
 	# inclusion #
 	#  #  #  #  #
@@ -626,7 +613,7 @@ function ge()
 
 	# EXCLUDE FILE PATTERN
 	ex_files=(dev '*.dev.*' .local local)
-
+	techo "Searching in ${BOX:-$root}/$(getfullpath -r $root $PWD)"
 	chooser -p 'Exclude dirs' -v ex_dirs --multi \
 		--selected "$ex_dirs $ex_files" -n "$(($#ex_dirs+1))" \
 		$ex_dirs "${C[head]}Exclude files:$C_" $ex_files; cod=$?

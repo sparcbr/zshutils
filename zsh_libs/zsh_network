@@ -494,7 +494,7 @@ function vnc()
 		vncpasswd $passfile
 	done
 	#DISPLAY=:0
-	x0vncserver -display :0 -rfbport 5555 -rfbauth $passfile
+	x0vncserver -display :0 -rfbport 5500 -rfbauth $passfile
 }
 
 function ssh_()

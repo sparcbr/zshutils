@@ -96,13 +96,12 @@ function accGetAccountIdByEmail()
 	#sqlFetch row
 }
 
-csvfp='_support/hotmart.csv'
-refunded_csvfp='_support/reembolsadas_app.csv'
-getresp_csvfp='_support/getResponse.csv'
 function hotmartCSVImport()
 {
-	integer i j accountId adesao_idx cancel_idx email_idx event_exists
+	integer i j accountId adesao_idx cancel_idx email_idx event_exists total
 	local var adesao cancelamento email out
+
+	csvfp=${1:-_support/hotmart.csv}
 
 	typeset -A refunded_email_index
 	# like: refunded_email_index[email@something.com]=3
@@ -110,7 +109,9 @@ function hotmartCSVImport()
 	include conversion
 	include sql
 	usedb idiomus
-	#chooser -v csvfp $csvfp  _support/*.csv
+
+	#refunded_csvfp=${2:-_support/reembolsadas_app.csv}
+	#chooser -v refunded_csvfp $refunded_csvfp $refunded_csvfp _support/*.csv
 	#explode --stdin --csv -v refunded_csv ';' < $refunded_csvfp || return
 	#refunded_email_idx=$(indexOf 'Email' '_headers')
 	#for ((i=1; i<=$refunded_csv_len; i++)); do
@@ -118,56 +119,79 @@ function hotmartCSVImport()
 	#	refunded_email_index+=($email $i)
 	#done
 
+	missingTxt='missing'$(date "+%Y%m%d%H%M")'.txt'
 	#############
 	## Hotmart ##
 	#############
-	#explode --stdin --csv -v csv ';' < $csvfp || return
-	#adesao_idx=$(indexOf 'Adesão' '_headers')
-	#cancel_idx=$(indexOf 'Cancelamento' '_headers')
-	#email_idx=$(indexOf 'Email' '_headers')
-	#for ((i=1; i<=$csv_len; i++)); do
-        #var="csv$i"
-		#premium_at=$(datetime --sql "${${(P)var}[adesao_idx]}")
-		#cancel_at=$(datetime --sql "${${(P)var}[cancel_idx]}")
-		#email=${${(P)var}[email_idx]}
+	csvfp=${1:-_support/hotmart.csv}
+	chooser -v csvfp $csvfp _support/*.csv
+	techo Reading $csvfp
+	explode --stdin --csv -v csv ';' < $csvfp || return
+	adesao_idx=$(indexOf 'Adesão' '_headers')
+	cancel_idx=$(indexOf 'Cancelamento' '_headers')
+	email_idx=$(indexOf 'Email' '_headers')
+	event_type='became_premium'
 
-		#(($#email)) || {
-			#techo -c warn "Empty email: ${${(P)var}[@]}"
-			#return 1
-		#}
+	for ((i=1; i<=$csv_len; i++)); do
+		var="csv$i"
+		premium_at=$(datetime --sql "${${(P)var}[adesao_idx]}")
+		cancel_at=$(datetime --sql "${${(P)var}[cancel_idx]}")
+		email=${${(P)var}[email_idx]}
 
-        #accGetAccountIdByEmail $email 'accountId' || {
-			#echo $email >> missing.txt
-			#techo -c warn "Account not found for email=$email index=$i"
-			#continue
-		#}
+		(($#email)) || {
+			techo -c warn "Empty email: ${${(P)var}[@]}"
+			return 1
+		}
 
-		#{
-			#if ((j % 20 == 0)); then
-				#((j)) && echo "$out;" # flush
-				#out="insert into account_event (account_id, type, created_at) values"
-				#j=0
-			#fi
+		accGetAccountIdByEmail $email 'accountId' || {
+			echo $email >> $missingTxt
+			techo -c warn "Account not found for email=$email index=$i"
+			continue
+		}
+		event_exists=0
+		{
+			sql $sqlopts -o row \
+				"SELECT account_id FROM account_event WHERE account_id=$accountId AND type='$event_type' AND created_at='$premium_at'"
+			(($#row1)) && event_exists=1
+		} always {
+			if catch '*'; then
+				techo $CAUGHT
+				return 1
+			fi
+		}
+		((event_exists)) && continue
 
-			#((j++)) && out+=','
-			#out+=" ($accountId, 'became_premium', '$premium_at')"
+		{
+			if ((j % 20 == 0)); then
+				((j)) && echo "$out;" # flush
+				out="insert into account_event (account_id, type, created_at) values"
+				j=0
+			fi
+
+			((j++)) && out+=','
+			out+=" ($accountId, 'became_premium', '$premium_at')"
+			((total++))
 
 			#(($#cancel_at)) && {
-				#out+=", ($accountId, 'subscription_canceled', '$cancel_at')"
-				#((j++))
+				#((j++)) && out+=','
+				#out+=" ($accountId, 'subscription_canceled', '$cancel_at')"
 			#}
-		#} always {
-			#if catch '*'; then
-				#techo $CAUGHT
-				#confirm $'\nExit' && { return 1 }
-			#fi
-		#}
-	#done
-	#((j)) && echo "$out;" # flush
+		} always {
+			if catch '*'; then
+				techo $CAUGHT
+				confirm $'\nExit' && { return 1 }
+			fi
+		}
+	done
+	((j)) && echo "$out;" # flush
 
+	echo "Total=$total"
+	return
 	#################
 	## GetResponse ##
 	#################
+
+	getresp_csvfp='_support/getResponse.csv'
 	explode --stdin --csv -v grcsv ',' < $getresp_csvfp || return
 	adesao_idx=$(indexOf 'sign_up' '_headers')
 	email_idx=$(indexOf 'email' '_headers')
