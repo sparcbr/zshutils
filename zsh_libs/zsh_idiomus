@@ -60,7 +60,7 @@ function accRemoteGetAccountIdByEmail()
 		sql $sqlopts --ssh idiomus -t --nocolumns \
 			"select account_id, type, created_at, expire_at, name," \
 			"phone_country_code, phone_area_code, phone_number, password, admin" \
-			"from account where email='$1'"
+			"from account where email='$1' and type='premium'"
 	)}") || abort -ex NetIoEx_Unreachable 9 idiomus 22
 
 	(($#buf && $#buf[1])) || return 10
@@ -80,12 +80,10 @@ function accRemoteGetAccountIdByEmail()
 function accGetAccountIdByEmail()
 {
 	{
-		sql $sqlopts -o row "select account_id from account where email='$1'"
-		(($#row1)) && typeset -g ${2:-accountId}'='$row1[1]
-		#|| {
-		#	accRemoteGetAccountIdByEmail $1
-		#		return 1
+		sql $sqlopts -o row "select account_id from account where email='$1' and type='premium'"
+		#|| { accRemoteGetAccountIdByEmail $1
 		#}
+		(($#row1)) && typeset -g ${2:-accountId}'='$row1[1]
 	} always {
 		if catch '*'; then
 			techo here $CAUGHT
@@ -96,6 +94,20 @@ function accGetAccountIdByEmail()
 	#sqlFetch row
 }
 
+function datediff()
+{
+	local d1 d2
+    d1=$(date -d "$1" +%s)
+    d2=$(date -d "$2" +%s)
+    echo $((d1>d2 ? d1 - d2 : d2 - d1))
+}
+
+function account_event_exists()
+{
+	sql $sqlopts -o row \
+		"SELECT account_id FROM account_event WHERE account_id=$accountId AND type='$event_type' AND created_at='$premium_at'"
+	(($#row1))
+}
 function hotmartCSVImport()
 {
 	integer i j accountId adesao_idx cancel_idx email_idx event_exists total
@@ -105,20 +117,29 @@ function hotmartCSVImport()
 
 	typeset -A refunded_email_index
 	# like: refunded_email_index[email@something.com]=3
+	rm not_refunded.txt
 
 	include conversion
 	include sql
 	usedb idiomus
-
-	#refunded_csvfp=${2:-_support/reembolsadas_app.csv}
-	#chooser -v refunded_csvfp $refunded_csvfp $refunded_csvfp _support/*.csv
-	#explode --stdin --csv -v refunded_csv ';' < $refunded_csvfp || return
-	#refunded_email_idx=$(indexOf 'Email' '_headers')
-	#for ((i=1; i<=$refunded_csv_len; i++)); do
-    #    var="refunded_csv$i"
-	#	refunded_email_index+=($email $i)
-	#done
-
+	refunded_csvfp=${2:-_support/reembolsadas_app.csv}
+	chooser -v refunded_csvfp $refunded_csvfp $refunded_csvfp _support/*.csv
+	techo Reading refunded $refunded_csvfp
+	sleep 0.5
+	explode --stdin --csv -v refunded_csv ';' < $refunded_csvfp || return
+	refunded_email_idx=$(indexOf 'Email' '_headers')
+	refunded_venda_idx=$(indexOf 'Data de Venda' '_headers')
+	for ((i=1; i<=$refunded_csv_len; i++)); do
+        var="refunded_csv$i"
+		#refunded_email_index+=($email $i)
+		email=${${(P)var}[refunded_email_idx]}
+		venda_at=$(datetime --sql "${${(P)var}[refunded_venda_idx]}")
+		if (($+refunded_email_index[$email])); then
+			refunded_email_index[$email]+=','$venda_at
+		else
+			refunded_email_index+=($email $venda_at)
+		fi
+	done
 	missingTxt='missing'$(date "+%Y%m%d%H%M")'.txt'
 	#############
 	## Hotmart ##
@@ -126,12 +147,12 @@ function hotmartCSVImport()
 	csvfp=${1:-_support/hotmart.csv}
 	chooser -v csvfp $csvfp _support/*.csv
 	techo Reading $csvfp
+	sleep 0.5
 	explode --stdin --csv -v csv ';' < $csvfp || return
 	adesao_idx=$(indexOf 'Adesão' '_headers')
 	cancel_idx=$(indexOf 'Cancelamento' '_headers')
 	email_idx=$(indexOf 'Email' '_headers')
 	event_type='became_premium'
-
 	for ((i=1; i<=$csv_len; i++)); do
 		var="csv$i"
 		premium_at=$(datetime --sql "${${(P)var}[adesao_idx]}")
@@ -148,18 +169,16 @@ function hotmartCSVImport()
 			techo -c warn "Account not found for email=$email index=$i"
 			continue
 		}
-		event_exists=0
+
 		{
-			sql $sqlopts -o row \
-				"SELECT account_id FROM account_event WHERE account_id=$accountId AND type='$event_type' AND created_at='$premium_at'"
-			(($#row1)) && event_exists=1
+			account_event_exists $accountId 'became_premium' $premium_at && premium_exists=1
 		} always {
 			if catch '*'; then
 				techo $CAUGHT
 				return 1
 			fi
 		}
-		((event_exists)) && continue
+
 
 		{
 			if ((j % 20 == 0)); then
@@ -168,14 +187,42 @@ function hotmartCSVImport()
 				j=0
 			fi
 
-			((j++)) && out+=','
-			out+=" ($accountId, 'became_premium', '$premium_at')"
-			((total++))
+			premium_exists || {
+				((j++)) && out+=','
+				out+=" ($accountId, 'became_premium', '$premium_at')"
+				((total++))
+			}
 
-			#(($#cancel_at)) && {
-				#((j++)) && out+=','
-				#out+=" ($accountId, 'subscription_canceled', '$cancel_at')"
-			#}
+			(($#cancel_at)) && {
+				refunded=0
+				if (($+refunded_email_index[$email])); then
+					explode -v dates $refunded_email_index[$email] ','
+					confirm=1
+					for d in $dates; do
+						# diff in seconds
+						if (( $(datediff $premium_at $d) <= 86400*8 )); then
+							refunded=1
+						elif (( $(datediff $premium_at $d) > 86400*30*11 )); then
+							confirm=0
+						fi
+					done
+					if ((refunded==0 && confirm)); then
+						#confirm "$email: Adesão $premium_at did not match \"Data de venda\" in refunded dates: $dates. Mark as refunded?" &&
+							refunded=1
+					fi
+					if ((refunded==0 && $(grep $email $csvfp | wc -l) == 1)); then
+						refunded=1
+					fi
+					((refunded==0)) && echo "$email " >> not_refunded.txt
+
+				fi
+				((j++)) && out+=','
+				if ((refunded)); then
+					out+=" ($accountId, 'subscription_refunded', '$cancel_at')"
+				else
+					out+=" ($accountId, 'subscription_canceled', '$cancel_at')"
+				fi
+			}
 		} always {
 			if catch '*'; then
 				techo $CAUGHT
@@ -185,7 +232,7 @@ function hotmartCSVImport()
 	done
 	((j)) && echo "$out;" # flush
 
-	echo "Total=$total"
+	#techo -c warn "Total=$total"
 	return
 	#################
 	## GetResponse ##
