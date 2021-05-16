@@ -530,7 +530,6 @@ sel-list-input() {
 			((ZSHSELECT_MULTI)) && _sellist_toggle_element $current_idx
 			;;
         (*)
-			decho "key=${(q)key}"
 			event=$KEY_MASK[(k)$key]
 			if [[ $event == <-> ]]; then
 				# It's a number. Select the corresponding element.
@@ -540,8 +539,7 @@ sel-list-input() {
 				else
 					reply=($idx 'SELECT')
 				fi
-			elif [[ "${NLIST_ENABLED_EVENTS[(r)$event]}" == $event ]]; then
-				# It's an event.
+			elif [[ -n $event && $NLIST_ENABLED_EVENTS[(r)$event] == $event ]]; then
                 reply=($current_idx $event)
             elif [[ $#key == 1 && $((#key)) -lt 31 ]]; then
                 # ignore all other control keys

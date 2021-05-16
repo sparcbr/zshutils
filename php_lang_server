@@ -1,0 +1,26 @@
+#!/bin/zsh
+#set -x
+ADDRESS='0.0.0.0:5005'
+opts=(--tcp-server=$ADDRESS --memory-limit=256M)
+
+vendor=$COMPOSER_HOME/vendor
+package='felixfbecker/language-server'
+lpath=$vendor'/felixfbecker/language-server/bin/php-language-server.php'
+
+zparseopts -D -M -A _opts - f
+
+#@TODO:
+# composer global require $package
+
+# init=(composer global run-script --working-dir=$vendor/$package parse-stubs)
+include -r functions
+#while
+if (($+_opts[-f])); then
+	run php $lpath $opts
+else
+	run php $lpath $opts &
+fi
+#set x
+#; pid=$!;
+#wait $pid; ret=$?; echo ret=$ret; return $ret
+

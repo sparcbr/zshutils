@@ -1,29 +1,41 @@
 #!/bin/bash
-bright="/sys/class/backlight/acpi_video0/brightness"
-case $1 in
+#bright="/sys/class/backlight/dell_backlight/brightness"
+cmd=$1; shift
+level=${1:-4}
+for devname in dell_backlight acpi_video0; do
+	dev="/sys/class/backlight/$devname"
+	bright=$dev/brightness
+	[[ -f $bright ]] && {
+		ok=1
+		break
+	}
+done
+((ok)) || {
+	echo No backlight devices found
+	return 1
+}
+
+case $cmd in
 	install)
-		fixfile="/lib/systemd/system-sleep/fix_brightness"
-		sudo tee $fixfile >/dev/null <<EOF
-#!/bin/sh
-case \$1 in
-  post)
-	$0
-    ;;
-esac
-EOF
-		sudo chmod +x $fixfile
-		shift
-	;;
+		sudo ln -s $0 /lib/systemd/system-sleep/brightness
+		;;
 	get|show)
 		cat $bright
-		exit
-	;;
+		exit ;;
+	pre)
+		exit ;;
+	post)
+		;;
+	*) ;;
 esac
 
 
-level=${1:-6}
-if [ $EUID -ne 0 ]; then
-	echo $level | sudo tee $bright
-else
-	echo $level > $bright
-fi
+setbrightness() {
+	#echo /sys/class/backlight/*
+	if [ $EUID -ne 0 ]; then
+		echo $level | sudo tee $bright
+	else
+		echo $level > $bright
+	fi
+}
+setbrightness $level
