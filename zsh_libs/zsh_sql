@@ -611,7 +611,7 @@ function dbcreate()
 {
 	local name user pass
 	input -v name -p 'Database name' $1
-	sql "create database $name" && techo -c ok "Database $name created."
+	sql -n "create database $name" && techo -c ok "Database $name created."
 	confirm 'Create user' && {
 		input -v user -p 'User' $name && {
 			input -v pass -p 'Password' '!7866f' && {
