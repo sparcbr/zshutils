@@ -554,7 +554,7 @@ function chooser()
 						fi
 
 						if [[ -n ${section[(r)$i]} ]]; then
-							techo -c head $tmp[2,-1]
+							techo -c head $_olist[$i]
 							continue
 						fi
 

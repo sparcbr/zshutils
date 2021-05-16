@@ -576,24 +576,47 @@ function sqlgroupby()
 	local _opts groups
 	#zparseopts -D -M -A _opts -
 	tbl=$(gettable $1)
-	tbl=$1; shift
+	(($#)) && shift
 	_opts=("$@")
 	explode -v cols "$(sql -t show columns from $tbl)" $'\n'
-	array_dump cols
-	dbg chooser --ifs '¬' --multi -s '|' -f 2 -v groups --head "         $cols[2]" ${(j.¬.)cols:4:-1}
-	e groups=$groups
+	chooser --ifs '¬' --multi -s '|' -f 1 -v groups --head "         $cols[2]" ${(j.¬.)cols:4:-1}
 	sql $_opts "SELECT count(*), ${(j.,.)groups} FROM $tbl"   # ORDER BY ${(j.,.)groups}"
 }
 
 # Added 2020-12-06 12:55
 function sqlgrant()
 {
-	local _gdb _guser _gpass
+	local _opts _gdb _guser _gpass
 	zparseopts -D -M -A _opts - p: u: d:
 
 	(($+_opts[-d])) && $_gdb=$_opts[-d]
 	(($+_opts[-p])) && $_gpass=$_opts[-p]
 	(($+_opts[-u])) && $_guser=$_opts[-u]
 
-	sql -n "GRANT ALL ON $_gdb.* TO '$_guser'@'localhost' IDENTIFIED BY '$_gpass' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+	sql -n "GRANT ALL ON $_gdb.* TO '$_guser'@'localhost' IDENTIFIED BY '$_gpass'"
+}
+
+function dbusercreate()
+{
+	local _opts _gdb
+	zparseopts -D -M -A _opts - d:
+
+	sql -n "CREATE USER '$1' IDENTIFIED BY '$2'" || return
+	techo -c ok "User $2 created."
+
+	(($+_opts[-d])) && sqlgrant -d $_opts[-d] -u $1 -p $2
+}
+
+function dbcreate()
+{
+	local name user pass
+	input -v name -p 'Database name'
+	sql "create database $name" && techo -c ok "Database $name created."
+	confirm 'Create user' && {
+		input -v user -p 'User' $name && {
+			input -v pass -p 'Password' '!7866f' && {
+				dbusercreate -d $name $user $pass
+			}
+		}
+	}
 }
