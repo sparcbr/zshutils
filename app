@@ -3,11 +3,11 @@ if [ -z "$ZSH_MAIN_INFO" ] || [ -z "$ZSH_LIBS" ]; then
 	[ -z "$ZSH_LIBS" ] && [ -f 'zsh_main' ] && ZSH_LIBS="$PWD"
 	source $ZSH_LIBS/zsh_main || { echo "zsh_main not found" ; exit 127 }
 fi
-include -qr functions
-include -qr file
+include -r functions
+include -r file
 include -r android
-include -ql debug
-include -ql network
+include -l debug
+include -l network
 zparseopts -D -M - n=dryrun D::=debug d::=D i=interactive
 if [[ -n $dryrun ]] || { [[ -n $DRYRUN ]] && ((DRYRUN)) }; then
 	DRYRUN=-n
@@ -32,14 +32,14 @@ function sexit()
 
 cmds=(focuswindow\|focus focusactivity home en\|enable\|dis\|disable install\|inst list poweroff stop\|restart uninstallall\|removeall\|delall\|deleteall uninstall\|remove\|rm\|del\(ete\)\? wallpaper\|anim\|animation hidekeyb\|hidekeyboard start immersive log\|logcat reboot\|restart doc)
 
-(($# || interactive)) || { usage ; sexit 1 }
-
 docurl='https://developer.android.com/studio/command-line/adb'
 function usage()
 {
 	print -l ${(o)cmds}
 	print "\"app doc\" for online documentation ($docurl)"
 }
+
+(($# || interactive)) || { usage ; sexit 1 }
 
 function parseADBErrors()
 {
@@ -77,16 +77,19 @@ function adb()
 	coproc parseADBErrors
 	#run $DRYRUN command adb $devOpts "$@" 2>&p & pid=$!
 	#run -c 0 $DRYRUN command adb $devOpts "$@" 2>&p
-	
+
 	# while ! run -Ae $DRYRUN command adb $devOpts "$@" 2>&p; do
-	while ! command adb $devOpts "$@" 2>&p; do
+	#while ! command adb $devOpts "$@" 2>&p; do
+	if ! command adb $devOpts "$@" 2>&p; then
 	#@TODO sort errors by file before opening files
 		while read -p line; do
 			split=(${(z)line})
 			case $split[1] in
 				EMultDev)
+					chooseDevice
+					return
 					while ! chooseDevice; do
-						techo -c warn Connect an android device
+						techo -c warn 'Connect an android device'
 						sleep 2
 					done
 					continue
@@ -100,7 +103,7 @@ function adb()
 			esac
 		done
 		break
-	done
+	fi
 	#wait $pid; ret=$?
 	print -p EOF
 	return $ret
@@ -114,32 +117,49 @@ function shell()
 
 function chooseDevice()
 {
+	adb -d -s 13d8c281
+	return 0
 	local devList=("${(f)$(adb devices -l)}")
 
 	curDevice=
 	#@TODO device usb:1-5.3 product:surnia_retbr_ds model:MotoE2_4G_LTE_ device:surnia_uds stdbuf -o0 transport_id:1
-	deviceID=$(chooser -H 'Select device' -D $curDevice -f1 $devList) || return
-	connType=(-s $deviceID)
+	#chooser -v deviceID -H 'Select device' -D $curDevice -f1 $devList[2,-1] || return
+	if [[ $deviceID != *:* ]]; then
+		connType=(-d -s $deviceID)
+	else
+		connType=(-e -s $deviceID)
+	fi
 }
 
+adbhost='cell'
+ADB_TCPPORT=5555
 function connect()
 {
-	local err line
-	coproc parseADBErrors
-	if ! adb connect "$@" 2>&p; then
-	(
-		#@TODO sort errors by file before opening files
-		while read -p line; do
-			split=(${(z)line})
-			case $split[1] in
-				EmultDev) ;;
-				EConn) ;;
-			esac
-		done
-	)
+	local err line _connArgs
+
+	if (($#)); then
+		_connArgs=("$@")
+	else
+		_connArgs=($connType)
 	fi
-	print -p EOF
-	failed to connect to '192.168.1.101:5555':
+
+	#@TODO sort errors by file before opening files
+	while read line; do <(adb connect $_connArgs)
+		split=(${(z)line})
+		case $split[1] in
+			([Aa]lready)
+				return 0
+				;;
+			(EmultDev)
+				break
+				;;
+			(EConn)
+				break
+				;;
+		esac
+	done
+	#techo -c warn "Failed to connect using '$_connArgs'"
+	return 1
 }
 
 function netDevice()
@@ -170,15 +190,21 @@ function listPkg()
 	pkgs=($(shell pm list packages $flags "$@" | stdbuf -o0 tr -d '\r')) || return
 	(($#pkgs)) || return 10
 	pkgs=(${pkgs#package:})
+	print -l $pkgs
+
+	return
+
+	set -x
 	for pkg in $pkgs; do
 		local _date=$(
 			shell dumpsys package $pkg | \
-				awk -F'=' '/lastUpdateTime/{print $2; exit}' | \
-				head -n1 | stdbuf -o0 tr -d '\r\n'
+				awk -F'=' '/lastUpdateTime/{print $2; exit}' | head -n1 | stdbuf -o0 tr -d '\r\n' \
+				|| techo -c warn "error pkg $pkg"
 		)
 		sorted+=("${(f)_date} $n")
 		((n++))
 	done
+		set +x
 
 	sorted=("${(@O)sorted}")
 
@@ -212,19 +238,24 @@ function getMainActivity()
 
 function listActivities()
 {
-	local pkg
-	
+	local pkg action
+
 	(($#)) || return 10
 	pkg=$(choosePkg "$@") || return
-	shell dumpsys package $pkg | \
-		awk '/^Activity Resolver Table/,/^$/ { s = $0 } \
-			match(s, /([^: =]+\/[^: ]+)/, m) { print m[1]; s="" }'
+	action=${2:-MAIN}
+
+	# match(s, /(android.intent.action.'${action}'):/, m) { print m[1]; actFound=1; next } \
+	shell dumpsys package $pkg | awk '/^[ \t]*Non-Data Actions:/,/^$/ { s=$0 } \
+		match(s, /(android.intent.action.'${action}'):/, m) { actFound=1; next } \
+		actFound==1 && match(s, /([^: =]+\/[^: ]+)/, m) { print m[1]; s=""; exit; }'
 }
 
 function start()
 {
 	local act
-
+	act=$(getMainActivity $1)
+	shell am start $act && sendkey WAKEUP
+return
 	if [[ $1 =~ "/" ]]; then
 		act=$1
 	elif [[ -n $2 ]]; then
@@ -275,6 +306,25 @@ function getPkgVersion()
 	info $1 | grep versionName
 }
 
+function getPackageName()
+{
+	getConfig 'pkgName'
+}
+
+typeset -A cfgMap=(pkg googlePlayAppId)
+function getConfig()
+{
+	local opts cfgFile='config.js' cfg=$1 val
+	#zparseopts -D -M -A opts -
+	if [[ -f $cfgFile && -n $cfg ]]; then
+		local val
+		expr=(- "/'$cfg': '[^']+'/" m 'print m[1]')
+		val=$(awkWrapper -e expr $cfgFile) || return
+		[[ -n $val ]] && { echo $val; return 0 }
+	fi
+	return 10
+}
+
 function choosePkg()
 {
 	local running pkgs
@@ -283,9 +333,11 @@ function choosePkg()
 		pkgs="$(listRunning "$@")"
 	else
 		((!$#)) && getPackageName && return 0
-		pkgs="$(listPkg -d "$@")"
+		#pkgs="$(listPkg -d "$@")"
+		pkgs=($(listPkg "$@"))
 	fi
-	chooser -H 'Select package' -f1 --ifs $'\n' $pkgs 
+	#chooser -H 'Select package' -f1 --ifs $'\n' $pkgs
+	chooser -H 'Select package' -f1 $pkgs
 }
 
 function clearData()
@@ -350,6 +402,12 @@ function sendkey() {
 	if [[ $1 == <-> ]]; then
 		keycode=$1
 		key=${keys[$keycode]:-Unknown}
+	elif [[ $1 == 'dump' ]]; then
+		for key in ${(k)keys}; do
+			echo -E - $key $keys[$key]
+		done | sort -n
+
+		return 0
 	elif [[ $1 == 'list' ]]; then
 		techo -c head ${(o)keys}
 		return 0
@@ -412,12 +470,12 @@ function logcat()
 function getprop()
 {
 	local name names val values tmp
-	
+
 	if (($# == 0)); then
-		confirm "List all properties" && run shell getprop
+		run shell getprop
 		return
 	fi
-	
+
 	names=() ; values=()
 	for name; do
 		if [[ $name != *'*'* ]]; then
@@ -504,23 +562,31 @@ function processLine()
 			#category=android.intent.category.HOME
 			#shell am start -a $action -c $category
 		;;
-		(immersive) immersive "$@"
-			local value options setting
-			options=(
-				'default - Reset to normal config'		'null*'					 
-				'full - Hide both bars'					'immersive.full=*'		 
-				'navigation - Hide navigation bar only' 'immersive.navigation=*' 
-				'status - Hide status bar only'			'immersive.status=*'	 
+		(immersive)
+			local value setting _im_help
+			typeset -A _im_options=(
+				'default'		'null*'
+				'full'			'immersive.full=*'
+				'navigation'	'immersive.navigation=*'
+				'status'		'immersive.status=*'
 			)
-			(($#)) || { techo $0 $cmd ${options} ; return 0 }
+			_im_help=(
+				'default: Reset to normal config.'
+				'full: Hide both bars.'
+				'navigation: Hide navigation bar only.'
+				'status: Hide status bar only.'
+			)
+			(($#)) || { techo "$0 $cmd ${(j.|.)_im_options}"; techo -P -l "$_im_help" ; return 0 }
 			if match_array -c -v tmp --array $1 options; then
 				setting g policy_control $setting
 			fi
 		;;
-		(apkinfo) 
+		(apkinfo)
 			getLocalApkVersion $(git root)/android/app/build/outputs/apk/**/*.apk || return
 		;;
-		(info) pkg=$(choosePkg "$@") && info $pkg ;;
+		(info)
+			(($#)) && [[ "$(getext $1)" == 'apk' ]] && { $0 apkinfo $1; return }
+			pkg=$(choosePkg "$@") && info $pkg ;;
 		(install|inst)
 			if [[ $(getext "$1") != "apk" ]]; then
 				techo -c warn $1 is not a APK
@@ -528,16 +594,28 @@ function processLine()
 			fi
 			apkinstall $1
 		;;
-		(port|redirect) adb reverse tcp:8081 tcp:8081 ;;
+		(port|redirect)
+			[[ -n "$(adb reverse --list)" ]] || {
+				adb reverse tcp:8081 tcp:8081
+				adb reverse tcp:8097 tcp:8097 # for flipper
+				confirm 'Open tcpip port' && adb tcpip $ADB_TCPPORT
+			}
+			;;
+		(tcp|tcpip) adb tcpip $ADB_TCPPORT ;;
+		(input) shell input text "$*" ;;
 		(keyb|hidekeyb|hidekeyboard) sendkey 111 ;;
 		(key|sendkey) sendkey "$@" ;;
 		(logcat) logcat "$@" ;;
 		(wifi)  ;;
 		(net) getDeviceIP  ;;
 		(list) listPkg "$@" ;;
-		(listactivities|listact|listacts|activities) listActivities "$@" ;;
+		(listactivities|listact|listacts|activities) getMainActivity "$@" ;;
 		(view|open|openurl|url)
-			shell am start -W -a android.intent.action.VIEW -d $1 $2
+			{ urlinfo -v scheme --all-schemes -s $1 && scheme+='://' } || {
+				scheme=$(getConfig 'schemePrefix')
+			}
+			pkg=${2:-$(getPackageName)}
+			shell am start -W -a android.intent.action.VIEW -d "${1:-"$(input -p 'Url' $scheme || cancel)"}"
 		;;
 		(poweroff)
 			shell am start -a android.intent.action.ACTION_REQUEST_SHUTDOWN
@@ -576,10 +654,12 @@ function processLine()
 		(uninstall|remove|rm|del(ete)?) uninstall "$@" ;;
 		(version|ver|release)
 			if pkg=$(choosePkg "$@"); then
+				techo -n "Package $pkg version: "
 				getPkgVersion $pkg
 			fi
 			chooser -H 'Select apk' --file -v apk \
 				$(git root)/android/app/build/outputs/apk/**/*.apk || return
+			techo -n "Local $apk version: "
 			getLocalApkVersion $apk
 		;;
 		(androidver(sion)?|androidinfo) getprop ro.build.version. ;;
@@ -609,7 +689,7 @@ function processLine()
 		;;
 	esac
 }
-
+typeset -Tf start choosePkg listActivities
 if ((DEBUG)); then
 	set -x
 	debug -k adb processLine choosePkg sendkey
@@ -639,18 +719,5 @@ if ((interactive)); then
 		}
 	done
 fi
-
-function getPackageName()
-{
-	if [[ -f config.js ]]; then
-		local expr
-		expr=(- "/appDomain: '[^']+'/" m 'print m[1]')
-		pkg=$(awkWrapper -e expr config.js) || return
-		[[ -n $pkg ]] || return 10
-		echo $pkg
-		return 0
-	fi
-	return 10
-}
 
 sexit $ret

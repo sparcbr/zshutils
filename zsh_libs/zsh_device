@@ -1,4 +1,4 @@
-VERSION=1.0.5
+VERSION=1.0.6
 #lazyload=imageMount,findDev,lspart,labelof,deviceMount,dirUnmount,deviceUnmount,diskUnmount,deviceOff,diskMount,sd,mountSD,deviceInfo,findSD,loopof,mntof,deviceof,fstypeof,isDirMounted,imageof,loop,unloop,ptablecp,sdd,ejectSD
 alias image='imageMount'
 alias diskOff='deviceOff'
@@ -59,7 +59,7 @@ function deviceMount()
 	zparseopts -D -M - m:=baseMnt r=remount
 	[[ -n "$1" ]] || return 1
 	[[ -n $baseMnt ]] && baseMnt=$baseMnt[2] || baseMnt=/m
-	
+
 	typeset -a devs
 	for dev; do
 		var=$(isDevice $dev)
@@ -114,7 +114,7 @@ function deviceMount()
 				continue
 			fi
 			if [[ -z "$FSTYPE" ]]; then
-				#@ no label, try to redetect, 
+				#@ no label, try to redetect,
 				# ask user to give a label
 				techo -c red "$NAME: no file system detected"
 				((err++))
@@ -192,9 +192,12 @@ function diskUnmount()
 	if (($#parts)); then
 		if [[ -z $force ]]; then
 			techo $parts
-			confirm "unmount all" || cancel 
+			confirm "unmount all" || cancel
 		fi
-		deviceUnmount $parts
+		deviceUnmount $parts || return
+	else
+		# @TODO check all partitions are really unmounted
+		return 0
 	fi
 	[[ -n $eject ]] && run -s eject $dev
 }
@@ -212,11 +215,11 @@ function diskMount()
 {
 	local mnt dev parts line devtmp err=0 pnum
 	zparseopts -D -M - m:=mnt p:=pnum
-	
+
 	dev=${1:-$(chooser $(deviceInfo -d))}
 	dev="/dev/${dev#/dev/}"
 	[[ -b "$dev" ]] || abortDevError NOBLKDEV "$1"
-	
+
 	#@TODO: use disk uuid or disk identifier as default?
 	[[ -n "$mnt" ]] && mnt="${mnt[2]}" || mnt="${2:-/m}"
 	isDir -m "$mnt" || return
@@ -263,37 +266,38 @@ function mountSD()
 
 function deviceInfo()
 {
-	local ret columns hotplug diskOnly args
-	local all short type data mounted mpat
-	zparseopts -D -M - h=hotplug d=diskOnly a=all m=mounted \
-		s=short -short=s t:=type -type:=t o:=columns u=mounted
+	local hotplug diskOnly args all short type data mounted mpat
+	typeset -aU _opts columns
+	integer ret
+	zparseopts -D -M -A _opts - 'h' -hotplug=h d -diskOnly=d a=all -all=a \
+		'm' -mounted=m 's' -short=s t: -type:=t o: -columns:=o
 
-	if [[ -n $columns ]]; then
-		explode -u -v columns "TYPE,$columns[2]" ','
+	if (($+_opts[-o])); then
+		explode -u -v columns "TYPE,$_opts[-o]" ','
 	else
 		columns=(TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT)
-		if [[ -z "$short" ]]; then
+		if ((!$+_opts[-s])); then
 			columns+=(STATE VENDOR MODEL SERIAL HOTPLUG RM)
 		fi
 	fi
 
-	if [[ -n $mounted && ${columns[(i)MOUNTPOINT]} -gt $#columns ]]; then
+	if (($+_opts[-m])); then
 		columns+=(MOUNTPOINT)
 	fi
 
-	if [[ -n $hotplug && ${columns[(i)HOTPLUG]} -gt $#columns ]]; then
+	if (($+_opts[-h])); then
 		columns+=(HOTPLUG RM)
 	fi
 
 	[[ -z $columns ]] && abort 1 'No column chosen'
 
 	args=($all $diskOnly --include 8 -o ${(j.,.)columns} --noheadings --pairs)
-	data=$(sudo lsblk $args "$@")
+	data=$(sudo lsblk $args "$@") || abort
 	ret=$?
-	[[ -n "$diskOnly" ]] && type=disk || type=$type[2]
-	[[ -n "$hotplug" ]] && data=$(egrep 'HOTPLUG="1" RM="1"' <<<$data)
-	[[ -n "$type" ]] && data=$(egrep '^TYPE="'$type'"' <<<$data)
-	if [[ -n "$mounted" ]]; then
+	(($+_opts[-d])) && type=disk || type=$_opts[-t]
+	(($+_opts[-h])) && data=$(egrep 'HOTPLUG="1" RM="1"' <<<$data)
+	(($+_opts[-t])) && data=$(egrep '^TYPE="'$type'"' <<<$data)
+	if (($+_opts[-m])); then
 		[[ $mounted == '-m' ]] && mpat='.+'
 		data=$(egrep -o "MOUNTPOINT=\"$mpat\"" <<<$data)
 	fi
@@ -335,7 +339,7 @@ function findSD()
 		i=1
 		found=()
 		for line in $disks; do
-			eval $line 
+			eval $line
 			if [[ -z "$SIZE" || -z "$SERIAL" ]]; then
 				techo -c warn "/dev/$NAME: $VENDOR $MODEL skipping: " \
 					"size=$SIZE, serial=$SERIAL : no media?"
@@ -350,7 +354,7 @@ function findSD()
 			((i++))
 		done
 
-		#@TODO use a simple chooser 
+		#@TODO use a simple chooser
 		if [[ $#found -gt 1 ]]; then
 			var=(${=$(chooser $found)})
 		elif [[ -n $found ]]; then
@@ -454,7 +458,7 @@ function mntof()
 
 function isDeviceMounted()
 {
-	local mnt="$(mntof $1)" 
+	local mnt="$(mntof $1)"
 	[[ -z "$mnt" ]] && return 1 # not mounted
 	[[ -n "$2"  && "$mnt" = "$(getfullpath "$2")" ]] && return 2 # mounted already on right place
 	echo $mnt
@@ -512,17 +516,22 @@ function imageof()
 #comp+=(image='')
 function imageMount()
 {
-	local img dir var dev
-	if [[ $# -ne 2 ]]; then
-		echo Usage: $0 imageFile mountDir
+	local img dir var dev _opt
+	(($#)) && { img=$1 ; dir=$2 }
+	(($#img)) && [[ -f $img ]] || {
+		#while [[ ! -f $img ]]; do
+			#chooser -v _opt --file --head 'Choose an image' $(f \*.iso)
+		#done
+		techo -c warn "Usage: $0 imageFile mountDir"
 		return 1
-	fi
-	img=$1 ; dir=$2
-	if [[ ! -f $1 ]]; then
-		techo -c lred "$1: file not found"
-		return 1
-	fi
-	isDir -m $dir || return 1
+	}
+	[[ -f $img ]] || { abort 2 "$img: file not found" }
+	[[ -n $dir ]] && isEmptyDir $dir || {
+		[[ -n $dir ]] && techo -c warn "$dir is not empty"
+		label="$(dd if=$img bs=1 skip=32808 count=32)"
+		isDir -m /m/$label
+		input -p "Mounting point directory" -v dir "/m/$label"
+	}
 	if dev=$(isDirMounted $dir); then
 		if var=$(isLoop $dev); then
 			var=$(imageof $var)
@@ -599,7 +608,7 @@ function sdd()
 
 	[[ $# -ge 2 ]] || return 1
 
-	include -r file || abort 1 
+	include -r file || abort 1
 	devin=$1
 	devout=$2
 	if [[ ${devin:0:2} == 'f:' ]]; then
@@ -618,7 +627,7 @@ function sdd()
 	if [[ -f $devout ]]; then
 		confirm "Output file $C[warn]\"$devout\"$_C exists.\n$C[warn]Overwrite" || cancel
 	fi
-	
+
 	shift 2
 
 	args=("$@")
@@ -632,7 +641,7 @@ function sdd()
 
 	techo "${C[b]}in=$devin => out=$devout$C_"
 	#@TODO techo watch -n5 'killall -USR1 dd'
-	##oflag=dsync 
+	##oflag=dsync
 	if [[ -z $quiet ]]; then
 		args+=('status=progress')
 	fi

@@ -1,29 +1,51 @@
 VERSION=1.0.0
-#lazyload=pretty,tags,finderror
-alias jtags='find . -type f -iregex ".*\.js$" -not -path "./node_modules/*" -exec jsctags {} -f \; | sed '"'"'/^$/d'"'"' | LANG=C sort > tags'
-alias pytags="ctags -R --python-kinds=-i ."
+#lazyload=pretty,tags,finderror,phpcheck,tools,gdev,dev,langChooser,getMainLang
+alias jtags='tags js'
+alias pytags='tags py'
 alias diff_ignore_space="diff --ignore-space-change --ignore-tab-expansion --ignore-trailing-space --ignore-blank-lines"
 
 [[ -v comp ]] || typeset -ga comp
+groot=$(git root) && [[ -d $groot/node_modules ]] && path=($groot/node_modules/.bin/prettier $path)
 
 # Added 2019-12-19 12:43
 function pretty()
 {
-	local F Fname f files args prettyF tmpBasePath basePath baseName _s
-	#zparseopts -D -M - 
+	local F Fname f prettyF tmpBasePath basePath baseName _s _popt
+	typeset -a gfiles files _opts args
+	zparseopts -D -M -A _opts -
+
 	basePath=$(git root)
-	files=($(prettier -l "$@"))
-	for f in $files; do
+
+	(($#)) && args=("$@")
+	#@TODO specify extension.. and have a default, in case no arguments are given
+	#@TODO if any dirs are given, add a file glob and use them below
+	#(($#)) # && files=($(prettier -l "$@")) || return
+	gfiles=(${(u)$(gdiff -ls $args; gdiff -l $args)}) # non pretty and in the index or modified
+	(($#gfiles==0)) && {
+		if ((!$#args)); then
+			techo -c ok 'No files needed formatting';
+			return
+		fi
+		gfiles=($args)
+	}
+	if [[ $PWD != $basePath ]]; then
+		relDir="$(getfullpath -r $basePath $PWD)"
+		#f=$relDir/$f
+		gfiles=(${gfiles#$relDir/})
+	fi
+	#(($#files==0)) && { techo -c ok 'No files needed formatting'; return }
+	# non git files are after git files
+	for f in $gfiles ${files:|gfiles}; do
 		F=$(getfullpath -r $basePath $f)
 		if [[ ${F:0:1} == '/' ]]; then
 			#F=$(getfullpath -r . $f)
 			techo TODO skipped $f
 			continue
 		fi
-		baseName=$(basename $basePath)
+		baseName=$basePath:t
 		tmpBasePath=$TMP/$baseName
 		prettyF=$tmpBasePath/$F.pretty
-		if [[ ! -f $prettyF || $f -nt $prettyF ]]; then
+		if [[ ! -f $prettyF || ! -s $prettyF || $f -nt $prettyF ]]; then
 			techo "$f => \$TMP/$baseName/$F.pretty"
 			dir=$(getpath $prettyF)
 			[[ -d $dir ]] || mkdir -p $dir
@@ -40,23 +62,37 @@ function pretty()
 				continue
 			fi
 		fi
-		if ! cmp --quiet $f $prettyF; then
-			diff -u $f $prettyF | head -n 20
-			local _opt
-			if chooser --simple -f1 -v _opt --use-keys 'S' "Save changes to $F" 'M' 'Meld files'; then
-				case $_opt in
+		while ! cmp --quiet $f $prettyF; do
+			if [[ $_popt != Diff ]]; then
+				diff -u --ignore-space-change $f $prettyF | head -n 20
+				(($pipestatus[1]==0)) && techo -c head 'Only space changes'
+			fi
+
+			if chooser -f1 -v _popt --footer 'Esc) Skip to next file' \
+				--use-keys 'S' "Save changes to $F" 'M' 'Meld files' 'D' 'Diff'
+			then
+				case $_popt in
 					Meld)
 						meld $f $prettyF
 						;;
 					Save)
-						cp $prettyF $f
+						confirm "cp $prettyF $f" && run -v2 cp $prettyF $f
 						;;
-					*)
+					Diff)
+						diff -u $f $prettyF
+						;;
+					*) techo -c warn "Invalid opt: $_popt"
 						;;
 				esac
 				cmp --quiet $f $prettyF && touch $prettyF
+			else
+				if (($?==130)); then
+					break
+				else
+					return $?
+				fi
 			fi
-		fi
+		done
 	done
 }
 
@@ -71,45 +107,61 @@ function finderror()
 	#v "$filename:$linenum"
 }
 
+typeset -gA langs=(
+	php PHP
+	js Javascript
+)
+function getMainLang()
+{
+	local ext _opts
+	zparseopts -D -M -A _opts - 'e' 'l'
+	[[ -f $1/composer.json ]] && ext=php
+	[[ -f $1/package.json ]] && ext=js
+	(($#ext)) || return 10
+	if (($+_opts[-e])); then
+		echo $ext
+	elif (($+_opts[-l])); then
+		echo $langs[$ext]
+	fi
+}
+
 function tags()
 {
 	local lang args excludePatterns exclude
-	zparseopts -lang:=lang -exclude:=exclude
+	zparseopts -exclude:=exclude
 
-	if (($#)) && [[ ! -f $1 && -z $lang ]]; then
-		lang=$1
-		shift
-	elif [[ -n $lang[2] ]]; then
-		lang=$lang[2]
-	else
-		chooser -v lang --simple --use-keys 'J' 'Javascript' 'P' 'PHP' 'Y' 'Python' 'S' 'Shell' || cancel
-	fi
-	
+	(($#)) && { lang=$1; shift }
+	lang=$(langChooser $lang)|| cancel
+
 	explode -v excludePatterns "${(@)exclude[2]}" ','
 
 	args=("$@")
-	case ${(L)lang} in
-		javascript|js)
-			type jsctags >/dev/null || npm install -g git+https://github.com/ramitos/jsctags.git
-			run jtags
+	case $lang in
+		js)
+			type jsctags >/dev/null || npm install -g git+https://github.com/sergioramos/jsctags
+
+			run -v6 jsctags -f $(git ls-files **/*.js) | sed '/^$/d' | LANG=C sort > tags
 			;;
 		php)
 			excludePatterns+=('vendor/*')
 			#@TODO box
 			(($#args)) || {
-				args=(v?(N) *.php(N))
-				(($#args)) || return 10
+				args=(v[0-9]##/*.php(N) *.php(N))
+				(($#args)) || args=(.)
 			}
+			args=($(git ls-files $args))
+			#exclude=(*.new*)
 			run phpctags -R --exclude=$^excludePatterns $args
+				#${args:|exclude}
 			;;
-		python|py)
-			run pytags
+		py)
+			run ctags -R --python-kinds=-i .
 			;;
-		shell|sh)
+		sh)
 			run ctags --language-force=Sh -R "${(@)args:-.}"
 			;;
 		*)
-			techo -c err "Unsupported language: $lang"
+			techo -c err "$0: Unsupported language: $langs[$lang]"
 			;;
 	esac
 }
@@ -129,3 +181,100 @@ function vreplace()
 
 	v "+arg | arg" "+argdo %s/\<$word\>/$replace/gce | update"
 }
+
+# Added 2020-04-02 17:17
+function phpcheck()
+{
+	local args=('.') report=phpcs73.log
+	(($#)) && { report=$1; shift }
+	(($#)) && args=("$@")
+	run phpcs -p --colors --extensions=php --standard=PHPCompatibility --report-full=$report --runtime-set testVersion 7.3 $args
+}
+
+function tools()
+{
+	local _url
+	chooser -f2 -v _url -S "$*" 'RegExp https://regexr.com/' && open $_url
+}
+
+#function composer()
+#{
+#	#all versions info
+#	command show -a "$@"
+#}
+
+# Added 2020-05-15 20:15
+function countfunclines()
+{
+	local expr f _cfl_out
+
+	for f in "$@"; do
+		techo $f
+			#- '/^(function .*|\$app->(post|get))/' m
+			#'i=NR; print $0; if ($1=="function") { b=1; } else { b=2; c=1; }'
+			#'/v' . $API_VERSION . '/email/validate/:email'
+		expr=(
+			- '/^function (.*)\(/' m
+				'i=NR; print m[1]; b=1; c=0;'
+			- '/^\$app->(post|get)\(/' m
+				'i=NR; printf "%s_", m[1]; b=2; c=1;'
+			'c' '/('\''/v'\'' ?\. ?\$API_VERSION \. '\''(.*)'\'')?),/' m
+				'c=0; if (NR!=i) print m[1]; next;'
+			1 '/^}$/' m
+				'print NR-i; next'
+			2 '/^}?);$/' m
+				'print NR-i; next'
+		)
+		awkWrapper -e expr -o sum $f
+	done
+	echo $_cfl_out
+}
+
+function langChooser()
+{
+	local root=$(git root)
+	(($#1 && $+langs[$1])) && { echo $1; return }
+
+	lang=$(getMainLang -e $root) || \
+		chooser -v lang --use-keys 'J' 'Javascript' 'P' 'PHP' 'Y' 'Python' 'S' 'Shell' || cancel
+
+	case ${(L)lang} in
+		javascript|js) echo 'js'
+			;;
+		php) echo 'php'
+			;;
+		python|py) echo 'py'
+			;;
+		shell|sh) echo 'sh'
+			;;
+		*)
+			techo -c err "Unsupported language: $lang"
+			false
+			;;
+	esac
+}
+
+function gdev()
+{
+	local fdev fndev fp langExt
+	langExt=$(langChooser $1) || return
+	#for f in $(dev --base$langExt); do
+	for fdev in $(dev $langExt); do
+		fndev=$(getfilename $fdev)
+		fp=$(getpath $fdev)
+		fn=$(noext $fndev dev.$langExt)
+		[[ -f $fp/$fn.$langExt ]] && {
+			diff -q $fp/$fn.$langExt $fdev >/dev/null && df="$C[ok]==" || df="$C[warn]!="
+			echo $df $fp/$fn.$langExt $fdev
+		} || {
+			echo 0 $fdev
+		}
+	done
+}
+
+function dev()
+{
+	(($#)) || return 10
+	find -name \*.dev.$1
+}
+

@@ -1,40 +1,293 @@
 VERSION=1.0.2
-#lazyload=urlfollow,urlinfo,vnc,imdb,globo
+#lazyload=urlfollow,urlinfo,url,vnc,imdb,globo,netGet,netGetJson,urlencode,urldecode,formdata
 
 [[ ! -v comp ]] && typeset -g -a comp
 
-function urlfollow() {
-	curl -Ls -I -o /dev/null -w %{url_effective} $1
+zmodload zsh/langinfo # Required for $langinfo
+
+# URL-encode a string
+#
+# Encodes a string using RFC 2396 URL-encoding (%-escaped).
+# See: https://www.ietf.org/rfc/rfc2396.txt
+#
+# By default, reserved characters and unreserved "mark" characters are
+# not escaped by this function. This allows the common usage of passing
+# an entire URL in, and encoding just special characters in it, with
+# the expectation that reserved and mark characters are used appropriately.
+# The -r and -m options turn on escaping of the reserved and mark characters,
+# respectively, which allows arbitrary strings to be fully escaped for
+# embedding inside URLs, where reserved characters might be misinterpreted.
+#
+# Prints the encoded string on stdout.
+# Returns nonzero if encoding failed.
+#
+# Usage: omz_urlencode [-r] [-m] [-P] <string>
+#
+#    -r causes reserved characters (;/?:@&=+$,) to be escaped
+#
+#    -m causes "mark" characters (_.!~*''()-) to be escaped
+#
+#    -P causes spaces to be encoded as '%20' instead of '+'
+function urlencode()
+{
+	emulate -L zsh
+	zparseopts -D -E -a opts 'r' 'm' 'P'
+
+	local in_str=$1
+	local url_str=""
+	local spaces_as_plus
+	if [[ -z $opts[(r)-P] ]]; then spaces_as_plus=1; fi
+	local str="$in_str"
+
+	# URLs must use UTF-8 encoding; convert str to UTF-8 if required
+	local encoding=$langinfo[CODESET]
+	local safe_encodings
+	safe_encodings=(UTF-8 utf8 US-ASCII)
+	if [[ -z ${safe_encodings[(r)$encoding]} ]]; then
+		str=$(echo -E "$str" | iconv -f $encoding -t UTF-8)
+		if [[ $? != 0 ]]; then
+			echo "Error converting string from $encoding to UTF-8" >&2
+			return 1
+		fi
+	fi
+
+	# Use LC_CTYPE=C to process text byte-by-byte
+	local i byte ord LC_ALL=C
+	export LC_ALL
+	local reserved=';/?:@&=+$,'
+	local mark='_.!~*''()-'
+	local dont_escape="[A-Za-z0-9"
+	if [[ -z $opts[(r)-r] ]]; then
+		dont_escape+=$reserved
+	fi
+	# $mark must be last because of the "-"
+	if [[ -z $opts[(r)-m] ]]; then
+		dont_escape+=$mark
+	fi
+	dont_escape+="]"
+
+	# Implemented to use a single printf call and avoid subshells in the loop,
+	# for performance (primarily on Windows).
+	local url_str=""
+	for (( i = 1; i <= ${#str}; ++i )); do
+		byte="$str[i]"
+		if [[ "$byte" =~ "$dont_escape" ]]; then
+			url_str+="$byte"
+		else
+			if [[ "$byte" == " " && -n $spaces_as_plus ]]; then
+				url_str+="+"
+			else
+				ord=$(( [##16] #byte ))
+				url_str+="%$ord"
+			fi
+		fi
+	done
+	echo -E "$url_str"
 }
 
+# URL-decode a string
+#
+# Decodes a RFC 2396 URL-encoded (%-escaped) string.
+# This decodes the '+' and '%' escapes in the input string, and leaves
+# other characters unchanged. Does not enforce that the input is a
+# valid URL-encoded string. This is a convenience to allow callers to
+# pass in a full URL or similar strings and decode them for human
+# presentation.
+#
+# Outputs the encoded string on stdout.
+# Returns nonzero if encoding failed.
+#
+# Usage:
+#   urldecode <urlstring>  - prints decoded string followed by a newline
+function urldecode()
+{
+	emulate -L zsh
+	local encoded_url=$1
+
+	# Work bytewise, since URLs escape UTF-8 octets
+	local caller_encoding=$langinfo[CODESET]
+	local LC_ALL=C
+	export LC_ALL
+
+	# Change + back to ' '
+	local tmp=${encoded_url:gs/+/ /}
+	# Protect other escapes to pass through the printf unchanged
+	tmp=${tmp:gs/\\/\\\\/}
+	# Handle %-escapes by turning them into `\xXX` printf escapes
+	tmp=${tmp:gs/%/\\x/}
+	local decoded
+	eval "decoded=\$'$tmp'"
+
+	# Now we have a UTF-8 encoded string in the variable. We need to re-encode
+	# it if caller is in a non-UTF-8 locale.
+	local safe_encodings
+	safe_encodings=(UTF-8 utf8 US-ASCII)
+	if [[ -z ${safe_encodings[(r)$caller_encoding]} ]]; then
+		decoded=$(echo -E "$decoded" | iconv -f UTF-8 -t $caller_encoding)
+		if [[ $? != 0 ]]; then
+			echo "Error converting string from UTF-8 to $caller_encoding" >&2
+			return 1
+		fi
+	fi
+
+	echo -E "$decoded"
+}
+
+function netGetJson()
+{
+	local var jqFilter opts json tmp
+	integer ret
+	zparseopts -D -M -A opts - v: -var: -jq: -raw
+
+	netGet --var json --header 'Accept: application/json' $opts['v'] "$@" || return
+
+	if (($+opts[--raw])); then
+		if (($+opts[--jq])); then
+			jqFilter=${opts[--jq]:-.}
+		fi
+	else
+		e jq $opts[--jq]
+		jqFilter=${opts[--jq]:-.}' | @sh'
+		e jqf $jqFilter
+	fi
+
+	if (($#jqFilter)); then
+		tmp=$(jq -erc $jqFilter <<< $json) || return
+	else
+		tmp=$json
+	fi
+	if (($+opts[--var])); then
+		typeset -g "$opts[--var]=$tmp"
+	else
+		print -r -- $tmp
+	fi
+}
+
+function netGet()
+{
+	local checkEval ftemp fname url out opt
+	typeset -a opts cOpts
+	integer stdout verbose=1 ret minKbps=20
+	zparseopts -D -M -A opts - v: 'q' -var: -stdout -temp: -check-eval: -url: -user: -header: -post
+
+	type -p curl git >/dev/null || sudo apt install curl git
+
+	#minKbps=${opts[--min-speed]:-}
+	#-w "\n¬ %{http_code}"
+	cOpts=(-L --speed-time 8 --speed-limit $((1000*minKbps)) --create-dirs)
+	(($+opts[-q])) && verbose=0 || { (($+opts[-v])) && verbose=${opts[-v]} }
+	((verbose)) || cOpts+=(-sS)
+	if (($+opts[--url])); then
+		url=$opts[--url]
+	elif (($#1)); then
+		url=$1; shift
+	else
+		return 10
+	fi
+
+	# pass through these options to curl
+	for opt in user header request data; do
+		opt="--$opt"
+		if (($+opts[$opt])); then
+			cOpts+=($opt $opts[$opt])
+		fi
+	done
+
+	if (($#1)); then
+		fname=$1
+		(($+opts[--temp])) && ftemp=${opts[--temp]}
+		if (($#ftemp)); then
+			cOpts+=(-o "$ftemp")
+		else
+			cOpts+=(-o "$fname")
+		fi
+	elif (($+opts[-v] || $+opts[--stdout])); then
+		stdout=1
+	else
+		cOpts+=(-JO -w '%{filename_effective}')
+		((verbose)) && techo -c warn 'Saving to '$PWD'. Using filename given by remote.'
+	fi
+
+	out=$(curl $cOpts $url); ret=$?
+	if ((ret)); then
+		(($#ftemp)) && rm -f $ftemp
+		return $ret
+	fi
+
+	if ((stdout)); then
+		if (($+opts[--var])); then
+			typeset -g "$opts[--var]=$out"
+		else
+			echo -n - $out
+		fi
+		return 0
+	fi
+
+	[[ -z $fname ]] && fname=$out # from -w {filename_effective}
+
+	if (($+opts[--check-eval])); then
+		local name=${ftemp:-$fname}
+		[[ -n $name ]] || { techo -c warn 'Filename not given but --check-eval used'; return 2 }
+		checkEval=${opts[--check-eval]//'$file'/$name}
+		eval $checkEval; ret=$?
+	fi
+
+	if ((ret)); then
+		(($#ftemp)) && rm -f $ftemp || rm -f $fname
+	else
+		mv $ftemp $fname; ret=$?
+	fi
+	return $ret
+}
+
+function urlfollow() {
+	curl -LsS -I -o /dev/null -w '%{url_effective}' $1
+}
+
+# Choose which parts of given url to return, or save in array (-v varname)
+# Note, no decoding is done.
+# All requested parts are returned in the order they appear in the url.
+# TODO break query into key val parts or associative array
 function urlinfo()
 {
 	local schemes=(ssh git https http ftp ftps file)
-	local getscheme getuser getport gethost getpath getquery
-	local userpat hostpat pathpat querypat argpat out var
+	local opts schemepat userpat hostpat pathpat querypat argpat out var
 	userpat='[[:alnum:]]+'
 	hostpat='[[:alnum:]][-.[:alnum:]]*\.[[:alpha:]]+'
 	pathpat='~?[-_./[:alnum:]]+'
 	argpat='[^&]+'
 	querypat="$argpat(&$argpat)*"
 	out=()
-	zparseopts -D -M - v:=var \
-		s=getscheme h=gethost u=getuser p=getpath q=getquery a=getall
+	zparseopts -D -M -A opts - v:=var 's' 'h' 'u' 'p' 'P' 'q' 'a' -all-schemes \
+		-getscheme=s -getuser=u -getport=P -gethost=h -getpath=p -getquery=q \
+		-setscheme: -setuser: -setport: -sethost: -setpath: -setquery:
 
-	if [[ $1 =~ (${(j.|.)schemes})'://'($~userpat'@')?($~hostpat)(':'[0-9]+)?('/'$~pathpat)?('\?'$~querypat)? ]]; then
-		(($#getscheme)) && out+=($match[1])
-		(($#getuser)) && out+=(${match[2]%@})
-		(($#gethost)) && out+=($match[3])
-		(($#getport)) && out+=(${match[4]#:})
-		(($#getpath)) && out+=($match[5])
-		(($#getquery)) && out+=(${match[6]#\?})
+	if (($+opts[--all-schemes])); then
+		schemepat='[a-z]+'
+	else
+		schemepat=${(j.|.)schemes}
+	fi
+
+	# parts=($scheme'://' $user'@' $host ':'$port '/'$_path '?'$query)
+	# ${(j..)parts}
+
+	if [[ $1 =~ ($schemepat)'://'($~userpat'@')?($~hostpat)(':'[0-9]+)?('/'$~pathpat)?('\?'$~querypat)? ]]
+	then
+		(($+opts[-s])) && { scheme=($match[1]); out+=$scheme }
+		(($+opts[-u])) && { user=(${match[2]%@}); out+=$user }
+		(($+opts[-h])) && { host=($match[3]); out+=$host }
+		(($+opts[-P])) && { port=(${match[4]#:}); out+=$port }
+		(($+opts[-p])) && { _path=($match[5]); out+=$_path }
+		(($+opts[-q])) && { query=(${match[6]#\?}); out+=$query }
 	elif [[ $1 =~ (${~userpat}'@')?(${~hostpat}):($~pathpat)? ]]; then
-		if (($#getscheme)); then
-			[[ $match[1] == 'git' ]] && out+=(git) || out+=(ssh)
+		# git scheme is actually ssh: git@host:path
+		if (($+opts[-s])); then
+			[[ $match[1] == 'git' ]] && scheme=(git) || scheme=(ssh)
+			out=($scheme)
 		fi
-		(($#getuser)) && out+=(${match[1]%@})
-		(($#gethost)) && out+=($match[2])
-		(($#getpath)) && out+=($match[3])
+		(($+opts[-u])) && { user=(${match[1]%@}); out+=$user }
+		(($+opts[-h])) && { host=($match[2]); out+=$host }
+		(($+opts[-p])) && { _path=($match[3]); out+=$_path }
 	else
 		return 1
 	fi
@@ -42,33 +295,26 @@ function urlinfo()
 	return 0
 }
 
-function imdb()
-{
-	local e
-	[[ $1 == '-e' ]] && { shift; e='-e' }
-
-	url $e 'https://www.imdb.com/find?q=' "$*"
-}
-
 function url()
 {
-	local echo encode url arg c
-	zparseopts -D -M -E - e=echo -no-color=c c:=c # E=encode -encode=E
-	
+	local encode url args c opts key val
+	zparseopts -D -M -E -A opts - 'e' c: -color=c
+	typeset -a args
 	[[ -n $1 ]] || return 10
-	url=$1
-	arg=$2
-	arg=$(omz_urlencode $arg)
+	url=("$(urlencode -mrp $1)"); shift
+	for key val; do
+		args+=("$(urlencode -mrp $key)")
+	done
 	if [[ -n $c[2] ]]; then
 		c=$C[$c[2]]
 	elif [[ -z $c ]]; then
-		c=$C[lgreen]
+		c=$C[${opts[-c]:-lgreen}]
 	else
 		c=
 	fi
 
 	url=$url$arg
-	if [[ -n $echo ]]; then
+	if (($+opts[-e])); then
 		echo $c$url
 	else
 		techo -c head 'Opening' $c$url
@@ -80,7 +326,7 @@ function htmlget()
 {
 	local url output begin end tmp data opts code expr
 	zparseopts -D -M - b:=begin e:=end o:=output u=update
-	
+
 	url=$1
 	opts=(-q --show-errors 0 --show-warnings false --wrap 0)
 	if (($#output)); then
@@ -109,15 +355,28 @@ function htmlget()
 		- '/^¬/' -
 			'print $2'
 	)
-	tmp=($(curl -Ss -w "\n¬ %{http_code}" -L $url | awkWrapper -e expr))
+
+	tmp=$TMP/'globo_raw.html'
+	if curl -Ss -w "\n¬ %{http_code}" -L $url -o $tmp && [[ -s $tmp ]]; then
+		abort $? curl
+	fi
+
+	tmp=($(cat $tmp | awkWrapper -e expr))
 	code=$tmp[-1]
 	if ((code!=200)); then
 		techo -c err "curl: http code $code"
 		return 1
 	fi
-	
+
 	tidy $opts <<< $tmp[1,-2]
-	#echo $pipefail
+	return 0
+}
+
+function imdb()
+{
+	local e
+	[[ $1 == '-e' ]] && { shift; e='-e' }
+	url $e 'https://www.imdb.com/find?q=' "$*"
 }
 
 # print: sed -n '/^<tr>/p' file
@@ -125,11 +384,11 @@ function htmlget()
 function globo()
 {
 	local tmp vars expr data file=$HOME/globo.html
-	zparseopts -D -M - u=update 
+	zparseopts -D -M - u=update
 
 	htmlget $update -b '<section class="schedule-item' \
 		-e '<div class="grade-de-programacao-container-bottom"' \
-		-o $file https://redeglobo.globo.com/sao-paulo/programacao || return
+		-o $file https://redeglobo.globo.com/sao-paulo/programacao || abort $? htmlget
 
 	vars=(today=$(date '+%Y%m%d') yesterday=$(date -d yesterday '+%Y%m%d') now=$(date '+%s'))
 	expr=(
@@ -150,7 +409,7 @@ function globo()
 		- '/<\/section>/' -
 			'x=0'
 	)
-	
+
 	if awkWrapper -v vars -e expr -o data $file; then
 		local field isCurrent dt a c
 		(($#data)) || abort 1 'No match'
@@ -210,6 +469,11 @@ function ipfind()
 	done
 }
 
+function ipget()
+{
+	ip addr | egrep -o '192.*/' | explode --stdin '/'
+}
+
 # Added 2020-01-15 19:12
 function google()
 {
@@ -219,5 +483,61 @@ function google()
 # Added 2020-03-07 00:57
 function vnc()
 {
-	DISPLAY=:0 x0vncserver -rfbport 5555 -rfbauth ~/.vnc/passwd
+	local dir passfile
+	#cfgget -v passfile -D "$HOME/.vnc/passwd" vncpassfile
+	passfile="$HOME/.vnc/passwd"
+	type x0vncserver || aptinst tigervnc-scraping-server
+	while ! [[ -f $passfile ]]; do
+		#input -p "Choose passfile" -v passfile || cancel
+		#[[ $passfile != $default ]] && cfgset vncpassfile $passfile
+		dir="$(getpath $passfile)"
+		[[ -d $dir ]] || mkdir -p $dir
+		vncpasswd $passfile
+	done
+	#DISPLAY=:0
+	x0vncserver -display :0 -rfbport 5500 -rfbauth $passfile
+}
+
+function ssh_()
+{
+	#-o PubkeyAuthentication=no
+}
+
+function formdata()
+{
+	local data var name val _type output_type=json
+	integer i j
+	zparseopts -D -M -
+
+	explode --stdin -v data ':' || return
+	echo '{'
+	for ((i=1,j=0; i<$data_len; i++)); do
+		var='data'$i
+		((${(P)#var}<2)) && continue
+		name=${${(P)var}[1]}
+		val=${${(P)var}[2]}
+
+		# type inference
+		if [[ $val == <-> ]]; then
+			_type='int'
+		elif [[ $val =~ 'false|true' ]]; then
+			_type='bool'
+		elif [[ $val =~ '^-?[0-9]+\.[0-9]+$' ]]; then
+			_type='float'
+		elif [[ $val =~ '^[0-9]{4}-?[0-9]{2}-?[0-9]{2}([T| ])?[0-9]{2}:?[0-9]{2}:?[0-9]{2}' ]]
+		then
+			_type='date'
+		else
+			_type='string'
+		fi
+
+		# output
+		((j++)) && echo ','
+		echo -n "\t\"$name\": "
+		case $_type in
+			int|bool) echo -n "$val" ;;
+			*) echo -n "\"${val}\"" ;;
+		esac
+	done
+	echo "}"
 }

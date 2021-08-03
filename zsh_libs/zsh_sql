@@ -1,25 +1,18 @@
-VERSION=1.0.5
-#lazyload=sql,gettable,tableshow,tablelist,sqlError,usedb,dblist,dbtstamp,dbsize,sqldbdump
+VERSION=1.0.6
+#lazyload=sql,gettable,tableshow,tablelist,sqlError,usedb,dblist,dbtstamp,dbsize,sqldbdump,sqlEscape
 alias sql="noglob sql"
-alias sqlmaq="noglob sql --ssh maquina"
-
+alias sqlmaq="noglob sql --ssh idiomus"
+alias sqlps="sql -n 'show full processlist'"
+alias sqlkill="sql -n kill"
 # databases data dir
 DB_DATA_DIR=/var/lib/mysql
 DBNAME='idiomus'
 
-typeset -gA sqlPass=(
-	# user  pass
-	'sparc' 'my!7866'
-	'idiomus' '#58dhAms$3xx'
-)
-typeset -gA sqlUser=(
-	# root user
-	'root' 'sparc'
-	# Dbname    User
-	'idiomus' 'idiomus'
-)
+source $CFG/sql.cfg.zsh
+include -ql functions
 
 typeset -gA rowIndex
+typeset -gi sqllimit=2000
 
 # get last modification time of dbname(s)
 # usage: dbtstamp dbname
@@ -28,16 +21,25 @@ function dbtstamp()
 	usedb "$@"
 	sudo ls -lrt --time-style=+"%Y-%m-%d %H:%M:%S" $DB_DATA_DIR/$db/ | \
 		awk '{print $6,$7,$8}' | sort --numeric-sort
-}
+	}
 
 function todosql__()
 {
-	sql --ssh maquina 'SELECT review_version_id, sequence, length, texts, timestamps, status FROM review_track WHERE review_version_id=184 ORDER BY updated_at' | {          
-		read cols ; while IFS=$'\t\t' read -r version_id sequence length texts timestamps _status ; do 
+	sql --ssh maquina 'SELECT review_version_id, sequence, length, texts, timestamps, status FROM review_track WHERE review_version_id=184 ORDER BY updated_at' | {
+		read cols ; while IFS=$'\t\t' read -r version_id sequence length texts timestamps _status ; do
 			sqlQuote -v _texts $texts; sqlQuote -v _timestamps $timestamps
 			sql "insert into review_track (review_version_id,sequence, length, texts, timestamps,status) values ($version_id, $sequence, $length, '$_texts', '$_timestamps', '$_status')"
 		done
 	}
+}
+
+function sqlEscape()
+{
+	if [[ $1 == 'NULL' ]]; then
+		echo 'NULL'
+	else
+		echo ${(qq)"$(trim $1)"}
+	fi
 }
 
 function sqlQuote()
@@ -47,68 +49,131 @@ function sqlQuote()
 	typeset -g "$var[2]=${1//(#m)[\']/\\$MATCH}"
 }
 
+# get column type info
+# sqlType [-d dbname]
+function sqlType()
+{
+	local _opts
+	zparseopts -D -M -A _opts -
+	(($+_opts[-d] || $+_opts[-n])) || {
+		usedb $_opts[-d] || return
+	}
+	sql "SELECT column_type FROM information_schema.columns WHERE table_schema = '$_db'" \
+		"AND table_name='$_tbl' AND column_name='$_col'"
+}
 # execute mysql command
 # sql [-d dbname] [-f file.sql] SELECT ...
 function sql()
 {
-	local file name nodb verbose user pass silent host ret _out opts
-	local _colsOut _cols p _idVar _raw
-	integer i _id
+	local file name verbose user pass silent host ret _out mysqlopts
+	local _colsOut _cols _idVar _raw _opts presql=''
+	integer p i _id
+
 	typeset -g sql
- #s=silent 
-	zparseopts -D -M - f:=file d:=name n=nodb v=verbose u:=user p:=pass \
-		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw
+
+	zparseopts -D -M -A _opts - f: d:=name 'n' v=verbose u: -user:=u p: -pass:=p 't' -table=t \
+		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw 'i' --pager -nocolumns \
+		-force 's' -limit:
+
+	if (($+_opts[--skip-foreign])); then
+		presql='SET GLOBAL FOREIGN_KEY_CHECKS=0;'
+	fi
 
 	sql="$*"
 
-	if (($#file)); then
-		[[ -f $file[2] ]] || abort --ex FileIoEx_NotFound 127 $(getfullpath $file[2])
+	if (($+_opts[-f])); then
+		file=$(getfullpath $_opts[-f])
+		[[ -f $file ]] || abort --ex FileIoEx_NotFound 127 $file
 	fi
 
-	coproc parseSqlErrors; p=$!
+	if ((! $+_opts[-i] && ! $+_opts[-s])); then # doesnt show in interactive or silent modes
+		coproc parseSqlErrors; p=$!
+	else
+		#TODO
+	fi
 
 	if [[ -n $host ]]; then # remote
-		OPT_CHK file -f for remote
-		#(($#file)) && file=$file[2]
-		if (($#_out)); then
+		#OPT_CHK file -f for remote
+		#(($+file)) &&
+		unset '_opts[--ssh]'
+		unset '_opts[-u]'
+		unset '_opts[-p]'
+		remote_opts=("${(@kv)_opts}") # bypass local otions to remote
+		#(($+_opts[-n])) || choose remote database
+		(($+_opts[-d] || $+_opts[-n])) || {
+			usedb $name[2]
+			remote_opts+=(-d $db)
+		}
+		if (($+_opts[-o])); then
+			OPT_CHK 1 -o for remote
 			#@TODO
-			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p | \
-				awkWrapper -F '\\t' --inc printFields -E - - - - 'printFields(1,-1)'
+			#ssh $host[2] "noglob sql $mysqlopts ${(qq)sql}" 2>&p | \
+			#	awkWrapper -F '\\t' --inc printFields -E - - - - 'printFields(1,-1)'
 		else
-			ssh $host[2] "noglob sql $opts ${(qqq)sql}" 2>&p
+			OPT_CHK file -f for remote
+			if (($#file)); then
+				[[ -f $file ]] || abort --ex FileIoEx_NotFound 127 $file
+				rsync -a $file $host[2]:/tmp/sql_$file:t
+				(($#verbose)) && techo -r -c head "ssh $host[2] $db < $file"
+			fi
+			if ((p)); then ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}" 2>&p
+			else; ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}"; fi
 		fi
 		ret=$?
-	else
-		opts=(-B $_raw)  # $silent
-		[[ -n $nodb ]] || usedb $name[2]
-		if [[ -n $db ]]; then
-			user=${user[2]:-${sqlUser[$db]:-$root}}
+
+	else #### Local ####
+		(($+_opts[--nocolumns] && $+_opts[-o])) && abort 2 "--nocolumns and -o options can't be used together"
+		mysqlopts=()
+		(($+_opts[-n])) || usedb $name[2]
+
+		# credentials
+		if [[ -n $db ]] && ((!$+_opts[-n])); then
+			user=${_opts[-u]:-${sqlUser[$db]:-$sqlUser[root]}}
 			pass=${pass[2]:-$sqlPass[$user]}
 		else
-			user=${user[2]:-$sqlUser[root]}
+			user=${_opts[-u]:-$sqlUser[root]}
 			pass=${pass[2]:-$sqlPass[$user]}
 		fi
-		opts+=(${user:+-u$user} ${pass:+-p"$pass"})
-		if (($#_out)); then
+		(($+_opts[-p])) && pass=$_opts[-p]
+		mysqlopts+=(${user:+-u$user} ${pass:+-p"$pass"})
+
+		if (($+_opts[-i])); then # interactive mode
+			mysql $mysqlopts $db
+			return
+		fi
+
+		mysqlopts+=(-B $_raw --disable-auto-rehash) # batch mode, $silent
+		mysqlopts+=(${_opts[--nocolumns]+--skip-column-names} ${_opts[-t]+-t} ${_opts[--force]+-f})
+
+		# Safety
+		if (($+_opts[--limit])); then
+			sqllimit=$_opts[--limit]
+			input -v sqllimit -p 'Row count limit (-1 for unlimited):'
+		fi
+		mysqlopts+=(--safe-updates --select-limit=$sqllimit)
+
+		if (($+_opts[-o])); then
 			i=1
 			_out=$_out[2]
+			if [[ $_out[-1] == <-> ]]; then
+				input -v _out -p "Not allowed: $_out ends with a number. Ex: use an underscore" ${_out}_
+			fi
 			unset $_out$i
-			rowIndex[$_out]=0
+			rowIndex[$_out]=0 # track row index
 			#@TODO: no error handling mode: redirect stderr to null
-			(($#verbose)) && techo -r -c head mysql $opts -e $sql $db
+			(($#verbose)) && techo -r -c head mysql $mysqlopts -e ${(qq)sql} $db
 			{
 				# column names
 				if IFS=$'\t\t' read -r -A _cols; then
-					typeset -ga $_out$i
-					while IFS=$'\t\t' read -r -A $_out$i; do
-						((i++)); typeset -ga $_out$i
+					while { typeset -ga $_out$i ; IFS=$'\t\t' read -r -A $_out$i }; do
+						((i++));
 					done
 					unset $_out$i
 					((i--))
 				fi
-			} < <(mysql $opts -e $sql $db) 2>&p
-			#mysql $opts -e $sql $db 2>&p | IFS=$'\t\t' read -A $_out[2]
-				#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
+			} < <(mysql $mysqlopts -e $sql $db) 2>&p
+			#mysql $mysqlopts -e $sql $db 2>&p | IFS=$'\t\t' read -A $_out[2]
+			#awkWrapper $_out -F '\\t' --inc printFields -E - - - - 'printArgs(1,-1)'
 			ret=$?
 			if ((i)); then
 				if (($#_colsOut)); then
@@ -124,28 +189,37 @@ function sql()
 		else
 			#@TODO: no error handling: redirect stderr to null
 			if (($#file)); then
-				if [[ -f $file[2] ]]; then
-					(($#verbose)) && techo -r -c head mysql ${(qq)opts} ${(qq)sql} $db '<' $file[2]
-					mysql $opts $sql $db 2>&p < $file[2]
+				if [[ -f $file ]]; then
+					if ((!$#presql)); then
+						confirm 'Turn off foreign key verification' && {
+							presql='SET GLOBAL FOREIGN_KEY_CHECKS=0;'
+							postsql='SET GLOBAL FOREIGN_KEY_CHECKS=0;'
+						}
+					fi
+					(($#verbose)) && techo -r -c head "mysql ${(qq)mysqlopts} $db < $file"
+					if ((p)); then mysql $mysqlopts $db < $file 2>&p
+					else mysql $mysqlopts $db < $file; fi
+					techo ret=$?
 				else
-					techo -c err "File not found$C_: $file[2]"
+					techo -c err "File not found$C_: $file"
 					false
 				fi
 			else
 				if (($#_idVar)); then
 					# sql+="; SELECT ROW_COUNT(), LAST_INSERT_ID()"
 					sql+="; SELECT LAST_INSERT_ID()"
-					(($#verbose)) && techo -r -c head mysql $opts -s -e $sql $db
-					_id=$(mysql $opts -s -e $sql $db) 2>&p
+					(($#verbose)) && techo -r -c head mysql $mysqlopts -s -e ${(qq)sql} $db
+					_id=$(mysql $mysqlopts -s -e $sql $db) # 2>&p
 				else
-					(($#verbose)) && techo -r -c head mysql $opts -e $sql $db
-					mysql $opts -e $sql $db 2>&p
+					(($#verbose)) && techo -r -c head mysql $mysqlopts -e ${(qq)sql} $db
+					if ((p)); then mysql $mysqlopts -e "$sql" $db 2>&p
+					else mysql $mysqlopts -e "$sql" $db; fi
 				fi
 			fi
 			ret=$?
 		fi
 	fi
-	echo EOF >&p ; wait $p
+	((p)) && { echo EOF >&p ; wait $p }
 
 	if ((ret==0)); then
 		if (($#_idVar)); then
@@ -164,9 +238,13 @@ function sql()
 		if read -p errCode sqlState line tmp; then
 			if [[ $errCode == '-' ]]; then
 				#@TODO
-				DEBUG=9 abort --ex SqlEx_Unknown 99 - ${sqlState:--} ${line:--} $tmp
+				DEBUG=9 abort --ex SqlEx_Unknown 99 - ${sqlState:-'-'} ${line:-'-'} $tmp
 			fi
 			split=(${(Q)${(z)tmp}})
+			if [[ $errCode == 'Ex' ]]; then
+				abort ${verbose:+-v3} --ex $sqlState $line $tmp # $sqlState is the exception
+			fi
+
 			if in_array -v i - '-' split; then # after '-' is the msg
 				m=($split[1,i-1])
 				#@ msg=$split[i+1,-1]
@@ -189,11 +267,17 @@ function sql()
 	}
 }
 
+# $1 is var name, which is array with row values
 function sqlFetch()
 {
 	integer N
+	# starts at 0
 	(($+rowIndex[$1])) || return 1
+
 	((N=++rowIndex[$1]))
+	#if (($# >= 2)); then
+
+	#fi
 	local var=$1$N
 	((${(P)+var})) || return 1
 	set -A $1 "${(P@)var}"
@@ -210,87 +294,134 @@ function sqlError()
 	local msg='' _v=0 cod state line
 	[[ $1 == '-v' ]] && { shift; _v=1 }
 	cod=$1; state=$2; line=$3; shift 3
-	((_v)) && msg="SQL Error $cod ($state)$C_ at line $line: "
+	((_v)) && {
+		msg="SQL Error $C[lcyan]$cod ($state)$C_"
+		((line)) && msg+="at line $C[warn]$line$C_: " || msg+=': '
+	}
 	case $cod in
 		1049) msg+="Can't connect to database $C[warn]'$1'$C_"
-		;;
+			;;
 		1062) #uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
 			msg+="Duplicate entry $C[warn]'$1'$C_ for key $C[warn]'$2'"
-		;;
+			;;
 		1064) msg+="Syntax error near $C[warn]'$@'"
-		;;
+			;;
 		145[12]) msg+="Constraint violation $C[warn]$3$C_: $C[warn]$2.$4$C_ REFERENCES $C[warn]$5.$6"
-		;;
+			;;
+		2002) msg+="Can't connect to mysql through $C[warn]'$1'$C_"
+			;;
 		*) local _args=("$@")
 			# printf -v _args $msg"$(perror -s $cod)" $C[warn]$^_args$C_
 			printf -v _args $msg"$(perror -s $cod)" $_args
 			techo -c lred $_args
 			return
-		;;
+			;;
 	esac
 	techo -c lred $msg
 }
 
 # Parses error string and returns error codes and relevant arguments.
 # For most errors uses perror string format and reverse printf using regexp.
+# More info:
+#  https://www.ppgia.pucpr.br/pt/arquivos/techdocs/mysql/error-handling.html
+#  https://mariadb.com/kb/en/mariadb-error-codes/
+#  sql/share/errmsg-utf8.txt
 #
 # @print errCode sqlState line arguments -
 function parseSqlErrors()
 {
-	_dbg_trap $0
-	local data
+	local data msg rx errCode sqlState msgFormat line
 	while read -r data; do
 		[[ $data == 'EOF' ]] && return
 		if [[ $data =~ $'^ERROR ([0-9]{4}) \\(([0-9A-Z]{5})\\) at line ([0-9]+): (.*)' ]]; then
-			local msg rx errCode sqlState msgFormat line
 			msg=$match[4]
 			errCode=$match[1]
 			sqlState=$match[2]
 			line=$match[3]
-			
-			# More info:
-			#  https://www.ppgia.pucpr.br/pt/arquivos/techdocs/mysql/error-handling.html
-			#  https://mariadb.com/kb/en/mariadb-error-codes/
-			#  sql/share/errmsg-utf8.txt
+
 			case $errCode in
-			1062) 
-				#uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
-				msgFormat="Duplicate entry '(.*)' for key '(.*)'"
-				;;
-			1064)
-				msgFormat="near '(.*)'"
-				;;
-			145[12])
-				msgFormat='^[^(]+\(`([^`]+)`.`([^`]+)`, CONSTRAINT `([^`]+)` FOREIGN KEY \(([^)]+)\) REFERENCES `([^`]+)` \(([^)]+)\)'
-				#msgFormat="^[^(]+\\(\`([^\`]+)\`.\`([^\`]+)\`, CONSTRAINT \`([^\`]+)\` FOREIGN KEY \\(\`([^\`]+)\`\\) REFERENCES \`([^\`]+)\` \\(\`([^\`]+)\`"
-			#	msgFormat="Cannot add or update a child row: a foreign key constraint fails (`¬tbl¬`.`#¬sql¬`, CONSTRAINT `#¬fk¬` FOREIGN KEY (`¬col¬`) REFERENCES `¬tbl¬` (`¬col¬`))"
-	#ERROR 1452 (23000) at line 1: Cannot add or update a child row: a foreign key constraint fails (`idiomus`.`#sql-426_49`, CONSTRAINT `#sql-426_49_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`))
-				;;
-			*)
-				if msgFormat=${"$(perror $errCode)"#*: }; then
-					msgFormat=${msgFormat//(#m)[()]/'\'$MATCH}
-					rx=(
-						'%l#[du]'       '(-?[0-9]+)'
-						'%-#.#[0-9]#[sM]' '(.*)'
-						'\).' ')\.'
-					)
-					msgFormat=${msgFormat//${~rx[1]}/$rx[2]}
-					msgFormat=${msgFormat//${~rx[3]}/$rx[4]}
-					msgFormat='^'${msgFormat//${~rx[5]}/$rx[6]}
-				else
-					techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState)"
-					continue
-				fi
-				;;
+				1062)
+					#uses the format string for 1586 (ER_DUP_ENTRY_WITH_KEY_NAME)
+					msgFormat="Duplicate entry '(.*)' for key '(.*)'"
+					;;
+				1064)
+					msgFormat="near '(.*)'"
+					;;
+				145[12])
+					msgFormat='^[^(]+\(`([^`]+)`.`([^`]+)`, CONSTRAINT `([^`]+)` FOREIGN KEY \(([^)]+)\) REFERENCES `([^`]+)` \(([^)]+)\)'
+					#msgFormat="^[^(]+\\(\`([^\`]+)\`.\`([^\`]+)\`, CONSTRAINT \`([^\`]+)\` FOREIGN KEY \\(\`([^\`]+)\`\\) REFERENCES \`([^\`]+)\` \\(\`([^\`]+)\`"
+					#	msgFormat="Cannot add or update a child row: a foreign key constraint fails (`¬tbl¬`.`#¬sql¬`, CONSTRAINT `#¬fk¬` FOREIGN KEY (`¬col¬`) REFERENCES `¬tbl¬` (`¬col¬`))"
+					#ERROR 1452 (23000) at line 1: Cannot add or update a child row: a foreign key constraint fails (`idiomus`.`#sql-426_49`, CONSTRAINT `#sql-426_49_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`))
+					;;
+				*)
+					if msgFormat=${"$(perror $errCode)"#*: }; then
+						msgFormat=${msgFormat//(#m)[()]/'\'$MATCH}
+						rx=(
+							'%l#[du]'			'(-?[0-9]+)'
+							'%-#.#[0-9]#[sM]'	'(.*)'
+							'\).'				')\.'
+						)
+						msgFormat=${msgFormat//${~rx[1]}/$rx[2]}
+						msgFormat=${msgFormat//${~rx[3]}/$rx[4]}
+						msgFormat='^'${msgFormat//${~rx[5]}/$rx[6]}
+					else
+						techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState)"
+						continue
+					fi
+					;;
 			esac
 
 			if [[ $msg =~ $msgFormat ]]; then
 				print -Pr $errCode $sqlState $line ${(@qqq)match} - #@ $msg
 			else
-				techo -c lred "$C[warn]$errCode$C_ ($sqlState)\n" \
-					"Message format doesn't match line"
-				techo "format: $msgFormat"
+				techo -c lred "$C[warn]$errCode$C_ ($sqlState)\n" "Message format doesn't match line"
+				techo "format: $msgFormat, msg: $msg"
 				print -Pr $errCode $sqlState $line - #@ $msg
+			fi
+		elif [[ $data =~ $'^Warning: (.*)' ]]; then
+			techo -c warn $data
+		elif [[ $data =~ $'^ERROR ([0-9]{4}) \\(([0-9A-Z]{5})\\): (.*)' ]]; then
+			msg=$match[3]
+			errCode=$match[1]
+			sqlState=$match[2]
+			line=0
+
+			case $errCode in
+				2002)
+					msgFormat="Can't connect to local MySQL server through socket '(.*)'"
+					;;
+				*)
+					if msgFormat=${"$(perror $errCode)"#*: }; then
+						msgFormat=${msgFormat//(#m)[()]/'\'$MATCH}
+						rx=(
+							'%l#[du]'			'(-?[0-9]+)'
+							'%-#.#[0-9]#[sM]'	'(.*)'
+							'\).'				')\.'
+						)
+						msgFormat=${msgFormat//${~rx[1]}/$rx[2]}
+						msgFormat=${msgFormat//${~rx[3]}/$rx[4]}
+						msgFormat='^'${msgFormat//${~rx[5]}/$rx[6]}
+					else
+						techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState)"
+						continue
+					fi
+					;;
+			esac
+
+			if [[ $msg =~ $msgFormat ]]; then
+				print -Pr $errCode $sqlState $line ${(@qqq)match} - #@ $msg
+			else
+				techo -c lred "$C[warn]$errCode$C_ ($sqlState)\n" "Message format doesn't match line"
+				techo "format: $msgFormat, msg: $msg"
+				print -Pr $errCode $sqlState $line - #@ $msg
+			fi
+		elif [[ $data =~ $'ssh: connect to host ([a-z]+) port ([0-9]+): (.*)' ]]; then
+			local host port
+			msg=$match[3]
+			if [[ $msg == 'Network is unreachable' ]]; then
+				print -Pr Ex NetIoEx_Unreachable 2 ${match:1:3}
+			else
+				print -Pr Ex NetIoEx_Unknown 127 ${match:1:3}
 			fi
 		else
 			techo -c lred $data
@@ -306,24 +437,28 @@ function isdb()
 
 function usedb()
 {
+	integer error
 	if [[ ${1:0:1} == '-' ]]; then
 		local search s
 		zparseopts -D -M - S:=search s:=s ; OPT_CHK s '-s(changed to -S)'
 	fi
 	if (($#)); then
-		isdb $1 && db=$1 || {
-			if [[ -o interactive ]]; then
-				(($#search)) || search=(-S $1)
-			else
-				abort --ex SqlEx_DbError 127 1049 42000 1 $1
-			fi
-		}
+		isdb $1 && { db=$1 ; return 0 }
+
+		error=1
+		techo -c lred "Database not found: \"$1\""
+		if [[ -o interactive ]]; then  #TODO not working?
+			(($#search)) || search=(-S $1)
+		else
+			abort --ex SqlEx_DbError 127 1049 42000 1 $1
+		fi
 	fi
 	if [[ -z $db ]]; then
 		#@TODO
 		#${dbname:-$(box get dbname)}
-		db=$(chooser ${DBNAME:+-D$DBNAME} $search $(dblist))
+		db=$(chooser ${DBNAME:+-D$DBNAME} $search $(dblist)) || return 1
 	fi
+	return 0
 }
 
 function dblist()
@@ -333,13 +468,21 @@ function dblist()
 
 function istable()
 {
-	[[ -n $db ]] || return 
+	[[ -n $db ]] || return
 	sql "describe $1" >/dev/null 2>&1
 }
 
 function tablelist()
 {
-	sql 'show tables' | tail -n +2
+	#(($#)) && isdb $1 && { shift }
+	usedb $1 || return
+	sql --nocolumns 'show tables'
+}
+
+function viewlist()
+{
+	usedb $1 || return
+	sql "SHOW FULL TABLES IN $db WHERE TABLE_TYPE LIKE 'VIEW'"
 }
 
 function gettable()
@@ -381,12 +524,99 @@ function dbsize()
 # Added 2019-03-23 23:36
 function sqldbdump()
 {
+	local opts _opts dumpfn
+	zparseopts -D -M -A _opts - -no-data -no-create-info
+
 	usedb "$@"
+
+	dumpfn=$db.sql
 	if [[ -f $db.sql.bkup ]]; then
 		techo -c warn "Saving backup $db.sql.bkup"
-		mv $db.sql $db.sql.bkup
+		mv $dumpfn $dumpfn.bkup
 	fi
-	mysqldump $db --no-data --single-transaction --skip-add-drop-table | \
+
+	# credentials
+	if [[ -n $db ]]; then
+		user=${_opts[-u]:-${sqlUser[$db]:-$sqlUser[root]}}
+		pass=${pass[2]:-$sqlPass[$user]}
+	else
+		user=${_opts[-u]:-$sqlUser[root]}
+		pass=${pass[2]:-$sqlPass[$user]}
+	fi
+	(($+_opts[-p])) && pass=$_opts[-p]
+	opts+=(${user:+-u$user} ${pass:+-p"$pass"})
+
+	(($+_opts[--no-data])) &&  opts+=(--no-data)
+	(($+_opts[--no-create-info])) && opts+=(--no-create-info)
+
+	mysqldump $db $opts --single-transaction --skip-add-drop-table | \
 		sed -e 's/ AUTO_INCREMENT=[0-9]*\b//g' | \
 		grep -v '^\/\*![0-9]\{5\}.*character_set_client.*\/;$' > $db.sql
+}
+
+# Added 2020-10-15 11:36
+alias sqldbshow='sqldbstat'
+function sqldbstat()
+{
+	local opts
+
+	usedb "$@"
+
+	tables=($(tablelist))
+	user=$sqlUser[root]
+	pass=$sqlPass[$user]
+	opts+=(-u$user -p"$pass" --count)
+	mysqlshow $opts $db
+}
+
+alias groupby='sqlgroupby'
+# Added 2020-11-10 20:41
+function sqlgroupby()
+{
+	local _opts groups
+	#zparseopts -D -M -A _opts -
+	tbl=$(gettable $1)
+	(($#)) && shift
+	_opts=("$@")
+	explode -v cols "$(sql -t show columns from $tbl)" $'\n'
+	chooser --ifs '¬' --multi -s '|' -f 1 -v groups --head "         $cols[2]" ${(j.¬.)cols:4:-1}
+	sql $_opts "SELECT count(*), ${(j.,.)groups} FROM $tbl"   # ORDER BY ${(j.,.)groups}"
+}
+
+# Added 2020-12-06 12:55
+function sqlgrant()
+{
+	local _opts _gdb _guser _gpass
+	zparseopts -D -M -A _opts - p: u: d:
+
+	(($+_opts[-d])) && _gdb=$_opts[-d]
+	(($+_opts[-p])) && _gpass=$_opts[-p]
+	(($+_opts[-u])) && _guser=$_opts[-u]
+
+	sql -n "GRANT ALL ON $_gdb.* TO '$_guser'@'localhost' IDENTIFIED BY '$_gpass'"
+}
+
+function dbusercreate()
+{
+	local _opts _gdb
+	zparseopts -D -M -A _opts - d:
+
+	sql -n "CREATE USER '$1' IDENTIFIED BY '$2'" || return
+	techo -c ok "User $2 created."
+
+	(($+_opts[-d])) && sqlgrant -d $_opts[-d] -u $1 -p $2
+}
+
+function dbcreate()
+{
+	local name user pass
+	input -v name -p 'Database name' $1
+	sql -n "create database $name" && techo -c ok "Database $name created."
+	confirm 'Create user' && {
+		input -v user -p 'User' $name && {
+			input -v pass -p 'Password' '!7866f' && {
+				dbusercreate -d $name $user $pass
+			}
+		}
+	}
 }

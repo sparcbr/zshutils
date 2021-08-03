@@ -1,24 +1,182 @@
 VERSION=1.0.5
-#lazyload=gdiff,gclone,gpr,commit,github,gpush,croot,gfollow,gunstage,gmerge,gchk,gbranch,grebase,gshow
-alias pull="git pull"
+#lazyload=gconfig,getbranch,gisupdated,croot,gremote,gdiff,gclone,gpr,commit,github,gpush,gfollow,gstaged,gunstage,gchk,gbranch,gstatus,gshow,gitgetrepo,glog,grestore,gpull,gstash,gexpirestash,gselect,gswitch,gmerge,gtag,grebase,jira,jiraRequest
+alias pull="gpull"
 alias push="gpush"
 alias gadd="git add"
 alias gadd-modified="git add \$(git diff --name-only --relative)"
 alias gh='github'
 alias unstage="gunstage"
 alias git_get_tag='git describe --tags $(git rev-list --tags --max-count=1)'
-alias glog2='git log --date=iso -g'
 alias gd='gdiff'
 alias gdi='gdiff --interactive'
+alias gsh='gshow'
+alias gls='git ls-files'
+unalias glog 2>/dev/null
+alias gst='gstatus'
+alias gstat='gstatus'
+alias grest='grestore'
+alias staged='gstaged'
+alias gds='gstaged'
+#local tmp=$(git rev-parse --short HEAD || echo '')
+typeset -gi hashAbbvLen=7
 
 export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
 
 [[ ! -v comp ]] && typeset -g -a comp
 
-#if [[ -z $PAGER && -z $GITPAGER ]]; then
-#	chooser -v PAGER -f1 'less' 'bat' '- *no pager*'
-#	[[ $PAGER == '-' ]] && PAGER=''
-#fi
+type meld >/dev/null || { [[ -n $DISPLAY ]] && confirm 'Install meld' && aptinst meld }
+
+#@TODO configs:
+globalCfg=(
+	core.excludesfile $CFG/.gitignore_global
+	diff.algorithm histogram
+	merge.conflictstyle diff3
+	user.email sparcbr@gmail.com
+	user.name 'Elizandro G. Roos'
+	color.ui auto
+	credential.helper store
+)
+function gconfig()
+{
+	local _opts cfg val
+	#zparseopts -D -M -A _opts -
+	git config --global --list --show-scope
+	chooser -v _opt -p 'git config' -f1 'Global config' 'Cancel' || return
+	case $_opt in
+		Unset)
+			git pull --no-commit "$@"
+			;;
+		Cancel)
+			cancel
+			;;
+		Global) ;;
+	esac
+	# or in repopath/.git/info/exclude
+	#if [[ -z $PAGER && -z $GITPAGER ]]; then
+	#	chooser -v PAGER -f1 'less' 'bat' '- *no pager*'
+	#	[[ $PAGER == '-' ]] && PAGER=''
+	#	git config --global core.pager
+	#fi
+	for cfg val in $globalCfg; do
+		run git config --global $cfg $val
+	done
+}
+
+function croot()
+{
+	git config --global --get alias.root > /dev/null || git config --global --add alias.root '!pwd'
+	alias croot='cd $(git root)'
+	cd $(git root)
+}
+
+gFormat=(
+	'%h'				# short hash
+	'%<(3,trunc)%cn'	# author
+	'%C(auto)%d%Creset'	# ref names
+	'%s'				# subject
+	'(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
+)
+gRefsFormat=$gFormat[3]
+# Added 2020-04-06 16:43
+alias _glog='git log'
+comp+=('glog=_glog')
+function glog()
+{
+	local _gopts _opts buf line _vname hashP authorP refsP subjectP dateP
+	local aline author hashColor
+	integer n=10 i
+	zparseopts -D -M -A _opts - -date: 'r' -relative=r v: 'l' n: 'd' diff=d -all a=all
+
+	_gopts=(--graph --color=always --format=tformat:"$gFormat")
+	(($+_opts[-r])) && _gopts+=(--relative)
+	(($+_opts[-n])) && n=$_opts[-n]
+	(($+_opts[--all])) && _gopts+=(--all)
+	_gopts+=(-n $n)
+
+	if [[ -n $_opts[-v] ]]; then
+		_vname=$_opts[-v]
+		typeset -ga $_vname
+	fi
+
+	hashP='[a-f0-9]{5,}'
+	authorP='[A-Z]'
+	refsP='\(.*\)'
+	subjectP='.*'
+	dateP='\(.*\)'
+	typeset -A authorColor=('E' yellow 'P' warn) # '*' lcyan)
+	for color in $authorColor; do colorSet $color; done  # setup colors
+	#lcolors=('' yellow '' '' '')
+	while read -r line; do
+		((i++))
+		# _glsub=(¬P.. "$C[warn]P$C_" ¬E.. "$C[ok]$EC_")
+		if [[ $line =~ '(.*) ('$~hashP') ('$~authorP').. ('$~refs')? ?('$subjectP') ('$~dateP')' ]]
+		then
+			author=$match[3]
+			color=$authorColor[$author]
+			match[3]=$C[$color]$author$C_
+
+			hash=$match[2]
+			match[2]=$(colorhash $hash)
+
+			#TODO save colors and data in separated arrays
+			aline="$match"
+		else
+			aline="$line"
+		fi
+
+		if [[ -n $_vname ]]; then
+			typeset -g "${_vname}[$i]=$aline"
+			(($+_opts[-l])) && typeset -g "${_vname}_files[$i]=$(gd -l $hash)"
+		else
+			echo -E - "$aline"
+			(($+_opts[-l])) && echo -E - $(gd -l $hash)
+		fi
+	done < <(git log --date=${_opts[--date]:-iso} $_gopts "$@")
+}
+
+function getrefs()
+{
+	git log -n1 --color=always --format=tformat:$gRefsFormat $1
+}
+
+# TODO: increase contrast
+function colorhash()
+{
+	integer color len=hashAbbvLen
+	local _opts
+	zparseopts -D -A _opts - -n:
+	(($+_opts[-n])) && len=$_opts[-n]
+	#does not work: ((color=[#10](0x$1 % 256)))
+	color=$(([#10](0x${1:0:2} % 256)))
+	echo - $'\033\['"38;5;${color}m${1:0:$len}"
+}
+
+function gpull()
+{
+	local upstream tmp _opts _opt gopts=()
+	#zparseopts -D -M -A _opts -
+	upstream=$(git for-each-ref --format='%(upstream:short)' "$(git symbolic-ref -q HEAD)") || {
+		techo -c warn 'No upstream branch set'
+		#todo
+		return 10
+	}
+	tmp=$(git pull --ff-only "$@" 2>&1) || {
+		techo -c warn $tmp
+		if [[ $tmp =~ 'fatal: (.*)' ]]; then
+			# on network=1 gpull
+			techo -c lred $match[1]
+			return 3
+		fi
+		chooser -v _opt -p 'No fast-forward possible' -f1 'Merge pull' 'Cancel' || return
+		case $_opt in
+			Merge)
+				git pull --no-commit "$@"
+				;;
+			Cancel) cancel ;;
+				*)	;;
+		esac
+	}
+}
 
 function gshow()
 {
@@ -36,76 +194,102 @@ function gchk()
 	git checkout "$@" && git status
 }
 
+function gstaged()
+{
+	gdiff --staged "$@"
+}
+
 comp+=('gunstage=git')
 function gunstage()
 {
-	git restore --staged "$@"
+	grestore --staged "$@"
 }
 
 function gselect()
 {
-	local lines _opts gopts noSelect
-	integer ret i idx nlimit=30
+	local msgsearch search filePattern revisions
+	integer ret i idx nlimit=20 hasDashDash
+	typeset -a lines _opts _copts g1opts gFixedOpts noSelect head gargs
 	setopt extendedglob
-	#zparseopts -D -M -A _opts - #-all
-	#opts="$@"
-	gopts=(
-		--color=always --graph -n $nlimit
-		--format=format:'%h %an <%aE> %ai %f'
-	)
+	zparseopts -D -M -A _opts - 'l' -nograph=l -oneline=l n: -follow g: -grep:=g G:
 
-	while [[ ${1[1]} == '-' ]]; do
-		if [[ $1 == '-' || $1 == '--' ]]; then
-			shift
-			break
+	(($+_opts[-n])) && nlimit=$_opts[-n]
+	(($+_opts[--follow])) && glopts+=(--follow)
+	(($+_opts[-g])) && msgsearch=$_opts[-g]
+	(($+_opts[-G])) && search=$_opts[-G]
+	((! $+_opts[-l])) && gFixedOpts+=('--graph')
+	gFixedOpts+=(--relative)
+
+	# separate revisions(branches/commits) and paths
+	while ((ret==0)); do
+		_copts=()
+		noSelect=()
+		head=()
+		glopts=($gFixedOpts)
+		if (($#msgsearch)); then
+			glopts+=(--grep "$msgsearch")
+			head+=("$C[head]Search message:$C_ $msgsearch")
 		fi
-		gopts+=("$1")
-		shift
-	done
-
-	lines=("$(run git log $gopts "$@")")
-
-	# mark lines without content as non-selectable
-	for ((i=1; i<=$#lines; i++)); do
-		if [[ ! $lines[i] =~ [a-f0-9]{5,} ]]; then
-			noSelect+=($i)
+		if (($#filePattern)); then
+			#TODO multiple files
+			glopts+=(--follow)
+			head+=("$C[head]Following:$C_ $filePattern")
 		fi
-	done
-	(($#noSelect)) && _opts+=(-n "$noSelect")
+		((nlimit)) && glopts+=(-n $nlimit)
 
-	_opts=(
-		#--head 'Commits containing "$1"'
-		--foot '(Enter) Show in terminal (V or E) Vim (F) Full revision (D) Diff (M) Meld (Q) Quit. Do nothing.'
-		--events "v\\|e EDIT f FULL d DIFF m MELD" 
-		-I idx
-	)
-	
-	if ((${lines[(i)--follow]}<$#lines)); then
-		_opts+=(--head "Following $@")
-	fi
+		glog -v lines $glopts "$@" -- $filePattern
+		# mark lines without content as non-selectable
+		for ((i=1; i<=$#lines; i++)); do
+			if [[ ! $lines[i] =~ [a-f0-9]{5,} ]]; then
+				noSelect+=($i)
+			fi
+		done
+		(($#noSelect)) && _copts+=(-n "$noSelect")
 
-	while { chooser --simple -v hashes --ifs $'\n' \
-		-R '([a-f0-9]{5,40} .*)' -f1 -D $idx $_opts $lines ; ret=$? ; ((ret==0)) }
-	do
-		case $ACTION in
-			'')
-				gshow $hashes $1
-				;;
-			'EDIT')
-				gshow $hashes $1 | gvim -
-				;;
-			'FULL')
-				gshow $hashes:$1 | gvim -
-				;;
-			'DIFF')
-				gvimdiff $1 <(gshow $hashes:$1)
-				;;
-			'MELD')
-				meld $1 <(gshow $hashes:$1)
-				;;
-		esac
+		_copts+=(
+			--foot '(Enter) Show (V|E) Vim (F) Full (D) Diff (M) Meld (Esc) Quit'
+			--events '[ve] EDIT f FULL d DIFF m MELD F3 GREP'
+			--strip-color
+			-R '([a-f0-9]{5,40} .*)' -f1
+		)
+
+		(($#head)) && _copts+=(--head "$head")
+
+		while { chooser -v hashes --items lines -D $idx -I idx $_copts ; ret=$? ; ((ret==0)) }
+		do
+			case $ACTION in
+				'')
+					gshow $gs_opts $hashes $1
+					;;
+				'EDIT')
+					# save to:
+					gshow $hashes $1 | gvim -
+					#gvim -f $1
+					;;
+				'FULL')
+					gshow $hashes:$1 | gvim -
+					;;
+				'DIFF')
+					gvimdiff $1 <(gshow $hashes:$1)
+					#TODO choose HEAD, WORKDIR, or other review, etc
+					#TODO older_hash vs newer , or choose
+					;;
+				'MELD')
+					set -x
+					meld $1 <(gshow $hashes:$1)
+					set +x
+					;;
+				'GREP')
+					input -p 'Msg search' -v msgsearch && break
+					;;
+				'GGREP')
+					input -p 'Code search' -v search && break
+					;;
+				*) ;;
+			esac
+		done
 	done
-	return $ret
+	return 0 # $ret
 }
 
 function gfollow()
@@ -113,18 +297,101 @@ function gfollow()
 	local hash entries REPLY
 	zparseopts -M -D - d=diff -diff=d
 	gselect --follow "$@"
-	#hashes=($(egrep '^commit' <(git log --follow "$@") | awk '{print $2}'))
-	#entries=("${(@f)$(git log --format=format:%h\ %an\ \<%aE\>\ %ai\ %f --follow $1)}")
 }
 
 function gtag() #@TODO
 {
 	local tag hash
+	zparseopts -D -M -A _opts - -fetch d: -depth:=d
+
+	gremote || { techo -c warn 'No remotes'; return 10 }
+	if (($+_opts[--fetch])); then
+		local _topts=()
+		tag=$1
+		(($+_opts[-d])) && _topts+=(--depth $_opts[-d])
+		git fetch $_topts $remote[1] tag $tag
+		return
+	fi
 	echo TODO
+	techo -c warn "Current tag: $(git describe --always --tags)" #$(git rev-list --tags --max-count=1)'
 	return 1
 	hash=${2:-$(gselect -h)}
 	tag=$()
 	git tag -a $tag $hash
+	include functions
+
+	autoload is-at-least
+
+	function versionCurrent()
+	{
+			#git tag -l --sort version:refname 2>/dev/null | tail -n1
+	}
+
+	function versionIncrement()
+	{
+			local s v="$1" prefix
+			explode -v s "$1" '.'
+			# no dots
+			if [[ $#s -eq 1 ]] && [[ $v[1] =~ [^0-9] ]]; then
+					v=${v:1}
+					prefix='v'
+			else
+					v=$s[-1]
+			fi
+			s[-1]=$prefix$(($v + 1))
+			echo ${(j/./)s}
+			set +x
+	}
+	integer isRelease=$1 versionMajor=$2 versionMinor=$3 versionPatch=$4
+	integer versionCode
+	#if [[ $# -eq 0 || $1 = 'cc' ]]; then
+			gitState=$(git describe --tags)
+			#git rev-list master 2>/dev/null | wc -l)
+			(( gitstate > versionCode)) && versionCode++
+			echo $versionCode
+			return
+	#fi
+
+	curVersion=$(git version )
+	if [[ -n $curVersion ]]; then
+			techo "Current git version: $curVersion"
+			input -v version -p "Current version $curVersion.\nEnter new version" $(versionIncrement "$curVersion")
+	elif confirm 'No version found. Use version 1.0'; then
+			version=1.0
+	else
+			cancel
+	fi
+
+	if [[ -n "$version" ]]; then
+			[[ "${version:0:1}" =~ "[0-9]" ]] && version="v$version"
+
+			{
+					[[ "$version" != "$curVersion" ]] && is-at-least $curVersion $version
+			} || abort "Version must be higher than $curVersion (given: $version)"
+
+			file= # app/build.gradle
+			local integer versionCode newVersionCode
+
+			file=
+			if [[ -f $file ]]; then
+
+					ver=($(awk  '/versionCode|versionName/{print $1"="$2}')) # <- ???
+					for line in $ver; do
+							eval $line
+							[[ $versionCode -gt 0 && -n $versionName ]] && break
+					done
+					newVersionCode=$(($version * 100))
+					while (( $newVersionCode <= $versionCode )); do
+							((newVersionCode*=10))
+					done
+					techo -c warn versionCode: $versionCode -> $newVersionCode
+					techo -c warn versionName: $versionName -> $version
+					sed --in-place=.sed "s/versionName '$versionName'/versionName '$version'/" $file
+			fi
+			git tag -a $version
+	fi
+
+
 }
 
 function rebase_in_progress()
@@ -133,12 +400,7 @@ function rebase_in_progress()
 		-d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ]]
 }
 
-function gconfig()
-{
-	# 'color.ui' 'auto'
-	#git config --global $opt $val
-}
-# git log --first-parent 
+# git log --first-parent
 function gmergebase()
 {
 	local common common2 _A _B
@@ -148,10 +410,10 @@ function gmergebase()
 	getbranch
 	_A=${1:-$compare_to}
 	_B=${2:-$branch}
-	common=$(run git merge-base $_A $_B) 
-	common2=$(run git merge-base --fork-point $_A $_B 2>/dev/null)
+	common=$(run -v3 git merge-base $_A $_B)
+	common2=$(run -v3 git merge-base --fork-point $_A $_B 2>/dev/null)
 	#[[ -n $common && $common != HEAD
-	#@TODO show glog graphic with shared commits and fork-point
+	#@TODO show g log graphic with shared commits and fork-point
 	if [[ -n $common || -n $common2 ]]; then
 		if [[ -z $common2 || $common == $common2 ]]; then
 			echo $common
@@ -166,13 +428,14 @@ function gmergebase()
 function grebase()
 {
 	local msg status cmd common _opts _from _onto
-	zparseopts -D -M -A _opts - i -onto:
+	zparseopts -D -M -A _opts - -onto:
+
 	compare_to='master' #@TODO
 	if ! rebase_in_progress; then
 		_from=${1:-$compare_to}
 
 		if [[ $_from != $compare_to ]] && ((!$+_opts[--onto])); then
-			chooser -v _onto --head 'Rebase onto:' -f1 --simple $compare_to $_from  || cancel
+			chooser -v _onto --head 'Rebase onto:' -f1 $compare_to $_from  || cancel
 			_opts+=(--onto $_onto)
 		fi
 
@@ -182,7 +445,7 @@ function grebase()
 		common=($(gmergebase $_from $branch))
 		if (($#common > 1)); then
 			integer n
-			chooser -I n -v common -f1 --head 'Select base:' --simple \
+			chooser -I n -v common -f1 --head 'Select base:' \
 				$common[1] "$common[2] --fork-point" || cancel
 
 			((n==2)) && _opts+=(--fork-point '')
@@ -196,7 +459,7 @@ function grebase()
 		else
 			cancel
 		fi
-		
+
 		rebase_in_progress || return 0
 	fi
 
@@ -231,7 +494,7 @@ function grebase()
 			cmd=
 		fi
 	fi
-	
+
 	if [[ -z $cmd ]]; then
 		if (($#unmerged)); then
 			local list=()
@@ -239,9 +502,9 @@ function grebase()
 				list+=($i $unmerged[i])
 			done
 			chooser --head 'There are rebase conflicts in the following files:' \
-				--simple -f2 -v cmd --events "${(@q)events}" $list || cancel
+				-f2 -v cmd --events "${(@q)events}" $list || cancel
 		else
-			chooser --head 'No conflicts' --simple -f2 -v cmd --events "${(@q)events}" || cancel
+			chooser --head 'No conflicts' -f2 -v cmd --events "${(@q)events}" || cancel
 		fi
 	fi
 
@@ -270,6 +533,7 @@ function grebase()
 	esac
 }
 
+comp+=(gmerge=gmerge)
 function gmerge() #@TODO
 {
 	local mergeHash status unmerged cmd=$1
@@ -286,7 +550,7 @@ function gmerge() #@TODO
 				techo -c warn "Merge in progress (${mergeHash:0:8})"
 				unmerged=($(git diff --name-only --diff-filter=U))
 				#unmerged=($(git ls-files --unmerged))
-				#chooser -v file -f1 
+				#chooser -v file -f1
 				techo -c head "Needs merging: $C[warn]$unmerged"
 			;;
 		esac
@@ -295,8 +559,13 @@ function gmerge() #@TODO
 		# 	status)
 		# 	;;
 		# esac
-		chooser -v branch -H 'Merge branch' -S "$1" -b2- --ifs $'\n' "$(listbranch -a)" || cancel
-		confirm "Merge branch $branch" && run git merge $branch --no-ff --no-commit
+		local selection
+		chooser -v selection -H 'Merge branch' -S "$1" --strip-color \
+			-b3- --ifs $'\n' "$(listbranch -a)" || cancel
+
+		selection=($=selection)
+
+		confirm "Merge branch $selection" && run git merge $selection[1] --no-ff --no-commit
 	fi
 }
 
@@ -327,14 +596,7 @@ function commit() #@TODO
 	else
 		args="$@"
 	fi
-	git commit $amend $m $args
-}
-
-function croot()
-{
-	git config --global --get alias.root > /dev/null || git config --global --add alias.root '!pwd'
-	alias croot='cd $(git root)'
-	cd $(git root)
+	git commit $amend $m $args || banner -c lred
 }
 
 # Added 2019-01-25 11:17:01
@@ -342,15 +604,23 @@ function croot()
 comp+=('github=cd')
 function github()
 {
-	local url repo search echo
-	zparseopts -D -M - r=repo s=search e=echo
-	if [[ $# -eq 0 ]]; then
+	local url repo search echo forks
+	zparseopts -D -M - r=repo s=search e=echo f=forks
+	if (($#forks)); then
+		repo="$*"
+	fi
+
+	if ((!$#)); then
 		[[ -d "$(git rev-parse --git-dir 2>/dev/null)" ]] && github . || open 'https://github.com/'
 	elif [[ -n $search ]]; then
-		open "https://github.com/search?q=$(omz_urlencode $*)"
+		open "https://github.com/search?q=$(urlencode $*)"
 	elif [[ -n $repo ]]; then
-		url="https://github.com/$*"
-		[[ -n $echo || ! -t 1 ]] && echo $url || open $url
+		if (($#forks)); then
+			open 'https://techgaun.github.io/active-forks/index.html#'$repo
+		else
+			url="https://github.com/$*"
+			[[ -n $echo || ! -t 1 ]] && echo $url || open $url
+		fi
 	elif url=$(gitgetrepo "$*"); then
 		if [[ -n $echo || ! -t 1 ]]; then
 			echo $url
@@ -360,20 +630,56 @@ function github()
 			open $url
 		fi
 	else
-		githubAPI $echo "$@"
+		githubrepo $echo "$@"
 	fi
 }
 
 function githubAPI()
 {
-	local limit=20 endpoint='https://api.github.com/graphql' #request response fields
-	local echo verbose ret args
+	local endpoint='https://api.github.com/graphql'
+	local echo verbose args
+	integer ret
+	zparseopts -D -M - v=verbose
+
+	request=${request//$'\n'/}
+	#@TODO use curl wrapper
+	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d $request $endpoint)
+	ret=$?
+	type jq >/dev/null || chkCmd jq
+	(($#verbose)) && {
+		jq -r <<<$request
+		jq -r <<<$response
+	}
+
+	if ((ret == 0)); then
+		local field
+		typeset -a rows tmp
+		#while read -r field; do
+		#	tmp+=("$(trim "$field")")
+		#@TODO with raw, and trim is slow
+		while read field; do
+			tmp+=("$field")
+			if (($#tmp == 5)); then
+				repos+=("$tmp")
+				tmp=()
+			fi
+		done < <(jq -cr "$fields" <<<$response)
+	fi
+
+	return $ret
+}
+
+function githubrepo()
+{
+	local limit=20 #request response fields
+	local echo verbose args
+	integer ret
 	zparseopts -D -M - e=echo v=verbose
 
 	args="${@%%.git}"
 
 	request=$(cat) <<-GQL
-	{ 
+	{
 		"query":"query(\$search:String!,\$limit:Int!){
 			search(query:\$search, first: \$limit, type: REPOSITORY){
 				nodes {
@@ -386,16 +692,9 @@ function githubAPI()
 		"variables":{ "search":"fork:true $args","limit":$limit }
 	}
 	GQL
-	#	"variables":{ "search":"fork:true $(omz_urlencode "$*")","limit":$limit }
+	#	"variables":{ "search":"fork:true $(urlencode "$*")","limit":$limit }
 	fields='.data.search.nodes[] | .nameWithOwner,.createdAt[0:8],.updatedAt,.stargazers.totalCount,.description'
-	request=${request//$'\n'/}
-	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d $request $endpoint)
-	ret=$?
-	type jq >/dev/null || chkCmd jq 
-	(($#verbose)) && {
-		jq -r <<<$request
-		jq -r <<<$response
-	}
+	githubAPI $request; ret=$?
 	if ((ret == 0)); then
 		local field
 		typeset -a repos tmp
@@ -419,7 +718,7 @@ function githubAPI()
 			if [[ $name == 'Open' ]]; then
 				github -s "$*"
 				abort 0
-				return 
+				return
 			else
 				github -r $echo $name
 			fi
@@ -458,7 +757,9 @@ function gitgetrepo()
 
 function gpush()
 {
-	if ! git push "$@"; then
+	local _opts
+	zparseopts -M -D -A _opts - l=list -list=l 'f'
+	if ! git push ${(@kv)_opts} "$@"; then
 		remote=(${1:-$VCS_STATUS_REMOTE_NAME})
 		if [[ -z $remote ]]; then
 			gremote || { techo -c warn 'No remotes'; return 10 }
@@ -467,16 +768,19 @@ function gpush()
 		if [[ -z $branch ]]; then
 			getbranch || { techo -c warn 'No branches'; return 10 }
 		fi
-		git push --set-upstream $remote[1] $branch
+		run git push --set-upstream ${(kv)_opts} $remote[1] $branch
+		[[ $branch != main && $branch != master ]] && gpr
 	fi
 }
 
 function getbranch()
 {
 	local tmp
+	integer quiet
 
+	[[ $1 == -q ]] && { quiet=1; shift }
 	read -A tmp < $(git rev-parse --git-path ${1:-HEAD}) || return 1
-	
+
 	if (($#tmp>1)) && [[ $tmp[1] == 'ref:' ]]; then
 		branch=$(git symbolic-ref --short ${1:-HEAD})
 	elif (($#tmp)); then
@@ -484,47 +788,81 @@ function getbranch()
 	else
 		return 1
 	fi
-	techo -c head "Current branch: $C[warn]$branch"
+	((quiet)) || techo -c head "Current branch: $C[warn]$branch"
+	return 0
+}
+
+function gswitch()
+{
+	local name cmd opt gopt out create force
+	integer exists
+	zparseopts -M -D -A opt - c=create f=force
+
+	(($#)) && { name=$1; shift }
+	if ((!$#name)); then
+		#chooser 'New branch' $(lisbranch)
+		gbranch -l
+		input -p 'Branch' -v name || return
+	fi
+	gopt=($force)
+	gbranch --exists $name && exists=1
+	if ((!exists)); then
+		if ((!$+opt[-c])); then
+			confirm "Branch \"$name\" does not exist. Create it" || return
+		fi
+		gopt+=(-c)
+	fi
+	out=$(git switch $gopt $name 2>&1) && return
+	techo -c warn $out
+	return 1
 }
 
 function gbranch() #@TODO
 {
-	local list diff cmd get current
-	zparseopts -M -D - d=diff -diff=d l=list -list=l c=current
+	local list delete cmd get current opts
+	#zparseopts -M -D -A opts - d=delete -delete=d l=list -list=l c=create \
+		#'r' -remote=r 'e' -exists=e
+	zparseopts -M -D -A opts - d=delete -delete=d l=list -list=l c=create \
+		'e' -exists=e -upstream
 
-	cmd=($list $current)
+	(($+opts[--upstream])) && {
+		git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null
+		return
+	}
+
+	#if (($#)) && [[ ${1:0:1} != '-' ]]; then
+
+	#fi
+	(($+opts[-e])) && {
+		(($#1)) && git show-ref --verify --quiet refs/heads/$1
+		return
+	}
+	cmd=($list $create $delete)
 	case $cmd in
-		-c) getbranch "$@" ;;
+		-c) #getbranch "$@" ;;
+			gswitch -c "$@" ;;
 		-l) listbranch "$@" ;;
-		*) listbranch "$@" ;; 
+		-d)
+			#(())
+			git fetch -p
+			#git branch -d $1
+			#gremote || { [ -t 1 ] && techo -c warn 'No remotes'; return 10 }
+			#git push $remote --delete
+			;;
+		*) listbranch "$@" ;;
 	esac
 }
 
-typeset -A gFields=(
-	'HEAD' ''
-	'refname:s' 'yellow'
-	'objectname:s' 'red'
-	'contents:subject' 'magenta'
-	'committerdate' 'green' 
-)
-
-#only works for git log --format?
-	glineFormat=(
-		'%(HEAD)'
-		'%C(yellow)%(refname:short)%Creset'
-		'%C(red)%(objectname:short)%Creset'
-		'%C(magenta)%(contents:subject)%Creset'
-		'(%C(green)%(committerdate:relative)%Creset)'
-	)
 function listbranch()
 {
 	local _cols head merged to compare_to all _opts opts=()
-	zparseopts -M -D -A _opts - -no-merged::=merged -merged::=merged a=all O:
-	#compare_to="$remote[1]/master"
+	zparseopts -M -D -A _opts - -no-merged::=merged -merged::=merged a -all=a O:
+	#zparseopts -M -D -A _opts - -no-merged::=N m:: -merged::=m 'a' -all=a O:
+	gremote || return
+	compare_to="$remote[1]/master"
 	#@TODO get "main" branch
-	compare_to='master'
-	if (($#all)); then
-	
+	if (($+_opts[-a])); then
+		opts+=(-a)
 	else
 		if (($+_opts[--no-merged])); then
 			if (($#_opts[--no-merged])); then
@@ -534,7 +872,7 @@ function listbranch()
 			fi
 		elif (($+_opts[--merged])); then
 			if (($#_opts[--merged])); then
-				opts+=(--merged $_opts[--no-merged])
+				opts+=(--merged $_opts[--merged])
 			else
 				opts+=(--merged $compare_to)
 			fi
@@ -542,7 +880,7 @@ function listbranch()
 			opts+=(--no-merged $compare_to)
 		fi
 	fi
-	
+
 	_cols=('refname' 'objectname' 'contents' 'committerdate')
 
 	if (($+_opts[-O])); then
@@ -554,34 +892,45 @@ function listbranch()
 	for tmp in $_cols; do
 
 	done
+
+	# format used in git-for-each-refonly
 	glineFormat=(
 		'%(HEAD)'
-		'%(color:yellow)%(refname:short)%(color:reset)'
+		'%(color:yellow)%(align:20,left)%(refname:short)%(end)%(color:reset)'
 		'%(color:red)%(objectname:short)%(color:reset)'
-		'%(color:magenta)%(contents:subject)%(color:reset)'
-		'(%(color:green)%(committerdate:relative)%(color:reset))'
+		'%(color:reset)%(contents:subject)'
+		'(%(color:green)%(committerdate:iso) %(color:#4579aa)%(committerdate:relative)%(color:reset))'
 	)
 	git --no-pager branch --sort=committerdate --format="$glineFormat" --color=always $opts "$@"
+	#todo colorhash
 }
 function gremote()
 {
 	#local current
 	#zparseopts c=current
-	
-	remote=($(git remote))
+
+	remote=($(git remote)) && {
+		(($#remote)) || return 10
+	} || abort 128 git repository not found
 }
 
 # Added 2019-09-03 19:04
 function gclone()
 {
-	local repo dir
+	local depth=20 repo dir _opts _copts=() base=$HOME/repos
+	zparseopts -D -M -A _opts - b: d: depth:=d -branch:
 
 	include -r network
 	repo=$1 ; dir=$2
-	cd $HOME/repos
+	(($+_opts[-b])) && base=$_opts[-b]
+	(($+_opts[-d])) && _copts+=(--depth $_opts[-d])
+	(($+_opts[--branch])) && _copts+=(--branch $_opts[--branch])
+	cd $base
 
 	{ [[ -n "$(urlinfo -s $repo)" ]] || repo="$(github -e $repo)" } || return
 
+	urlinfo -v name -p $repo
+	repo='git@github.com:'$name
 	while ((1)); do
 		if [[ -z $dir ]]; then
 			dir=${repo##*/}
@@ -593,7 +942,13 @@ function gclone()
 			fi
 			input -p $repo -t 'Clone into dir' -v dir $dir || return
 		fi
-		if git clone $repo $dir && [[ -d $dir ]] && cd $dir; then
+		if git clone $_copts $repo $dir && [[ -d $dir ]] && cd $dir; then
+			local tag tags=($(git ls-remote --tags --sort=-v:refname))
+			chooser -v tag $tags && {
+				_copts=()
+				(($+_opts[-d])) && _copts+=(--depth $_opts[-d])
+				gtag --fetch $_copts $tag && gchk $tag
+			}
 			return 0
 		fi
 		techo -c lred Error cloning $repo
@@ -603,7 +958,26 @@ function gclone()
 
 function gpr()
 {
-	local request owner 
+	#local request owner
+	local owner url dir _opts base=$HOME/repos
+	zparseopts -D -M -A _opts - b: 'f'
+
+	integer id=$1
+	(($+_opts[-f])) || confirm 'Open Pull Request' || return
+
+	if url=$(gitgetrepo "$*"); then
+		local url args=($(urlinfo -hp $url))
+		url="https://$args[1]/$args[2]"
+		((id)) && {
+			open "$url/pull/$id"
+			return
+		}
+
+		open "$url/pull/new/$branch"
+	else
+	fi
+
+	return
 
 	request=$(cat) <<-GQL
 	{
@@ -638,6 +1012,82 @@ function gpr()
 	"variables":{ "search":"fork:true $*","limit":$limit }
 	}
 	GQL
+
+	githubAPI -v prs $request; ret=$?
+	if ((ret == 0)); then
+		if ((!$#prs)); then
+			abort 10 'No Pull Requests found'
+		else
+			chooser -v pr "$prs[@]"
+		fi
+	fi
+
+#{
+#	"query":query(owner:"$owner", name:"$repname") {
+#	  repository(owner:"$owner", name:"$repname") {
+#		pullRequests(first: 10, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) {
+#		  nodes {
+#			... on PullRequest {
+#			  id, author { login }, createdAt
+#			  merged, mergedAt, mergeable
+#			  body, changedFiles
+#			  commits(first: 100) {
+#				nodes { commit {
+#					oid
+#					message
+#					status { context(name: "x") { description } }
+#				  } }
+#			  }
+#			  comments(last: 100) {
+#				nodes { author { login }, updatedAt, minimizedReason }
+#			  }
+#			  labels(last: 100) {
+#				nodes {
+#				  ... on Label { color, name, description }
+#				}
+#			  }
+#			}
+#		  }
+#		}
+#	  },
+#	}
+#	"variables":{ "search":"fork:true $*","limit":$limit }
+#}
+#query { organization(login: "MyOrganisation") {
+#		  repositories(first: 20, orderBy: {field: PUSHED_AT, direction: DESC}) {
+#		  nodes {
+#			  name
+#			  pullRequests(first: 10, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) {
+#				  nodes {
+#					  headRepository { nameWithOwner }
+#					  url
+#					  author {
+#					  ... on User {
+#						  login name
+#						  }
+#					  }
+#					  mergeable
+#					  createdAt
+#					  baseRefName
+#					  headRefName
+#					  title
+#					  ... on PullRequest {
+#						  pullRequestcommits: commits(last: 1) {
+#							  totalCount
+#							  nodes {
+#								  commit {
+#									  url
+#									  status { state contexts { context description createdAt targetUrl } }
+#								  }
+#							  }
+#						  }
+#					  }
+#				  }
+#			  }
+#		  }
+#	  }
+#	}
+#  }
 }
 
 # Added 2019-12-04 18:50
@@ -658,64 +1108,151 @@ function gbisect()
 comp+=('gdiff=git-diff')
 function gdiff()
 {
-	local cmd _opts flist
-	zparseopts -D -M -A _opts - i -interactive=i
+	local cmd _opts _dopts args flist hashes=()
+	integer i sepindex
 
-	if  (($+_opts[-i])); then
-		local f name _copts args head_hash hashes2=() hashes=()
+	_dopts=()
+	args=()
+	#--options hashes -- files
+	sepindex=${@[(ie)--]}
+	((sepindex<$#)) && args=("$@[sepindex+1,-1]") || sepindex=0
+	zparseopts -D -M -A _opts - 'i' -interactive=i 'l' -list=l 's' -staged=s
+	j=${@[(ie)--]}
+	if ((j<$#)); then
+		sepindex=j
+	elif ((sepindex)); then
+		j=0
+	fi
+	i=1
+	while ((i<j)); do
+		if [[ ${@[i]:0:1} == '-' ]]; then
+			_dopts+=($@[i])
+		elif [[ $sepindex -eq 0 && (-f $@[i] || -d $@[i]) ]]; then #&& isRevision rev-parse
+			args=("$@[i,-1]")
+			break
+		else
+			hashes+=($@[i])
+		fi
+		((i++))
+	done
+
+	(($+_opts[-s])) && _dopts+=(--cached)
+
+	if (($+_opts[-i])); then # interactive
+		local f name _copts _a _b head_hash hashes2=()
 		integer idx h
-		#hash=$1
-		#shift
-		_copts=(
-			--head "diff $*"
-			--foot '(Enter) Show in terminal (V or E) Gvimdiff (M) Meld (Esc) Quit'
-			--events "v\\|e EDIT m MELD" 
-			-I idx
-			--no-auto-select
-		)
-		
-		#flist=($(git diff --no-color --name-only $hash "$@"))
-		flist=($(git diff --no-color --name-only "$@")) || return $?
+		# --relative
+		flist=($(git diff --no-color --name-only $_dopts $hashes -- "$args[@]")) || return
 
-		if [[ "$*" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
+		(($#flist==0)) && { techo -c warn 'No differences'; return }
+
+		if [[ "$hashes" =~ ^([^. ]*)([ .]\+)?([^. ]*)$ ]]; then
+			techo -r h1="'$match[1]'" h2="'$match[2]'" h3="'$match[3]'"
 			if [[ -n $match[2] ]]; then
-				hashes=(${match[1]:-HEAD} ${match[2]:-HEAD})
+				hashes=(${match[1]:-HEAD} ${match[3]:-HEAD})
+				if [[ $match[2] == '...' ]]; then
+					hashes[1]="$(git merge-base $hashes[@])"
+				fi
+				_a=$hashes[1]
+				_b=$hashes[2]
 			elif [[ -n $match[1] ]]; then
-				# workdir <-> commit
 				hashes=($match[1])
+				_a=$hashes[1]
+				if (($+_opts[-s])); then #staged
+					_b='INDEX'		# commit => index
+				else
+					_b='WORKDIR'	# commit => workdir
+				fi
+			elif (($+_opts[-s])); then
+				_a='WORKDIR'		# disk => index
+				_b='INDEX'
 			else
-				#abort -v5 -d-1 1 "Incorrect arguments: $@"
+				_a='HEAD'		# head => disk
+				_b='WORKDIR'
 			fi
-			hashes2=($(git rev-parse $hashes))
-			head_hash="$(git rev-parse HEAD)"
+			# hashes2=($(git rev-parse $hashes))
+			# head_hash="$(git rev-parse HEAD)"
 			#if in_array -v h $head_hash hashes2; then
 			#	$hashes
 			#fi
 		else
-			abort -v5 -d-1 2 "Incorrect arguments: $@"
+			abort -v5 -d-1 2 "Incorrect arguments: $hashes"
 		fi
 
-		while chooser --simple -v f -D $idx $_copts $flist
-		do
-			cmd=''
+		_copts=(
+			--head "Diff $_dopts $hashes" -I 'idx' -v 'f' -f1
+			--foot '(Enter) Show diff in terminal  (V or E) Gvimdiff  (M) Meld (C) VS Code (R) Restore (U) Unstage (Esc) Quit'
+			--events "[ve] EDIT m MELD c VSCODE r RESTORE u UNSTAGE" --no-auto-select
+		)
+		# --src-prefix=
+		# Show the given source prefix instead of "a/".
+		# --dst-prefix=<prefix>
+		# TODO: zip flist with additional info
+		while chooser -D $idx $_copts $flist; do
+			cmd=()
 			case $ACTION in
 				'')
-					git diff "$@" -- $f
+					(($+_opts[-s])) && C2=$C[lcyan]
+					techo "$cmd {$C[warn]$_a$_C => $C2$_b$C_}:$f"
+					run git diff --src-prefix=$_a/ --dst-prefix=$_b/ $_dopts "$hashes[@]" -- $f
 				;;
-				'DIFF')
-					cmd='gvimdiff'
+				'EDIT')
+					cmd=(gvimdiff -f)
 				;;
 				'MELD')
-					cmd='meld'
+					cmd=(meld)
+				;;
+				'RESTORE')
+					grestore $f
+				;;
+				'UNSTAGE')
+					gunstage $f
+				;;
+				'VSCODE')
+					code $f
+					#cmd=(code)
 				;;
 			esac
 
-			if [[ -n $cmd ]]; then
+			if (($#cmd)); then
 				if (($#hashes == 0)); then
+					if (($+_opts[-s])); then
+						# workdir => index
+						C1=$C[warn] ; C2=$C[lcyan]
+						techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+						set -x
+						$cmd <(git show HEAD:$f) <(git show :$f)
+						set +x
+					else
+						# head => workdir
+						C1=$C[lred] ; C2=$C[warn]
+						techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+						set -x
+						$cmd <(gshow HEAD:$f) $f
+						set +x
+					fi
 				elif (($#hashes == 1)); then
-					$cmd <(gshow $hashes[1]:$f) $f
+					if (($+_opts[-s])); then
+						# commit <=> index
+						C1=$C[lred] ; C2=$C[lcyan]
+						techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+						set -x
+						$cmd <(gshow $hashes[1]:$f) <(git show :$f)
+						set +x
+					else
+						# commit <=> workdir
+						C1=$C[lred] ; C2=$C[warn]
+						techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+						set -x
+						$cmd <(gshow $hashes[1]:$f) $f
+					set +x
+					fi
 				else
+					C1=$C[warn] ; C2=$C[ok]
+					techo "$cmd {$C1$_a $C[lcyan]=> $C2$_b$C_}:$f"
+					set -x
 					$cmd <(gshow $hashes[1]:$f) <(gshow $hashes[2]:$f)
+					set +x
 				fi
 			fi
 		done
@@ -729,6 +1266,288 @@ function gdiff()
 			#meld $tmp "$f"
 		#done
 	else
-		git diff "$@"
+		(($+_opts[-l])) && _dopts+=('--name-only')
+		git diff $_dopts $hashes -- $args
 	fi
 }
+
+# find revision containing file (matching content)
+# @param $1 file
+# @return revision, if found
+function gfind()
+{
+	local rev revs file filehash hash since=(--since='34 days ago')
+	file="$1"; shift 1
+	# git hash for file
+	{
+		[[ -f file ]] && filehash=$(git hash-object $file) || filehash=$(git ls-tree HEAD $file) || return 1
+	} 2>/dev/null
+	revs=($(git log $since --all --pretty=%H -- "$file"))
+	for rev in $revs; do
+		# check each revision for checksum match
+		hash=$(git ls-tree $rev $file | explode -z --stdin ' ' 3)
+		if [[ $hash == $filehash ]]; then
+			echo "${rev:0:$hashAbbvLen}"
+			return 0
+		#elif git diff --exit-code --quiet $@ $rev -- $file; then
+			#echo "${rev:0:$hashAbbvLen} diff"
+			#return 0
+		#elif git diff --exit-code --quiet --ignore-space-change \
+			#--ignore-blank-lines --ignore-space-at-eol $@ $rev -- $file
+		#then
+			#echo "${rev:0:$hashAbbvLen} space"
+			#return 0
+		fi
+	done
+	return 1
+}
+
+function gisupdated()
+{
+	getbranch -q || return
+	gremote || { [ -t 1 ] && techo -c warn 'No remotes'; return 10 }
+	(($#)) && {
+		in_array $1 remote || { techo -c warn "$1 is not a remote"; return 1 }
+		gdiff ..$1/$branch --quiet
+		return
+	}
+	gdiff ..$remote[1]/$branch --quiet
+}
+
+function gstatus()
+{
+	local _gopts _opts buf line _vname _gst stat fn f
+	local dev_diff staged changed diff_changed_dev k
+	integer i ok warns alerts n=10
+	zparseopts -D -M -A _opts - -branch: 'u'
+	#TODO gselect
+	#flist=($(git status -uno --porcelain=v2 $_dopts $hashes -- "$args[@]")) || return
+	typeset -a diffs
+	if ! gisupdated; then
+		#gdi ..origin/$branch
+		#return 1
+		techo -c warn 'Head not in sync with origin'
+	fi
+	_gst=("${(@f)$(git status -uno --porcelain=v1 "$@")}")
+	for line in $_gst; do
+		staged=$line[1]		# 1st char
+		modified=$line[2]	# 2st char
+		f=$line[4,-1]	# 4th til end
+
+		[[ $staged != ' ' ]] && stat=$C[ok]$staged || stat=' '
+		[[ $modified != ' ' ]] && stat+=$C[lred]$modified || stat+=' '
+
+		ext=$(getext $f)
+		fn=$(noext $f)
+
+		dev_diff=''
+		ndev_diff=
+		diffs=()
+		#diff_changed_dev=''
+		ok=0
+		if [[ -f $fn.dev.$ext ]]; then
+			if [[ -f $f ]]; then
+				dev_diff=$(diff -u --color=never $fn.dev.$ext $f)
+				ndev_diff=$#dev_diff
+				if ((!ndev_diff)); then
+					diffs+=("$C[ok]== $fn.dev.$ext")
+					((ok++))
+				else
+					diffs+=("$C[lred]$ndev_diff!= $fn.dev.$ext")
+				fi
+			elif [[ $modified == 'D' ]]; then
+				dev_diff=$(diff -u --color=never $fn.dev.$ext <(gshow :$f))
+				ndev_diff=$#dev_diff
+				if ((!ndev_diff)); then
+					diffs+=("$C[ok]== $fn.dev.$ext")
+					((ok++))
+				else
+					diffs+=("$C[lred]$ndev_diff!= $fn.dev.$ext")
+				fi
+				#	if (($#changed && $#dev_diff)); then
+				#		diff_changed_dev=$(diff -u <(<<<"$changed") <(<<<"$dev_diff"))
+				#		(f - git)
+				#		#e $changed $dev_diff
+				#	fi
+			fi
+		fi
+		if (($+_opts[--branch])); then
+			dev_diff_b=$(git diff --color=never $_opts[--branch] -- $f)
+			ndev_diff_b=$#dev_diff_b
+			if ((!ndev_diff_b)); then
+				diffs+=("$C[ok]== $_opts[--branch]")
+				((ok++))
+			else
+				diffs+=("$C[lred]$ndev_diff_b != $_opts[--branch]")
+			fi
+		fi
+		if revfound=($(gfind $f)); then
+			rev=$revfound[1]
+			diffs+=("$C[ok]== * $(colorhash $rev)")
+			case $revfound[2] in
+				space)
+					diffs+=("$C[warn]space changes only") ;;
+				diff)
+					diffs+=("$C[warn]diff") ;;
+			esac
+			diffs+=($(getrefs $rev))
+			((ok++))
+		fi
+		if ((ok)) && [[ $modified == ' ' ]]; then
+			k=$C[ok]
+		elif ((ok)); then
+			((warns++))
+			k=$C[warn]
+		else
+			((alerts++))
+			k=$C[lred]
+		fi
+		techo $stat $k$f $diffs
+		#$(($#changed - $#dev_diff)) $diff_changed_dev
+	done
+	if ((alerts)); then techo -c lred "Non $C[warn]recoverable changes found"; \
+	elif ((warns)); then techo -c warn "There are $C[lcyan]recoverable$C_ changes"; fi
+}
+
+# Added 2020-04-29 14:25
+function gstash()
+{
+  #TODO: -R: git stash show stash@\{0\} -p | git apply -R
+	local _gopts cmd
+	zparseopts -D -M -A _opts - 'l'  # -date:
+	# --date=${_opts[--date]:-iso}
+	_gopts=(--color=always --format=tformat:"$gFormat")
+
+	if (($#==0 || $+_gopts[-l])); then
+		cmd='list'
+	else
+		cmd=$1
+		shift
+	fi
+
+	case $cmd in
+		list)
+			_gopts+=(--dirstat)
+			if (($+_gopts[-l])); then
+				run -v3 git stash list $_gopts "$@"
+				return
+			fi
+			local opt events=('Esc' 'Cancel' 'X' 'Expire old stashes' 'Del' 'Delete')
+			chooser -v opt -f1 --ifs $'\n' --foot 'X) Expire old stashes Del) Delete selected stashes' \
+				--events "$events" "$(git stash list $_gopts "$@")" || return
+			case $ACTION in
+				X) gexpirestash ;;
+				Delete) run git stash drop $opt ;;
+				'') run git stash show $_gopts $opt ;;
+			esac
+			;;
+		show)
+			run -v3 git stash show $_gopts "$@"
+			;;
+		'')
+			;;
+	esac
+}
+
+# Added 2020-04-20 00:46
+function gexpirestash()
+{
+	local when='30.days'
+	input -p 'Expire before' -v when || return
+	[[ -n $when ]] && run git reflog expire --expire=$when refs/stash
+}
+
+#tODO:  <16-10-20, yourname> #confirm first to discard changes not saved in stash or some other place
+# call this from gst -i
+function grestore()
+{
+	local files
+	(($#)) && {
+		git restore "$@"
+		return
+	}
+	gst
+}
+#TODO unstage error: pathspec '.*' did not match any file(s) known to git
+#gpick() { e TODO .git/CHERRY_PICK_HEAD }
+
+JIRA_TOKEN='xqd6etzANstbl9JLlO1t0FBE'
+JIRA_USER='elizandro@idiomus.com'
+function jiraRequest()
+{
+	local opts api
+	zparseopts -D -M -A opts - v: -var:=v -jq: -post: -raw
+	api=$1
+	netGetJson ${(kv)opts} --user ${JIRA_USER}:${JIRA_TOKEN} \
+		'https://idiomus.atlassian.net/rest/api/2/'$api
+}
+
+jiraPrefixes=(API APP MAN INF)
+# Added 2020-07-19 23:56
+function jira()
+{
+	local cmd repo repoPrefix
+	integer issueId
+	typeset -a opts args
+
+	#TODO list issues, fetch filters from jira and save in jiraFilters.txt
+	(($#)) && {
+		[[ $1 == <-> ]] && issueId=$1 || cmd=$1
+		shift
+	}
+	(($#cmd)) || cmd='start'
+
+	case $cmd in
+		api) open 'https://developer.atlassian.com/cloud/jira/platform/rest/v2'
+			return
+			;;
+		proj|projects*)
+			if (($#)); then
+				opts=(-S $1\*)
+			elif boxconfig -v project '.jira.prefix'; then
+				opts=(-D $project)
+			fi
+			#jiraRequest -v projects 'projects/search?recent=20'
+			chooser -v project $opts $jiraPrefixes
+			return
+			#cmd='tasks'
+			;;
+		tasks)
+			(($#)) && project=$1
+			(($#project)) && project='project+%3D+'$project
+			tstatus='status+in+(%22In+Progress%22,+%22To+Do%22)'
+			#jiraRequest 'filter/10007'
+			opts=($project $tstatus 'assignee+in+(currentUser(),+EMPTY)+ORDER+BY+Rank+ASC')
+			jiraRequest -v issues --jq '' 'search?jql='${(j.+AND+.)opts} || return
+			#$issues == New && input -v is sueId -p 'Issue id' || return 10
+			chooser -v issueId -f1 $issues
+			return 0
+			;;
+		start)
+			#if (($#)) && [[ ${(U)1} =~ '([A-Z]*)-?([0-9]*)' && -n $match[1] ]] && \
+				#in_array $match[1]\* jiraPrefixes
+			#then
+				#(($#match[2])) && issueId=$match[2]
+				#jira proj "$match[1]" || return
+			#else
+				#jira proj || return
+			#fi
+			#jira tasks $project || return
+			;;
+	esac
+
+	#"filters="
+	# TODO: suggest branch name from issue id
+	repo=$(gitgetrepo)
+	repoPrefix=${(U)${(L)repo##*/}%.git}
+
+	(($#issueId)) || input -v issueId 'issue id' || return
+	bName="feat/$repoPrefix-$issueId-"
+	input -v bName -p 'Branch name'
+	[[ $bName =~ '^feat/'$repoPrefix'-([0-9]+)-' && $match[1] -eq $issueId ]] || \
+		abort 2 "Incorrect branch name. Must start with \"feat/$repoPrefix-$issueId-\""
+	gbranch -c $bName || return
+	# TODO: set assignee=me; set tstatus=InProgress
+}
+
+# curl -s "https://api.github.com/repos/user/project-name/commits?path=filename&page=1&per_page=1" | jq -r '.[0].commit.committer.date'

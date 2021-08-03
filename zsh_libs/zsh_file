@@ -1,13 +1,36 @@
 VERSION=1.0.9
-#lazyload=syncDirs,urlfollow,urlinfo,vnc,imdb,globo,awkWrapper,getfullpath,getpath,getext,getfilename,isDir,isEmptyDir,box,ddiff
+#lazyload=syncDirs,awkWrapper,getfullpath,getpath,getext,getfilename,isDir,isEmptyDir,box,ddiff
+
+alias fullpath='getfullpath'
+alias full='getfullpath'
 
 [[ -v comp ]] || typeset -ga comp
 
 setopt nomultios
 
+function cdhere()
+{
+	local here=$(here 2) && cd $here || abort 127 "Could not find directory: $here"
+}
+
+function here()
+{
+	local fp
+	include -lq file
+	fp=$(getfullpath $(explode "$funcfiletrace[${1:-1}]" ':' 1)) || abort 127 "File not found: $fp"
+	getpath $fp
+}
+# (#ia1) allow 1 error
 function getfilename()
 {
-	echo "${@:t}"
+	local opt name
+	zparseopts -D -M -A opt - 'p:' -prefix:=p
+	if (($+opt[-p])); then
+		name=("${@:t}")
+		echo ${opt[-p]}${(@)^name#${prefix}*}
+	else
+		echo "${@:t}"
+	fi
 }
 
 function getfullpath()
@@ -23,9 +46,13 @@ function getpath()
 	echo "${1:h}"
 }
 
-# ${file%%.old}
 function getext()
 {
+	local _opts
+	zparseopts -D -M -A _opts - 'a' -all=a n:
+	# TODO: specify how many suffixes to get (example: -n 3)
+
+	(($+_opts[-a])) && { echo "${f#.*}"; return }
 	# echo "${1##*.}"
 	echo "${1:e}"
 }
@@ -46,7 +73,11 @@ function isDir()
 			return 2
 		fi
 		[[ -z $mk ]] && return 1
-		confirm "dir $dir doesn't exist. Create" && run -S mkdir -p $dir
+		if confirm "dir $dir doesn't exist. Create"; then
+			run -S mkdir -p $dir
+		else
+			return 130
+		fi
 	fi
 }
 
@@ -57,10 +88,18 @@ function isEmptyDir()
 }
 
 # @description: remove extension
-# @arg2: optional extension. If given remove only if extension = this
+# @arg2: optional extension. If given, remove only specifc extension
 # @returns: full path (or filename if no path given) without extension
 function noext()
 {
+	local _opts
+	zparseopts -D -M -A _opts - 'a' -all=a n:
+
+	if (($+_opts[-a])); then  # strip all suffixes
+		echo "${f%%.*}"
+		return
+	fi
+
 	if [[ -n $2 ]]; then
 		echo "${1%%.$2}"
 	else
@@ -86,17 +125,38 @@ function backup()
 	} || run $sudo cp "$1" "$1.bkup"
 }
 
+function del()
+{
+	local f
+	for f do
+		if [[ -d $f ]]; then
+			confirm "Delete $C[lred]dir$C_ $f" && {
+				techo -c lred "Removing dir $f"
+				rm -rf $f
+			}
+		elif [[ -f $f ]]; then
+			confirm "Delete$C_ $f" && {
+				techo -c lred "Removing $f"
+				rm -f $f
+			}
+		fi
+	done
+}
 #@TODO
 function rename()
 {
-	local orig name dir fullpath
+	local orig name dir fullpath sudo
 	(( $# )) || usage $0
 	#@TODO is link? confirm rename link or link target
 	[[ "$1" == '-s' ]] && { shift; sudo='-s' }
 	orig="$(getfilename "$1")"
-	dir="$(getpath $(getfullpath $1))"
+	dir="$(getpath "$(getfullpath $1)")"
 	fullpath="$dir/$orig"
-	[[ -f "$1" || -d "$1" ]] || abort 127 "$1 doesn't exist or no file permission"
+	if [[ -n $sudo ]]; then
+		sudo zsh -c "[[ -f '$1' || -d '$1' ]]" || abort 127 "$1 doesn't exist"
+	else
+		[[ -f "$1" || -d "$1" ]] || abort 127 "$1 doesn't exist or no file permission"
+	fi
 	name=${2:-$orig}
 	if input -r -p "Rename \"${C[warn]}$fullpath${C[head]}\" to" -v name && \
 		[[ -n $name && $name != $orig ]]
@@ -107,14 +167,20 @@ function rename()
 
 function ddiff()
 {
-	local list cmd file sudo config var dargs r u q
+	local list cmd file sudo config var _dopts r u q
+	typeset -a _ropts _dopts
+
 	zparseopts -D -M - c=config -set=c l=list s=sudo i:=ignore q=q
 
-	echo "dir1=$dir1\ndir2=$dir2"
-	[[ -n $list ]] && return 0
-	
-	dargs=(-u -r)
-	[[ -n $q ]] && dargs+=($q)
+	if [[ -z $config ]] && (($#==2)) && [[ -d $1 && -d $2 ]]; then
+		config=1
+	else
+		echo "dir1=$dir1\ndir2=$dir2"
+		[[ -n $list ]] && return 0
+	fi
+
+	_dopts=(-u -r)
+	[[ -n $q ]] && _dopts+=($q)
 
 	if [[ -n $config || -z $dir1 || -z $dir2 ]]; then
 		if [[ -n $config ]]; then
@@ -142,37 +208,74 @@ function ddiff()
 		techo "dir1: $dir1\ndir2: $dir2"
 	fi
 
-	if [[ -d $dir1 && -d $dir2 ]]; then 
+	cmd=()
+	if [[ -d $dir1 && -d $dir2 ]]; then
 		if [[ -n $1 ]] && type $1 >/dev/null; then
-			cmd=$1
+			cmd=($1)
 			shift
 		fi
-		if [[ -z $cmd ]]; then
-			[[ -n $1 ]] && run $sudo -p "diff -ur \$d1/$1 \$d2/$1" diff $dargs $dir1/$1 $dir2/$1 ||
-				run $sudo -p "diff -ur \$dir1 \$dir2" diff $dargs $dir1 $dir2
-		else
-			[[ -n $1 ]] && run $sudo -p "${=cmd} \$dir1/$1 \$dir2/$1" $=cmd $dir1/$1 $dir2/$1 ||
-				run $sudo -p "${=cmd} \$dir1 \$dir2" $=cmd $dir1 $dir2
+		if ((! $#cmd)); then
+			cmd=(diff $_dopts)
+		elif (($#>1)); then
+			integer i=${@[(ie)--]}
+			cmd+=("$@[1,i-1]")
+			shift $#cmd
+			#args=("$@[i+1:-1]")
 		fi
+		if [[ -n $1 ]]; then
+			#@TODO
+			# for f in files
+			# cnd iots $dir1/$f $dir2/$f
+			_dargs=($dir1/$1 $dir2/$1)
+		else
+			_dargs=($dir1 $dir2)
+		fi
+		#@TODO add pager option to run()
+		#@TODO add no-pager option to ddiff
+		[[ "$cmd[1]" =~ 'diff|grep' ]] && _ropts+=('-N1')
+		run $_ropts $sudo -v3 -p "$cmd $_dargs" $cmd $_dargs #| $PAGER
 	fi
 }
+
+typeset -A rsyncCodes=(
+	1 'Syntax or usage error'
+	2 'Protocol incompatibility'
+	3 'Errors selecting input/output files, dirs'
+	4 'Requested action not supported: an attempt was made to manipulate 64-bit files on a platform that cannot support them; or an option was specified that is supported by the client and not by the server.'
+	5 'Error starting client-server protocol'
+	6 'Daemon unable to append to log-file'
+	10 'Error in socket I/O'
+	11 'Error in file I/O'
+	12 'Error in rsync protocol data stream'
+	13 'Errors with program diagnostics'
+	14 'Error in IPC code'
+	20 'Received SIGUSR1 or SIGINT'
+	21 'Some error returned by waitpid()'
+	22 'Error allocating core memory buffers'
+	23 'Partial transfer due to error'
+	24 'Partial transfer due to vanished source files'
+	25 'The --max-delete limit stopped deletions'
+	30 'Timeout in data send/receive'
+	35 'Timeout waiting for daemon connection'
+)
 
 # Added 2019-05-03 16:50
 comp+=("syncDirs=rsync")
 function syncDirs()
 {
-	integer n
+	integer n cod
 	local dir data checksum arg noDelete
 	local quiet sudo excludeFrom exclude dry reverse
-	local stat name noSlash sshCFG ret host p
-	typeset -aU src targets rsArgs extraArgs files excludePatterns
-	zparseopts -D -M - q=quiet s=sudo d=dry \
-		c=checksum r=reverse -no-add-slash=noSlash -no-delete=noDelete \
-		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e
+	local stat name noSlash sshCFG ret host p _copts
+	typeset -aU _opts src targets rsArgs extraArgs files excludePatterns
+	zparseopts -D -M -A _opts - q=quiet s=sudo d=dry 'R' -relative=R 'z' -compress=z \
+		c=checksum -reverse=reverse -no-add-slash=noSlash -no-delete=noDelete \
+		E:=excludeFrom -exclude-from:=E e:=exclude -exclude:=e -port: \
+		-no-perms -no-user -no-group
 
 	[[ -z "$sudo" ]] && sudo='-S'
 	(($# >= 2)) || abort 1 "usage: $0 source1 [.. sourceN] target1[,target2]"
-	
+
 	n=$#
 	for arg; do
 		if [[ ${arg:0:1} = - ]]; then # option parameter
@@ -208,15 +311,10 @@ function syncDirs()
 		rsArgs+=(-c --no-times)
 	else
 		rsArgs+=(-tu)
-	fi 
-
-	# exclusions
-	if [[ -n $exclude ]]; then
-		explode -v excludePatterns $exclude[2] ' '
 	fi
-	excludePatterns+=(.osync_workdir 'backup*' '*.local' '.git' 'node_modules')
-	rsArgs+=(--exclude=$^excludePatterns)
-	[[ -n $excludeFrom ]] && rsArgs+=(--exclude-from="${excludeFrom[2]}")
+	(($+_opts[-R])) && rsArgs+=(--relative)
+	(($+_opts[-z])) && rsArgs+=(-z)
+	(($+_opts[--port])) && rsArgs+=(-e "ssh -p $_opts[--port]")
 
 	# analyse sources
 	for ((n=1; n<=$#src; n++)); do
@@ -255,29 +353,44 @@ function syncDirs()
 					;;
 				f) ;; # file
 				0)
-					confirm -c warn "@TODO Empty remote directory$C_: $C[lred]'$host:$p'. \
-						Create dir" || cancel
+					confirm -c warn "@TODO Empty remote directory$C_: '$C[lred]$host:$p$C_'. Create dir" || cancel
 					src[$n]=(); ((n--))
 					;;
 				'')
-					confirm -c warn "Source $host:$p not found. Ignore and continue" || cancel
+					confirm -c warn "Source '$C[lred]$host:$p$C_' not found. Ignore and continue" || cancel
 					src[$n]=(); ((n--))
 					;;
-				*) abort 1 "Invalid response from $host: '$ret'" ;;
+				*) abort 1 "Invalid response from $host: '$C[lred]$ret$C_'" ;;
 			esac
 		elif [[ -d $dir ]]; then
 			if isEmptyDir $dir; then
-				confirm -c warn "Empty directory$C_: $C[lred]'$dir'. \
-					Ignore and continue" || cancel
+				confirm -c warn "Empty directory$C_: '$C[lred]$dir$C_'. Ignore and continue" || cancel
 				src[$n]=(); ((n--))
 			else
-				((!$#noSlash)) && [[ ${dir: -1} != / ]] && { dir+='/'; src[$n]+='/' }
-				if [[ -f ${dir}rsync.ignore ]]; then
-					rsArgs+=(--exclude-from=${dir}rsync.ignore)
+				((!$#noSlash)) && [[ ${dir: -1} != / ]] && src[$n]+='/'
+				if [[ -f $dir/rsync.ignore ]]; then
+					excludePatterns+=("${(@f)$(< $dir/rsync.ignore)}")
 				fi
 			fi
 		fi
 	done
+
+	# exclusions
+	if [[ -n $exclude ]]; then
+		explode -v exclude $exclude[2] ','
+		excludePatterns+=($exclude)
+	fi
+	[[ -n $excludeFrom ]] && excludePatterns+=("${(@f)$(egrep -v '^ *#' $excludeFrom[2])}")
+	#(--exclude-from="${excludeFrom[2]}")
+	excludePatterns+=('backup*' '*.local' '.git' 'node_modules')
+	chooser -v excludePatterns --multi --selected "$excludePatterns" $excludePatterns
+	cod=$?
+	if ((cod && cod!=10)); then
+		confirm 'Cancel' && cancel
+	fi
+	# Parameter Expansion -> $^ RC_EXPAND_PARAM
+	(($#excludePatterns)) && rsArgs+=(--exclude=$^excludePatterns)
+
 	techo -c lcyan "Sources: ${(@qq)src}"
 	techo -c lcyan "Targets: ${(@qq)targets}"
 	# rsync arguments from command line
@@ -289,57 +402,84 @@ function syncDirs()
 	# # # # # #
 	local nothing=1 permFlags
 	for dir in $targets; do
-		host=''; p=''  #sshArgs
+		host=''; p='' #sshArgs
 		if [[ $dir =~ ([^:]+):(.*) ]]; then
 			host=$match[1]; p=$match[2]
 		elif ! isDir -m $dir; then
-			techo -c warn "Skipping $dir"
-			continue
+			#techo -c warn "Skipping $dir"
+			#continue
+			abort $? 'Error creating $dir'
 		fi
 
-		if ((1)); then
-			permFlags=''
-			if (($#host)); then # remote
-				permFlags='-p' # og'
+		permFlags=''
+		#if (($#host)); then # remote
+		#	permFlags='-p' # og'
+		#else
+		#	[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-p' #og'
+		#fi
+		#data="$(run $sudo rsync -ni ${sshArgs[@]} ${rsArgs[@]} $permFlags "$src[@]" $dir)"
+		data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
+		cod=$?
+		if ((cod)); then
+			techo $rsyncCodes[$cod]
+			return $cod
+		fi
+		if (($#data)); then
+			nothing=0
+			echo $data
+			if confirm "Do it"; then
+				run $sudo rsync --info=PROGRESS2 $rsArgs $permFlags "$src[@]" $dir ; cod=$?
+				if ((cod)); then
+					techo $rsyncCodes[$cod]
+					return $cod
+				fi
 			else
-				[[ "$(fstypeof $dir)" != 'vfat' ]] && permFlags='-p' #og'
+				cancel
 			fi
-			#data="$(run $sudo rsync -ni ${sshArgs[@]} ${rsArgs[@]} $permFlags "$src[@]" $dir)"
-			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"
-			if (($#data)); then
+
+			# @TODO((!isRemote && !noSync)) && _sync
+		fi
+
+		if ((!$#noDelete)); then
+			# # # # # # #
+			# Deletions #
+			# # # # # # #  @TODO: -J (omit-link-times) does not work on old rsync
+			data="$(run $sudo rsync -ni --delete --existing --ignore-existing -O ${rsArgs[@]} \
+				"$src[@]" $dir)"; cod=$?
+			if ((cod)); then
+				techo $rsyncCodes[$cod]
+				confirm 'Cancel' && cancel
+				continue
+			fi
+			if [[ -n "$data" ]]; then
 				nothing=0
-				echo $data
-				if confirm "Do it"; then
-					run $sudo rsync --info=PROGRESS2 $rsArgs $permFlags $src $dir || abort
-				else
-					cancel
+				n=0
+				files=()
+				echo $data | while read stat name; do
+					files+=($dir/$name)
+					((n++))
+				done
+
+				_copts=(
+					-v keepFiles -f1 --head "$C[warn]Deletions:" \
+					--no-auto-select --multi --selected "$files" \
+					--marks $'0:ok:\u2714:Keep,1:red:\u274C:Delete' \
+					--foot "These files are only on \"$dir\""
+				)
+				chooser $_copts "$files[@]"; cod=$?
+				if ((cod)); then
+					((cod==10 || cod==130)) && continue
+					confirm 'Cancel' && cancel
 				fi
 
-				# @TODO((!isRemote && !noSync)) && _sync
-			fi
-
-			if ((!$#noDelete)); then
-				# # # # # # #
-				# Deletions #
-				# # # # # # #  @TODO: -J (omit-link-times) does not work on old rsync
-				data="$(run $sudo rsync -ni --delete --existing --ignore-existing \
-					-O ${rsArgs[@]} $src[@] $dir)" || abort
-
-				if [[ -n "$data" ]]; then
-					nothing=0
-					techo -c warn "Deletions:"
-					n=0
-					echo $data | while read stat name; do
-						echo "$dir/$name ${C[red]}❌$C_"
-						files+=($dir/$name)
-						((n++))
-					done
-					confirm -c warn "Delete these $n files" || continue
-					#@TODO rm $(chooser "$files[@]")
-					run $sudo rsync --delete --existing --ignore-existing \
-						--info=PROGRESS2 $rsArgs $src $dir || abort
-					_sync
+				run $sudo rsync --delete --existing --ignore-existing --info=PROGRESS2 $rsArgs \
+					--exclude=$^keepFiles $src $dir ;
+				cod=$?
+				if ((cod)); then
+					techo $rsyncCodes[$cod]
+					return $cod
 				fi
+				_sync
 			fi
 		fi
 	done
@@ -347,16 +487,33 @@ function syncDirs()
 	return 0
 }
 
+function boxconfig()
+{
+	local cfgfile arg val opts _var
+	zparseopts -D -M -A opts - a -all=a v:=_var
+	cfgfile='.box.cfg.json'
+	arg=$1
+	if [[ -f $cfgfile ]]; then
+		val="$(jq -rc "$arg | @sh" < $cfgfile)" || return $?
+		explode -v $_var[2] -z $val
+	fi
+	#if [] && explode -v val -z $val; then
+		#explode -z -v initCmd $initCmd
+}
+
 # Added 2019-02-20 09:23:39 @TODO
 function box()
 {
-	local box base=$HOME/repos cmd search list
-	#zparseopts -D -M - 
+	local box base=$HOME/repos cmd search list _opts
+	#zparseopts -D -M -
 	include -r functions
 	include -l network
-	#include boxes
+	#include 'boxes
+
+	zparseopts -D -M -A _opts - a -all=a
 
 	if (($#)); then
+	#	[[ $1 == 'cd' ]] && shift &&
 		cmd=$1 ; shift ; box="$*"
 	else
 		cmd='search'
@@ -378,8 +535,17 @@ function box()
 					 box=$BOX
 				fi
 				cd $base/$box || return
+				local initCmd initList=()
 				BOX=$box
-				[[ -d .git ]] && git status &
+				if boxconfig -v initList '.cmd.init'
+				then
+					for initCmd in $initList; do
+						#run -z "$initCmd"
+						explode -z -v initCmd $initCmd
+						run "$initCmd[@]" &
+					done
+				fi
+				[[ -d .git ]] && gstatus &
 				[[ -d android ]] && include android
 				todo -d . #@TODO mv to cd hook
 				return 0
@@ -393,10 +559,10 @@ function box()
 					#@TODO: glob search name, if count==1 box=result
 					result=($base/(#i)*${box}*)
 					(($#result)) || abort 10
-					chooser --simple -v box $result:t || cancel
+					chooser -v box $result:t || cancel
 				fi
 				if [[ -d $base/$box/node_modules ]]; then
-					(cd $base/$box/node_modules ; npm start &)
+					(cd $base/$box ; npm start)
 				fi
 				return
 			;;
@@ -406,10 +572,15 @@ function box()
 					cmd='open'; box=$search
 					continue
 				fi
-
-				list=($base/*(-/omN))
+				integer num
+				if (($+_opts[-a] || $#search)); then
+					num=-1 # [1,-1] => all
+				else
+					num=20
+				fi
+				list=($base/*(-/omN[1,num]))
 				(($#list)) || return 10
-				chooser --simple -v box -f1 ${=box:+-S $search} $list:t 'New box' || cancel
+				chooser -v box -f1 ${=box:+-S $search} $list:t 'New box' || cancel
 				if [[ $box == 'New' ]]; then
 					cmd='new' ; box=''
 				elif [[ -d $base/$box ]]; then
@@ -424,7 +595,6 @@ function box()
 		esac
 	done
 }
-
 
 # Added 2019-06-05 16:55
 function attributeSync()
@@ -443,16 +613,17 @@ function attributeSync()
 		return 127
 	fi
 	confirm "$dir1 -> $dir2" || return
-	rsArgs=(${@:--u})
+	rsArgs=(${@:-'-u'})
 	while read stats name skip; do
 		#echo stat=$stats name=$name ;
-		#[[ $stats == skipping ]] 
+		#[[ $stats == skipping ]]
 		[[ $stats[5] == t ]] && $dry sudo touch --reference "$dir1/$name" $dir2/$name
 		[[ $stats[6] == p ]] && $dry sudo chmod --reference "$dir1/$name" $dir2/$name
 		if [[ $stats[7] == o || $stats[8] == g ]] && [[ $stats != skipping ]]; then
 			$dry sudo chown --reference "$dir1/$name" $dir2/$name
 		fi
-	done < <(run -s rsync -n -hDirtpog $rsArgs $dir1/ $dir2 | tee $TTY)
+	done < <(run -s rsync -n -hDirt -pog $rsArgs $dir1/ $dir2 | tee $TTY)
+	#@TODO -p perms -o owner -g group : make these optional throw an option
 	_sync
 }
 
@@ -460,7 +631,7 @@ function attributeSync()
 function _sync() {
 	#run -w "isDirty" -p "Flushing caches to disk. Please wait." sync
 	run -p "Flushing caches to disk..." sync
-	#watch -n 1 -c -t  "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
+	#watch -n 1 -c -t "grep -e 'Dirty:' -e 'Writeback:' /proc/meminfo; kill -0 $pid || killall watch"
 }
 
 # Added 2019-08-21 00:27
@@ -497,7 +668,7 @@ function fordo() #TODO
 	local v cmd
 	cmd=$1; shift
 	for v; do
-		run - $=cmd $v
+		run -e - $=cmd $v
 	done
 }
 
@@ -597,7 +768,7 @@ function awkWrapper()
 			elif [[ $x != '-' ]]; then
 				prog+=$x
 			fi
-			
+
 			if [[ $pat != '-' ]]; then
 				if [[ $x != '-' ]]; then
 					prog+=' && '
@@ -656,5 +827,68 @@ function awkWrapper()
 
 function open()
 {
-	xdg-open "$@" &
+	xdg-open "$@" & sleep 1
+}
+
+# Added 2020-04-06 23:53
+# Just like the --relative-base option from realpath
+# Usage: relpath <file|dir> <relative_base>
+# Exs:
+# relpath /home/user/repo/API /home/user/repo/API/v6 ; # gives: v6
+function relpath()
+{
+	python -c 'import os, sys; print(os.path.relpath(*sys.argv[1:]))' $2 $1
+}
+
+# Added 2020-05-09 01:23
+# backup
+# restore
+# remove
+# disable=[backup,] remove
+# purge
+function apt-source()
+{
+	local f _opts _copts code bkup_suffix='.save' choices
+	integer saved disable purge backup
+
+	zparseopts -D -M -A _opts - 'd' -disable=d 'r' - -delete=r 'p' -purge=p -no-backup
+
+	code=${1:-$(lsb_release -sc)}
+
+	choices=('cancel')
+	for f in *$code.list *$code.list; do
+		name=${f%%$code.list}
+		if [[ -f $f.save ]]; then
+			if cmp $f $f.save; then
+				techo "$OK $f $C[ok]==$C_ $f.save"
+				saved=1
+			else
+
+				diff -u $f $f.save
+				if (($+_opts[-d])); then
+					choices+=("remove $f (keep $f.save)")
+					choices+=("remove $f => $f.save")
+				else
+					choices+=("remove $f (use $f.save)") ||
+				fi
+			fi
+		else
+			if (($+_opts[-d] && $+_opts[--no-backup]==0)); then
+			fi
+			_copts=("overwrite $f => $f.save")
+			_copts=("remove $f")
+			_copts=("rename $f (keep $f.save)")
+		fi
+
+		chooser -v choice -f1 $_copts
+		case $choice in
+			(b*) sudo cp $f $fsave ;;   # backup
+			(d*) sudo cp $f $fsave ;;   # disable
+			(pur*) sudo rm $f $fsave ;;  # purge
+			(res*) sudo cp $fsave $f ;;  # restore
+			(rem*) sudo rm $f ;;
+			(ren*) rename -s $f $fsave ;;
+			(*) techo Invalid choice ;;
+		esac
+	done
 }
