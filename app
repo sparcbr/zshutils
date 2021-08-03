@@ -32,14 +32,14 @@ function sexit()
 
 cmds=(focuswindow\|focus focusactivity home en\|enable\|dis\|disable install\|inst list poweroff stop\|restart uninstallall\|removeall\|delall\|deleteall uninstall\|remove\|rm\|del\(ete\)\? wallpaper\|anim\|animation hidekeyb\|hidekeyboard start immersive log\|logcat reboot\|restart doc)
 
-(($# || interactive)) || { usage ; sexit 1 }
-
 docurl='https://developer.android.com/studio/command-line/adb'
 function usage()
 {
 	print -l ${(o)cmds}
 	print "\"app doc\" for online documentation ($docurl)"
 }
+
+(($# || interactive)) || { usage ; sexit 1 }
 
 function parseADBErrors()
 {

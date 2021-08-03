@@ -71,7 +71,7 @@ function sql()
 
 	typeset -g sql
 
-	zparseopts -D -M -A _opts - f: d:=name n v=verbose u: -user:=u p: -pass:=p 't' -table=t \
+	zparseopts -D -M -A _opts - f: d:=name 'n' v=verbose u: -user:=u p: -pass:=p 't' -table=t \
 		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw 'i' --pager -nocolumns \
 		-force 's' -limit:
 
@@ -127,7 +127,7 @@ function sql()
 		(($+_opts[-n])) || usedb $name[2]
 
 		# credentials
-		if [[ -n $db ]]; then
+		if [[ -n $db ]] && ((!$+_opts[-n])); then
 			user=${_opts[-u]:-${sqlUser[$db]:-$sqlUser[root]}}
 			pass=${pass[2]:-$sqlPass[$user]}
 		else
@@ -589,9 +589,9 @@ function sqlgrant()
 	local _opts _gdb _guser _gpass
 	zparseopts -D -M -A _opts - p: u: d:
 
-	(($+_opts[-d])) && $_gdb=$_opts[-d]
-	(($+_opts[-p])) && $_gpass=$_opts[-p]
-	(($+_opts[-u])) && $_guser=$_opts[-u]
+	(($+_opts[-d])) && _gdb=$_opts[-d]
+	(($+_opts[-p])) && _gpass=$_opts[-p]
+	(($+_opts[-u])) && _guser=$_opts[-u]
 
 	sql -n "GRANT ALL ON $_gdb.* TO '$_guser'@'localhost' IDENTIFIED BY '$_gpass'"
 }

@@ -383,13 +383,14 @@ function chooser()
 			fi
 
 
-			local sel_box elem_show _msg last_search
+			local sel_box elem_show _msg last_search='¬'
 			integer last_key next_key b loop=1
 			integer opt_wid page_size max_lines found_idx=0
-			integer num_elem first last begin_idx end_idx noSelectAlign
+			integer num_elem first last begin_idx end_idx noSelectAlign redraw_list=1
 
-			max_lines=${PAGE_SIZE:-15}
-			((page_size=LINES>max_lines?max_lines:LINES))
+			max_lines=${PAGE_SIZE:-12}
+			((page_size=LINES>max_lines ? max_lines : LINES))
+			techo pagesize=$page_size
 
 			typeset -A keys=(
 				'UP' $'\e[A' 'PGUP' $'\e[5~' 'HOME' $'\e[1~'
@@ -410,6 +411,7 @@ function chooser()
 				if [[ $tmp[1] == '¬' ]]; then
 					_olist[i]=$tmp[2,-1]
 					section+=($i)
+					noSelect+=($i)
 				fi
 
 				if [[ -z ${(k)list_keys[(r)$i]} && -z ${noSelect[(r)$i]} ]]; then
@@ -449,7 +451,7 @@ function chooser()
 				# # # # # # # # #
 				# FIND ELEMENTS #
 				# # # # # # # # #
-				if [[ -z $search || $search != $last_search ]]; then
+				if [[ $search != $last_search ]]; then
 					elem_show=() # clear
 					# elem_show has nothing to do with pagination. It indicates it's not filtered out.
 					# begin_idx and end_idx are used for that.
@@ -465,6 +467,7 @@ function chooser()
 					done
 					last_search=$search
 					((elem_show[current_key])) || current_key=$first
+					redraw_list=1
 				fi
 				#	first=1
 				#	last=$#_olist
@@ -478,9 +481,20 @@ function chooser()
 				# TODO: find page where current_key belongs to
 				# at the beginning we draw all pages until we find it
 				#begin_idx=
+				set -x
 				begin_idx=$first
-				((end_idx=i-1))
-					#techo "begin=$begin_idx, end=$end_idx, current=$current_key"
+				found_idx=0
+				while ((!found_idx && begin_idx<=last)); do
+					for ((i=begin_idx, j=0; i>=first && j<page_size && i<=last; i++)); do
+						((elem_show[$i])) && ((j++))
+						if ((i==current_key)); then
+							found_idx=1
+						fi
+					done
+					((found_idx)) && ((end_idx=i-1)) || begin_idx=$i
+				done
+				set +x
+				techo "begin=$begin_idx, end=$end_idx, current=$current_key"
 
 				# for page_size = 5: end = page_size - foot = 5 - 1 = 4
 				# in case of hidden elements (search filter)
@@ -493,24 +507,27 @@ function chooser()
 				#   footer                  footer
 				(($#head)) && techo -c head "$head[2]"
 
+				set -x
 				if ((next_key)); then
 					last_key=current_key
 					current_key=$next_key
+					set +x
 					techo last=$last_key, current=$current_key
+					techo begin_idx=$begin_idx end_idx=$end_idx
+					set -x
+
 					if ((current_key > end_idx)); then
 						found_idx=0
 						((begin_idx=end_idx+1))
 						techo "begin=$begin_idx, end=$end_idx"
 						while ((! found_idx && begin_idx<=last)); do
-							for ((i=begin_idx, j=2; i>=first && j<page_size; i++)); do
+							for ((i=begin_idx, j=0; i>=first && j<page_size && i<=last; i++)); do
 								((elem_show[$i])) && ((j++))
 								if ((i==current_key)); then
 									found_idx=$i
 								fi
 							done
-							if ((! found_idx)); then
-								begin_idx=$i
-							fi
+							((found_idx)) || begin_idx=$i
 						done
 						if ((i>last)); then
 							((end_idx=last))
@@ -522,7 +539,7 @@ function chooser()
 						((end_idx=begin_idx-1))
 						techo "begin=$begin_idx, end=$end_idx"
 						while ((! found_idx && end_idx>=first)); do
-							for ((i=end_idx, j=2; i>=first && j<page_size; i--)); do
+							for ((i=end_idx, j=0; i>=first && j<page_size && i<=last; i--)); do
 								((elem_show[$i])) && ((j++))
 								if ((i==current_key)); then
 									found_idx=$i
@@ -537,24 +554,25 @@ function chooser()
 						else
 							((begin_idx=i+1))
 						fi
-						techo "begin=$begin_idx, end=$end_idx"
 					fi
+					techo "begin=$begin_idx, end=$end_idx"
 				fi
-
+				set +x
+				techo begin_idx=$begin_idx
+				techo end_idx=$end_idx
 				# # # # # # #
 				# DRAW LIST #
 				# # # # # # #
 				if ((num_elem)); then
-					for ((i=begin_idx, j=2; j<page_size && i<=last; i++)); do
+					for ((i=begin_idx; i<=end_idx; i++)); do
 						((elem_show[$i])) || continue
 						if [[ -n ${noSelect[(r)$i]} ]]; then
-							# left padding: (l:expr::string1::string2:)
-							techo "  ${(l:noSelectAlign:)} $_olist[i]"
-							continue
-						fi
-
-						if [[ -n ${section[(r)$i]} ]]; then
-							techo -c head $_olist[$i]
+							if [[ -n ${section[(r)$i]} ]]; then
+								techo -c head $_olist[$i]
+							else
+								# left padding: (l:expr::string1::string2:)
+								techo "  ${(l:noSelectAlign:)} $_olist[i]"
+							fi
 							continue
 						fi
 
@@ -581,10 +599,8 @@ function chooser()
 						else
 							techo "  $C[ok]${(ml:opt_wid:)_opt}$C_)$sel_box $_olist[i]"
 						fi
-
-						((j++))
 					done
-					_msg="Showing $((j - 2)) matches of total $num_elem"
+					_msg="Showing $((end_idx - begin_idx)) matches of total $num_elem"
 				else
 					_msg='No matches found'
 				fi
@@ -630,19 +646,10 @@ function chooser()
 							((DEBUG)) && array_dump elem_show
 							((DEBUG)) && array_dump noSelect
 							i=$current_key
-							techo i=$i
-							set -x
-							for ((--i; (elem_show[i]!=1 || noSelect[(r)$i]) && i>=first; --i)) :
-							if ((i<first)); then
-								i=$last
-							fi
-							set +x
-							techo i=$i
-							# if ((i>first)); then
-							# 	while ((elem_show[--i]!=1 && i>1)) :
-							# else
-							# 	i=$last
-							# fi
+							((--i<first)) && i=$last
+							for (( ; elem_show[i]!=1 || noSelect[(r)$i] ; )); do
+								((i < $first)) && i=$last || ((--i))
+							done
 							if ((i!=current_key)); then
 								next_key=$i
 								break
@@ -666,17 +673,12 @@ function chooser()
 							fi
 						;;
 						$keys[DOWN])
+							# find next selectable element
 							i=$current_key
-							# find next shown element
-							while (((elem_show[++i]!=1 || noSelect[(r)$i]) && i<=$last)); do; done
-							if ((i>last)); then
-								i=$first
-							fi
-							#if ((i<last)); then
-								# while ((elem_show[++i]!=1 && i<$#list)) :
-							#else
-							#	i=$first
-							#fi
+							((++i>last)) && i=$first
+							for (( ; elem_show[i]!=1 || noSelect[(r)$i] ; )); do
+								((i > $last)) && i=$first || ((++i))
+							done
 							if ((i!=current_key)); then
 								next_key=$i
 								break
