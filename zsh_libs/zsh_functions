@@ -481,7 +481,6 @@ function chooser()
 				# TODO: find page where current_key belongs to
 				# at the beginning we draw all pages until we find it
 				#begin_idx=
-				set -x
 				begin_idx=$first
 				found_idx=0
 				while ((!found_idx && begin_idx<=last)); do
@@ -493,7 +492,6 @@ function chooser()
 					done
 					((found_idx)) && ((end_idx=i-1)) || begin_idx=$i
 				done
-				set +x
 				techo "begin=$begin_idx, end=$end_idx, current=$current_key"
 
 				# for page_size = 5: end = page_size - foot = 5 - 1 = 4
@@ -507,14 +505,11 @@ function chooser()
 				#   footer                  footer
 				(($#head)) && techo -c head "$head[2]"
 
-				set -x
 				if ((next_key)); then
 					last_key=current_key
 					current_key=$next_key
-					set +x
-					techo last=$last_key, current=$current_key
-					techo begin_idx=$begin_idx end_idx=$end_idx
-					set -x
+					#techo last=$last_key, current=$current_key
+					#techo begin_idx=$begin_idx end_idx=$end_idx
 
 					if ((current_key > end_idx)); then
 						found_idx=0
@@ -557,9 +552,8 @@ function chooser()
 					fi
 					techo "begin=$begin_idx, end=$end_idx"
 				fi
-				set +x
-				techo begin_idx=$begin_idx
-				techo end_idx=$end_idx
+				#techo begin_idx=$begin_idx
+				#techo end_idx=$end_idx
 				# # # # # # #
 				# DRAW LIST #
 				# # # # # # #
