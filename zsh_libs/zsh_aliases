@@ -1,5 +1,6 @@
 VERSION=1.0.7
 [[ -v comp ]] || typeset -g -a comp
+alias ls='ls --color=auto'
 alias e=echo
 alias op='open'
 alias vmake="make SHELL='$SHELL -x'"

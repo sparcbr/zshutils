@@ -542,7 +542,7 @@ function box()
 					for initCmd in $initList; do
 						#run -z "$initCmd"
 						explode -z -v initCmd $initCmd
-						run "$initCmd[@]" &
+						run "$initCmd[@]"
 					done
 				fi
 				[[ -d .git ]] && gstatus &

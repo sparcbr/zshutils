@@ -1317,7 +1317,7 @@ function gisupdated()
 function gstatus()
 {
 	local _gopts _opts buf line _vname _gst stat fn f
-	local dev_diff staged changed diff_changed_dev k
+	local dev_diff staged changed diff_changed_dev k groot=$(git root)
 	integer i ok warns alerts n=10
 	zparseopts -D -M -A _opts - -branch: 'u'
 	#TODO gselect
@@ -1345,9 +1345,9 @@ function gstatus()
 		diffs=()
 		#diff_changed_dev=''
 		ok=0
-		if [[ -f $fn.dev.$ext ]]; then
-			if [[ -f $f ]]; then
-				dev_diff=$(diff -u --color=never $fn.dev.$ext $f)
+		if [[ -f $groot/$fn.dev.$ext ]]; then
+			if [[ -f $groot/$f ]]; then
+				dev_diff=$(diff -u --color=never $groot/$fn.dev.$ext $groot/$f)
 				ndev_diff=$#dev_diff
 				if ((!ndev_diff)); then
 					diffs+=("$C[ok]== $fn.dev.$ext")
@@ -1356,7 +1356,7 @@ function gstatus()
 					diffs+=("$C[lred]$ndev_diff!= $fn.dev.$ext")
 				fi
 			elif [[ $modified == 'D' ]]; then
-				dev_diff=$(diff -u --color=never $fn.dev.$ext <(gshow :$f))
+				dev_diff=$(diff -u --color=never $groot/$fn.dev.$ext <(gshow :$f))
 				ndev_diff=$#dev_diff
 				if ((!ndev_diff)); then
 					diffs+=("$C[ok]== $fn.dev.$ext")
@@ -1549,5 +1549,6 @@ function jira()
 	gbranch -c $bName || return
 	# TODO: set assignee=me; set tstatus=InProgress
 }
-
+zle -N gstatus
+bindkey '^G' gstatus
 # curl -s "https://api.github.com/repos/user/project-name/commits?path=filename&page=1&per_page=1" | jq -r '.[0].commit.committer.date'
