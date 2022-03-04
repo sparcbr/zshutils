@@ -21,7 +21,7 @@ alias gds='gstaged'
 typeset -gi hashAbbvLen=7
 
 export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
-
+#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
 [[ ! -v comp ]] && typeset -g -a comp
 
 type meld >/dev/null || { [[ -n $DISPLAY ]] && confirm 'Install meld' && aptinst meld }
