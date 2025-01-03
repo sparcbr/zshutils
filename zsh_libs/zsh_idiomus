@@ -291,3 +291,54 @@ function hotmartCSVImport()
 	((j)) && echo "$out;" # flush
 
 }
+
+function create_include_file()
+{
+	[[ $# -eq 0 ]] && {
+		echo "Usage: $0 <newversion> <file>"
+		echo "\tExample: $0 37 transaction.utils"
+		exit 0
+	}
+
+	[[ -d $PWD/.git ]] || cd $(git rev-parse --show-toplevel)
+
+	version="$1"
+	filenoext="${2%%.php}"
+	file="$filenoext.php"
+	vdir="v$version"
+
+	[[ -d $vdir ]] || {
+		confirm "Create $PWD/$vdir" || cancel
+		mkdir "$vdir" 
+	}
+
+	newfile="$vdir/$file"
+	oldversion=$((version - 1))
+
+
+	oldfile=$oldversion/$file
+	olddata=$(< $oldfile)
+	IFS="\n" olddatalines=(($olddata))
+
+	oldisinclude=0
+	[[ $#olddatalines == 2 || $#olddatalines == 3 ]] && oldisinclude=1
+
+	if [[ -f $newfile ]]; then
+		cat $newfile
+		if ((oldisinclude)); then
+			diff -q $newfile $oldfile
+		fi
+		abort 'Existent file. Aborting';
+	fi
+
+	echo $#olddatalines lines
+
+
+	if [[ $#olddatalines == 2 || $#olddatalines == 3 ]]; then
+		# is a include, so we just copy file
+		echo -n $olddata > $newfile;
+	else
+		# create include
+
+	fi
+}

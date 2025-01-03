@@ -1,0 +1,1 @@
+PAGER="less -g -s '+/$1'" command man zshall

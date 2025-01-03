@@ -1,0 +1,21 @@
+aptsnapshot()
+{
+	type apt-clone || sudo apt-get install apt-clone
+	apt-clone clone foo
+	dpkg --get-selections > ~/dpkg.list
+	sudo cp -R /etc/apt/sources.list* ~/etc
+	sudo apt-key exportall > ~/repo.keys
+	rsync --progress /home/`whoami` /path/to/user/profile/backup/here
+}
+
+# Reinstall/restore
+aptrestore()
+{
+rsync --progress /path/to/user/profile/backup/here /home/
+sudo apt-key add ~/Repo.keys
+sudo cp -R ~/etc/sources.list* /etc/apt/
+sudo apt-get update
+sudo apt-get install dselect
+sudo dpkg --set-selections < ~/dpkg.list
+sudo dselect
+}

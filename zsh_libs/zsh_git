@@ -17,10 +17,12 @@ alias gstat='gstatus'
 alias grest='grestore'
 alias staged='gstaged'
 alias gds='gstaged'
+alias gdsw='g diff --staged --word-diff=color --word-diff-regex=.'
+alias master="git checkout master"
 #local tmp=$(git rev-parse --short HEAD || echo '')
 typeset -gi hashAbbvLen=7
 
-export github_token='b2e74253b94398066f3938bb63120f51ca7745ee'
+export github_token=''
 
 [[ ! -v comp ]] && typeset -g -a comp
 
@@ -71,7 +73,7 @@ function croot()
 
 gFormat=(
 	'%h'				# short hash
-	'%<(3,trunc)%cn'	# author
+	'%<(5,trunc)%cn'	# author
 	'%C(auto)%d%Creset'	# ref names
 	'%s'				# subject
 	'(%Cgreen%ci %C(#4579aa)%cr%Creset)' # date
@@ -99,11 +101,11 @@ function glog()
 	fi
 
 	hashP='[a-f0-9]{5,}'
-	authorP='[A-Z]'
+	authorP='[A-Z][a-z][a-z]'
 	refsP='\(.*\)'
 	subjectP='.*'
 	dateP='\(.*\)'
-	typeset -A authorColor=('E' yellow 'P' warn) # '*' lcyan)
+	typeset -A authorColor=('Eli' yellow 'Vin' lcyan 'Kas' lred)
 	for color in $authorColor; do colorSet $color; done  # setup colors
 	#lcolors=('' yellow '' '' '')
 	while read -r line; do
@@ -112,13 +114,14 @@ function glog()
 		if [[ $line =~ '(.*) ('$~hashP') ('$~authorP').. ('$~refs')? ?('$subjectP') ('$~dateP')' ]]
 		then
 			author=$match[3]
+			[[ $author == 'Jef' ]] && author='Kas'
 			color=$authorColor[$author]
+			[[ -z $color ]] && color='head'
 			match[3]=$C[$color]$author$C_
 
 			hash=$match[2]
 			match[2]=$(colorhash $hash)
 
-			#TODO save colors and data in separated arrays
 			aline="$match"
 		else
 			aline="$line"
@@ -176,6 +179,7 @@ function gpull()
 				*)	;;
 		esac
 	}
+	echo $tmp
 }
 
 function gshow()
@@ -569,26 +573,34 @@ function gmerge() #@TODO
 	fi
 }
 
-function ggrep() #@TODO
+function ggrep()
 {
-	local files pattern
-	pattern=$(echo "$@" | awk -F' - ' '// {print $1}')
-	files=$(echo "$@" | awk -F' - ' '// {print $2}')
-	#pattern="${@%%_*}"
-	#files="${@#*_}"
-	#while arg in "$@"; do
-	#    [[ "$arg" != "--" ]]
-	#    [[ ]] && files+=" $arg"
-	#done
-	set -x
-	git grep "$pattern" $(git rev-list --all -- ${=files}) -- ${=files}
-	set +x
+#	local files pattern
+#	pattern=$(echo "$@" | awk -F' - ' '// {print $1}')
+#	files=$(echo "$@" | awk -F' - ' '// {print $2}')
+#	#pattern="${@%%_*}"
+#	#files="${@#*_}"
+#	#while arg in "$@"; do
+#	#    [[ "$arg" != "--" ]]
+#	#    [[ ]] && files+=" $arg"
+#	#done
+#	set -x
+#	git grep "$pattern" $(git rev-list --all -- ${=files}) -- ${=files}
+#	set +x
+	grep -rn "$1" $(echo $(git diff --name-only))
 }
 
 function commit() #@TODO
 {
 	local m args amend
 	zparseopts -D -M - m:=m A=amend -amend=A
+
+	getbranch -q
+
+	[[ $branch == 'master' ]] && {
+		confirm "Commit to master branch" || cancel
+	}
+
 	[[ $amend[1] == '-A' ]] && amend='--amend'
 	#@TODO check for empty changes
 	if [[ -n "$1" && ${1:0:1} != - ]]; then
@@ -764,10 +776,11 @@ function gpush()
 		if [[ -z $remote ]]; then
 			gremote || { techo -c warn 'No remotes'; return 10 }
 		fi
-		branch=${2:-$VCS_STATUS_LOCAL_BRANCH}
-		if [[ -z $branch ]]; then
-			getbranch || { techo -c warn 'No branches'; return 10 }
-		fi
+		[[ -n "$2" ]] && branch=$2 || {
+			getbranch -q || abort 10 'No branches'
+		}
+
+		[[ $branch == 'master' ]] && abort 2 "Can't push to master branch"
 		run git push --set-upstream ${(kv)_opts} $remote[1] $branch
 		[[ $branch != main && $branch != master ]] && gpr
 	fi
@@ -817,6 +830,35 @@ function gswitch()
 	return 1
 }
 
+function remove_local_unused_branches()
+{
+	git fetch -p && {
+		for branch in $(git for-each-ref --format '%(refname) %(upstream:track)' refs/heads | awk '$2 == "[gone]" {sub("refs/heads/", "", $1); print $1}'); do
+			confirm "Remove branch $branch" && git branch -d $branch
+		done
+	}
+}
+
+function remove_remote_branch()
+{
+	local br
+
+	gremote
+	#while chooser -f1 -v br $(g branch --merged $remote[1]/master -r | grep -v master); do
+	while chooser --strip-color --ifs $'\n' -f1 -v br "$(listbranch --merged -r | grep -v '/master')"; do
+		gshow -l $br
+		br=${br#origin/}
+		confirm "Remove remote branch $br" && run -v6 git push $remote[1] -d $br
+	done
+}
+
+function remove_local_branch()
+{
+	local br
+	br=$(git for-each-ref --format "%(refname:short) %(upstream:track)" refs/heads | grep -F " [gone]" | cut -d" " -f1)
+	confirm "Remove these local branches: $br" && for v in $(echo $br); do git branch -d $v; done
+}
+
 function gbranch() #@TODO
 {
 	local list delete cmd get current opts
@@ -844,6 +886,7 @@ function gbranch() #@TODO
 		-l) listbranch "$@" ;;
 		-d)
 			#(())
+			echo git fetch -p
 			git fetch -p
 			#git branch -d $1
 			#gremote || { [ -t 1 ] && techo -c warn 'No remotes'; return 10 }
@@ -858,7 +901,7 @@ function listbranch()
 	local _cols head merged to compare_to all _opts opts=()
 	zparseopts -M -D -A _opts - -no-merged::=merged -merged::=merged a -all=a O:
 	#zparseopts -M -D -A _opts - -no-merged::=N m:: -merged::=m 'a' -all=a O:
-	gremote || return
+	gremote
 	compare_to="$remote[1]/master"
 	#@TODO get "main" branch
 	if (($+_opts[-a])); then
@@ -887,8 +930,10 @@ function listbranch()
 		_cols+=($=_opts[-O])
 	fi
 
-	[[ -n $_cols[(r)author] ]]
-	#%(authorname)
+	if [[ -n $_cols[(r)author] ]]; then
+		#%(authorname)
+	fi
+
 	for tmp in $_cols; do
 
 	done
@@ -899,8 +944,10 @@ function listbranch()
 		'%(color:yellow)%(align:20,left)%(refname:short)%(end)%(color:reset)'
 		'%(color:red)%(objectname:short)%(color:reset)'
 		'%(color:reset)%(contents:subject)'
+		'%(authorname)'	# author
 		'(%(color:green)%(committerdate:iso) %(color:#4579aa)%(committerdate:relative)%(color:reset))'
 	)
+#	%(authorname)
 	git --no-pager branch --sort=committerdate --format="$glineFormat" --color=always $opts "$@"
 	#todo colorhash
 }
@@ -1276,11 +1323,12 @@ function gdiff()
 # @return revision, if found
 function gfind()
 {
-	local rev revs file filehash hash since=(--since='34 days ago')
+	local rev revs file filehash hash since=(--since='200 days ago')
 	file="$1"; shift 1
 	# git hash for file
 	{
-		[[ -f file ]] && filehash=$(git hash-object $file) || filehash=$(git ls-tree HEAD $file) || return 1
+		[[ -f $file ]] && filehash=$(git hash-object $file) || \
+			filehash=$(git ls-tree HEAD $file | explode -z --stdin ' ' 3) || return 1
 	} 2>/dev/null
 	revs=($(git log $since --all --pretty=%H -- "$file"))
 	for rev in $revs; do
@@ -1372,7 +1420,7 @@ function gstatus()
 			fi
 		fi
 		if (($+_opts[--branch])); then
-			dev_diff_b=$(git diff --color=never $_opts[--branch] -- $f)
+			dev_diff_b=$(git diff --color=never $_opts[--branch] -- $groot/$f)
 			ndev_diff_b=$#dev_diff_b
 			if ((!ndev_diff_b)); then
 				diffs+=("$C[ok]== $_opts[--branch]")
@@ -1381,7 +1429,7 @@ function gstatus()
 				diffs+=("$C[lred]$ndev_diff_b != $_opts[--branch]")
 			fi
 		fi
-		if revfound=($(gfind $f)); then
+		if revfound=($(gfind $groot/$f)); then
 			rev=$revfound[1]
 			diffs+=("$C[ok]== * $(colorhash $rev)")
 			case $revfound[2] in
@@ -1402,7 +1450,8 @@ function gstatus()
 			((alerts++))
 			k=$C[lred]
 		fi
-		techo $stat $k$f $diffs
+		filedatelastchange=$C[warn]$(stat -c '%y' $groot/$f | cut -d'.' -f 1)
+		techo $stat $k$f $filedatelastchange$C_ $diffs
 		#$(($#changed - $#dev_diff)) $diff_changed_dev
 	done
 	if ((alerts)); then techo -c lred "Non $C[warn]recoverable changes found"; \

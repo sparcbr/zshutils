@@ -1,0 +1,1 @@
+	project=%project AND status in ("In Progress", "To Do", "Todo") AND assignee in (currentUser(), EMPTY) ORDER BY Rank ASC

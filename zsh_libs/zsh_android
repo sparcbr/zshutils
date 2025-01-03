@@ -14,9 +14,7 @@ ANDROID_SDK_ROOT=$(getfullpath $location)
 function isAndroidSDK()
 {
 	local desc
-	[[ -n $1 && -d $1/tools && -f $1/tools/source.properties ]] || return 1
-	desc="$(egrep '^Pkg.Desc' $1/tools/source.properties)"
-	[[ $desc == 'Pkg.Desc=Android SDK Tools' ]]
+	[[ -n $1 && -d $1/build-tools ]] || return 1
 }
 
 if ! isAndroidSDK $ANDROID_SDK_ROOT; then
@@ -42,7 +40,7 @@ while ! isAndroidSDK $ANDROID_SDK_ROOT; do
 	#list=($HOME /usr/lib/android-sdk )
 
 	if [[ -n $ANDROID_SDK_ROOT ]]; then
-		techo -c warn "'$ANDROID_SDK_ROOT' does not look like an Android SDK folder. It should contain the subfolder $C[lred]\"tools\""
+		techo -c warn "'$ANDROID_SDK_ROOT' does not look like an Android SDK folder\""
 	fi
 
 	[[ -o interactive ]] || abort 127 'Android SDK not found'
@@ -57,7 +55,7 @@ fi
 export ANDROID_SDK_ROOT
 export ANDROID_HOME=$ANDROID_SDK_ROOT
 export ANDROID_PLATFORM_TOOLS=$ANDROID_SDK_ROOT/platform-tools
-path+=($ANDROID_HOME/emulator $ANDROID_HOME/tools $ANDROID_HOME/tools/bin $ANDROID_PLATFORM_TOOLS)
+path+=($ANDROID_HOME/emulator $ANDROID_HOME/build-tools/33.0.0 $ANDROID_HOME/tools/bin $ANDROID_PLATFORM_TOOLS)
 
 techo -c head ANDROID_HOME$C_="$C[warn]'$ANDROID_HOME'$C_"
 

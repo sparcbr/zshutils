@@ -1,0 +1,12 @@
+SET @id = 1,
+    @title = 'In Search of Lost Time',
+    @author = 'Marcel Proust',
+    @year_published = 1913;
+INSERT INTO books
+    (id, title, author, year_published)
+VALUES
+    (@id, @title, @author, @year_published)
+ON DUPLICATE KEY UPDATE
+    title = @title,
+    author = @author,
+    year_published = @year_published;

@@ -1,0 +1,3 @@
+#!/bin/zsh
+include -q functions
+run "$@"

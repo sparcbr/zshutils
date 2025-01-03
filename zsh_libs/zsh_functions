@@ -973,15 +973,16 @@ function alert()
 	local icon title body
 	if [ "$1" = "-e" ]; then
 		icon="error"
-		title="Error"
+		title="Error: $*"
 		shift
 		((! NOSND)) && sndplay error
 	else
 		icon="trophy-gold"
-		title="Success"
+		title="Success: $*"
 		((! NOSND)) && sndplay success
 	fi
 	vflash
+	echo $title
 	notify-send --icon=$icon "$title" "$*"
 }
 
@@ -994,7 +995,7 @@ function sndplay()
 	local dir
 	dir=$SOUNDS/$1
 	[ -d "$dir" ] || { techo -c err "$dir doesn't exist" ; return }
-	run -I libsox-fmt-mp3 - shuf -ezn 1 $dir/* | xargs -0 -n1 play
+	run -I libsox-fmt-mp3 - shuf -ezn 1 $dir/* | xargs -0 -n1 play -q
 }
 
 [ -z "$BASH" ] || return

@@ -12,12 +12,21 @@ alias sys="sudo systemctl"
 alias c='cod'
 alias wh='what'
 alias pizza='alarm 13 pizza time'
+alias pma='echo d4urjrvvAOkHZUhc|xclip ; open "http://192.168.10.11/pma/index.php?route=/database/structure&server=1&db=new_3"'
+
 
 gExcludeDirs=(__tests__ .local)
 gNodeExcludeDirs=(node_modules)
 gRNExcludeDirs=(android android/app/build ios $gNodeExcludeDirs)
 gPhPExcludeDirs=(vendor)
-
+function blaster()
+{
+	open "https://blaster.zipline.com.br/egestor/#$1"
+}
+function tudu()
+{
+	open "https://bracket.egestor.com.br/interno/kasper/kanboard/?controller=TaskViewController&action=show&task_id=$1&project_id=1"
+}
 function cod()
 {
 	code --goto "$@"
@@ -442,11 +451,20 @@ function v()
 					pos="+$linenum"
 				fi
 				file=$tmp[1,i-1]
-				$sudo $vim $opts $pos $file
+				if [[ $vim == 'gvim' ]]; then
+					$sudo $vim $opts $pos $file &
+				else
+					$sudo $vim $opts $pos $file
+				fi
 				continue
 			fi
 		fi
-		$sudo $vim $opts $arg
+		#$sudo $vim $opts $arg
+		if [[ $vim == 'gvim' ]]; then
+			$sudo $vim $opts $arg &
+		else
+			$sudo $vim $opts $arg
+		fi
 	done
 }
 

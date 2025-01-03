@@ -1,0 +1,881 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.9~svn20110310	//
+--info	zsh_file	/^						--info=PROGRESS2 $rsArgs $src $dir || abort$/;"	v
+-file	zsh_functions	/^		 -file=file -filter:=filter$/;"	v
+1	zsh_main	/^		1=\/bin\/zsh$/;"	v
+BOX	zsh_file	/^				BOX=$box$/;"	v
+C	zsh_functions	/^C=($/;"	v
+C1	zsh_functions	/^			C1=$C[$c]$/;"	v
+CANCEL	zsh_functions	/^CANCEL=" [${C[warn]}CANCEL$C_]"$/;"	v
+CODE_CURSOR_IN_SCROLL_AREA	zsh_progress_bar	/^CODE_CURSOR_IN_SCROLL_AREA="\\033[1A"$/;"	v
+CODE_RESTORE_CURSOR	zsh_progress_bar	/^CODE_RESTORE_CURSOR="\\033[u"$/;"	v
+CODE_SAVE_CURSOR	zsh_progress_bar	/^CODE_SAVE_CURSOR="\\033[s"$/;"	v
+COLORS	zsh_functions	/^COLORS=($/;"	v
+COLOR_BG	zsh_progress_bar	/^COLOR_BG="\\e[42m"$/;"	v
+COLOR_BG_BLOCKED	zsh_progress_bar	/^COLOR_BG_BLOCKED="\\e[43m"$/;"	v
+COLOR_FG	zsh_progress_bar	/^COLOR_FG="\\e[30m"$/;"	v
+C_	zsh_functions	/^C_="[0m"$/;"	v
+Ch	zsh_functions	/^			Ch=$C[$hcolor]$/;"	v
+DBNAME	zsh_sql	/^DBNAME='idiomus'$/;"	v
+DB_DATA_DIR	zsh_sql	/^DB_DATA_DIR=\/var\/lib\/mysql$/;"	v
+DEBUG	zsh_debug	/^			DEBUG=1 $script$/;"	v
+DEBUG	zsh_sql	/^				DEBUG=9 abort --ex SqlEx_Unknown 99 - ${sqlState:--} ${line:--} $tmp$/;"	v
+DEBUG	zsh_sql	/^			DEBUG=9 abort --ex SqlEx_Unknown 99 'Unknown error'$/;"	v
+DISPLAY	zsh_network	/^	DISPLAY=:0 x0vncserver -rfbport 5555 -rfbauth ~\/.vnc\/passwd$/;"	v
+Ex	zsh_sql	/^				Ex='ConstraintSqlEx'$/;"	v
+ExTree	zsh_main	/^	ExTree=(Ex -$/;"	v
+F	zsh_progtools	/^		F=$(getfullpath -r $basePath $f)$/;"	v
+FAIL	zsh_functions	/^FAIL=" [${C[err]}FAIL$C_]"$/;"	v
+HeaderColumnWidths	.directory	/^HeaderColumnWidths=346,72,103$/;"	v
+HiddenFilesShown	.directory	/^HiddenFilesShown=true$/;"	v
+IFS	zsh_aliases	/^		IFS=',;: ' read -rA ex_dirs <<<$ex_dirs[2]$/;"	v
+IFS	zsh_aliases	/^		IFS=',;: ' read -rA ex_exts <<<$ex_exts[2]$/;"	v
+IFS	zsh_aliases	/^	IFS=',;: ' read -rA in_exts <<<"$1"$/;"	v
+IFS	zsh_file	/^				IFS=$'' read -d '' -A $_out$/;"	v
+IFS	zsh_main	/^	IFS=$'\\n' read -r -d '' $1 || true$/;"	v
+MNTBUSY	zsh_device	/^MNTBUSY=33$/;"	v
+NLIST_SET_SEARCH_TO	zsh_functions	/^				NLIST_SET_SEARCH_TO=$search[2] \\$/;"	v
+NOBLKDEV	zsh_device	/^NOBLKDEV=32$/;"	v
+OK	zsh_functions	/^OK=" [${C[ok]}OK$C_]"$/;"	v
+OPT_CHK	zsh_main	/^function OPT_CHK()$/;"	f
+PBAR_CHAR	zsh_progress_bar	/^	PBAR_CHAR="X"$/;"	v
+PROGRESS_BLOCKED	zsh_progress_bar	/^	PROGRESS_BLOCKED="false"$/;"	v
+PS4	zsh_debug	/^		PS4="%(${lvl}e,%F{8},%F{2})+%D{%s.%.}>%e<%1x:%I><%N:%i>%f "$/;"	v
+PS4	zsh_debug	/^		PS4=$'\\\\\\011%D{%s%6.}\\011%x\\011%I\\011%N\\011%e\\011'$/;"	v
+R	zsh_aliases	/^			R=$1$/;"	v
+R	zsh_aliases	/^			R=$STAGING_DIR$/;"	v
+R	zsh_aliases	/^	local R=$USER_HOME\/clp$/;"	v
+RESTORE_BG	zsh_progress_bar	/^RESTORE_BG="\\e[49m"$/;"	v
+RESTORE_FG	zsh_progress_bar	/^RESTORE_FG="\\e[39m"$/;"	v
+S	zsh_sql	/^		S=(-S $1)$/;"	v
+SDCARDSIZELIMIT	zsh_device	/^SDCARDSIZELIMIT='32G'$/;"	v
+SDDEV	zsh_device	/^	SDDEV=$sdDev$/;"	v
+THROW	zsh_main	/^	THROW= 2>\/dev\/null$/;"	v
+TRAPHUP	zsh_main	/^function TRAPHUP() { reload }$/;"	f
+TRAPPING_ENABLED	zsh_progress_bar	/^	TRAPPING_ENABLED="false"$/;"	v
+TRAPPING_ENABLED	zsh_progress_bar	/^	TRAPPING_ENABLED="true"$/;"	v
+TRAP_SET	zsh_progress_bar	/^	TRAP_SET="false"$/;"	v
+TRAP_SET	zsh_progress_bar	/^	TRAP_SET="true"$/;"	v
+Timestamp	.directory	/^Timestamp=2019,5,13,8,46,5$/;"	v
+VERSION	zsh_	/^VERSION=1.0.0$/;"	v
+VERSION	zsh_aliases	/^VERSION=1.0.7$/;"	v
+VERSION	zsh_android	/^VERSION=1.0.0$/;"	v
+VERSION	zsh_blank	/^VERSION=1.0.0$/;"	v
+VERSION	zsh_conversion	/^VERSION=1.0.0$/;"	v
+VERSION	zsh_conversion2	/^VERSION=1.0.0$/;"	v
+VERSION	zsh_debug	/^VERSION=1.0.2$/;"	v
+VERSION	zsh_device	/^VERSION=1.0.5$/;"	v
+VERSION	zsh_dns	/^VERSION=1.0.1$/;"	v
+VERSION	zsh_file	/^VERSION=1.0.8$/;"	v
+VERSION	zsh_functions	/^VERSION=1.0.8$/;"	v
+VERSION	zsh_git	/^VERSION=1.0.3$/;"	v
+VERSION	zsh_idiomus	/^VERSION=1.0.0$/;"	v
+VERSION	zsh_kerneltools	/^VERSION=1.0.0$/;"	v
+VERSION	zsh_main	/^		VERSION=$match[1]$/;"	v
+VERSION	zsh_main	/^VERSION=1.0.8$/;"	v
+VERSION	zsh_network	/^VERSION=1.0.2$/;"	v
+VERSION	zsh_non_interactive	/^VERSION=1.0$/;"	v
+VERSION	zsh_proc	/^VERSION=1.0.2$/;"	v
+VERSION	zsh_progress_bar	/^VERSION=1.0.2$/;"	v
+VERSION	zsh_progtools	/^VERSION=1.0.0$/;"	v
+VERSION	zsh_sql	/^VERSION=1.0.5$/;"	v
+Version	.directory	/^Version=4$/;"	v
+ViewMode	.directory	/^ViewMode=1$/;"	v
+ZSHSELECT_ENABLE_EVENTS	zsh_functions	/^				ZSHSELECT_ENABLE_EVENTS=$events[2] \\$/;"	v
+ZSHSELECT_HEAD	zsh_functions	/^				ZSHSELECT_HEAD=$head[2] ZSHSELECT_FOOT=$foot[2] \\$/;"	v
+ZSHSELECT_NONSELECTABLE	zsh_functions	/^				ZSHSELECT_NONSELECTABLE=$noSelect[2] \\$/;"	v
+ZSHSELECT_START_IN_SEARCH_MODE	zsh_functions	/^				ZSHSELECT_START_IN_SEARCH_MODE=1 \\$/;"	v
+_Asep	zsh_main	/^				_Asep=$_Asep[2]$/;"	v
+_Asep	zsh_main	/^		_Asep=$_Asep[2]$/;"	v
+_EX	zsh_main	/^		_EX=$_EX_TYPE[2]$/;"	v
+_cmd	zsh_aliases	/^		_cmd="--remote-expr"$/;"	v
+_cmd	zsh_aliases	/^		_cmd="--remote-send"$/;"	v
+_cols	zsh_file	/^			_cols=$_cols[2]$/;"	v
+_colsOut	zsh_sql	/^					_colsOut=$_colsOut[2]$/;"	v
+_dbg_PS	zsh_debug	/^function _dbg_PS()$/;"	f
+_dbg_def_lvl	zsh_debug	/^_dbg_def_lvl=4$/;"	v
+_dbg_fcfg	zsh_debug	/^function _dbg_fcfg()$/;"	f
+_dbg_funcOnOff	zsh_debug	/^function _dbg_funcOnOff()$/;"	f
+_dbg_trap	zsh_debug	/^function _dbg_trap()$/;"	f
+_dbg_trap	zsh_main	/^function _dbg_trap() { set +x }$/;"	f
+_expr	zsh_file	/^			_expr=("$@[1,4]")$/;"	v
+_expr	zsh_file	/^			_expr=(${(P)_expr[2]})$/;"	v
+_i	zsh_main	/^		_i=${${(P)2}[(rei)$1]}$/;"	v
+_i	zsh_main	/^		_i=${(k)${(P)2}[(re)$1]}$/;"	v
+_id	zsh_sql	/^					_id=$(mysql $opts -s -e $sql $db) 2>&p$/;"	v
+_list	zsh_main	/^		_list=()$/;"	v
+_list	zsh_main	/^	_list=(${(@ps\/$_sep\/)_str})$/;"	v
+_mapCols	zsh_file	/^			_mapCols=$_mapCols[2]$/;"	v
+_out	zsh_file	/^		_out=$_out[2]$/;"	v
+_out	zsh_sql	/^			_out=$_out[2]$/;"	v
+_pop	zsh_functions	/^function _pop()$/;"	f
+_push	zsh_functions	/^function _push()$/;"	f
+_ret	zsh_main	/^	local _ret=$?$/;"	v
+_row	zsh_file	/^			_row=()$/;"	v
+_s	zsh_progtools	/^				local _s=($(stat -L --printf='%s. ' $f $prettyF))$/;"	v
+_sep	zsh_main	/^		_sep=${1:- }$/;"	v
+_sep	zsh_main	/^		_sep=${2:- }$/;"	v
+_sopts	zsh_main	/^	_sopts=(-H $user)$/;"	v
+_str	zsh_main	/^		_str=$1$/;"	v
+_sync	zsh_file	/^function _sync() {$/;"	f
+_test	zsh_debug	/^function _test()$/;"	f
+_test_explode	zsh_debug	/^function _test_explode()$/;"	f
+_type	zsh_aliases	/^			_type=($(typeOf -a $func))$/;"	v
+_type	zsh_main	/^					_type='builtin'$/;"	v
+_type	zsh_main	/^				_type=($(typeOf $m))$/;"	v
+_types	zsh_debug	/^		_types=($(typeOf -a $_cmd)) || { run=1; _cmd=$1; break }$/;"	v
+_var	zsh_functions	/^		_var=$_var[2]$/;"	v
+_var	zsh_main	/^	_var=${_var[2]:-REPLY}$/;"	v
+_vars	zsh_file	/^		_vars=(${(P)_vars[2]})$/;"	v
+a	zsh_debug	/^	a=($($f 'a  b ;; b' ' '))$/;"	v
+a	zsh_debug	/^	a=($($f 'a  b ;; b' ';'))$/;"	v
+a	zsh_network	/^					a=($=tmp)$/;"	v
+a	zsh_network	/^			a=($=tmp)$/;"	v
+abort	zsh_main	/^function abort()$/;"	f
+abortDevError	zsh_device	/^function abortDevError()$/;"	f
+add_key	zsh_aliases	/^function add_key()$/;"	f
+aldd	zsh_aliases	/^function aldd() {$/;"	f
+alert	zsh_functions	/^function alert()$/;"	f
+alg	zsh_kerneltools	/^	alg=$1 ; shift$/;"	v
+append	zsh_aliases	/^						append=1$/;"	v
+aptinst	zsh_main	/^function aptinst()$/;"	f
+aptlist	zsh_aliases	/^function aptlist()$/;"	f
+arg	zsh_aliases	/^	arg=($(type $1)) || return 1$/;"	v
+arg	zsh_device	/^		arg="\/m\/$arg"$/;"	v
+arg	zsh_device	/^	local arg=${(z)1}$/;"	v
+arg	zsh_network	/^	arg=$(omz_urlencode $arg)$/;"	v
+arg	zsh_network	/^	arg=$2$/;"	v
+argpat	zsh_network	/^	argpat='[^&]+'$/;"	v
+args	zsh_device	/^	args=("$@")$/;"	v
+args	zsh_device	/^	args=($all $diskOnly --include 8 -o ${(j.,.)columns} --noheadings --pairs)$/;"	v
+args	zsh_file	/^	args=("$@")$/;"	v
+args	zsh_functions	/^			args=($colors -name name -center -ontop -wrap -buttons "$(implode -A':' buttons ',')")$/;"	v
+args	zsh_git	/^		args="$@"$/;"	v
+args	zsh_git	/^	args="${@%%.git}"$/;"	v
+args	zsh_progtools	/^	args=("$@")$/;"	v
+array	zsh_aliases	/^	array=($(explode "$1" ':')) ; name=$array[1]; linenum=$array[2]$/;"	v
+array	zsh_aliases	/^	array=($(type -w "$name"))$/;"	v
+array_dump	zsh_debug	/^function array_dump()$/;"	f
+attributeSync	zsh_file	/^function attributeSync()$/;"	f
+awkFuncs	zsh_file	/^awkFuncs=($/;"	v
+awkWrapper	zsh_file	/^function awkWrapper()$/;"	f
+backup	zsh_file	/^function backup()$/;"	f
+banner	zsh_functions	/^function banner()$/;"	f
+bar_size	zsh_progress_bar	/^	bar_size=$(($cols-17))$/;"	v
+base	zsh_aliases	/^	base=${1:-~}$/;"	v
+base	zsh_file	/^			base=${base%$suffix}$/;"	v
+base	zsh_file	/^		base=$1$/;"	v
+baseName	zsh_progtools	/^		baseName=$(basename $basePath)$/;"	v
+basePath	zsh_progtools	/^	basePath=$(git root)$/;"	v
+biosInfo	zsh_device	/^function biosInfo()$/;"	f
+block_progress_bar	zsh_progress_bar	/^function block_progress_bar() {$/;"	f
+box	zsh_file	/^					 box=$BOX$/;"	v
+box	zsh_file	/^					box=$BOX$/;"	v
+box	zsh_file	/^				box=$(chooser -f1 ${=box:+-S $search} $list:t 'New box') || cancel$/;"	v
+box	zsh_file	/^				box=$cmd$/;"	v
+box	zsh_file	/^		box="$@"$/;"	v
+box	zsh_file	/^function box()$/;"	f
+branch	zsh_git	/^		branch=${2:-$VCS_STATUS_LOCAL_BRANCH}$/;"	v
+branch	zsh_git	/^	branch=$(git symbolic-ref --short ${1:-HEAD}) $/;"	v
+bs	zsh_device	/^	bs=${bs[2]:-64M}$/;"	v
+builtin	zsh_main	/^					builtin=0$/;"	v
+buttons	zsh_file	/^		local buttons=(--okcodes '0 1' -b "Current directory [$PWD]:1")$/;"	v
+c	zsh_file	/^		c=checksum r=reverse -no-add-slash=noSlash -no-delete=noDelete$/;"	v
+c	zsh_functions	/^		c=$2 ; shift 2$/;"	v
+c	zsh_functions	/^		c=$c[2]$/;"	v
+c	zsh_functions	/^		c=(-c lcyan)$/;"	v
+c	zsh_functions	/^	local c=$COLORS[${2:-$1}]$/;"	v
+c	zsh_main	/^		c=$c[2]$/;"	v
+c	zsh_network	/^		c=$/;"	v
+c	zsh_network	/^		c=$C[$c[2]]$/;"	v
+c	zsh_network	/^		c=$C[lgreen]$/;"	v
+cancel	zsh_main	/^function cancel() {$/;"	f
+chartoint	zsh_conversion	/^function chartoint()$/;"	f
+chartoint	zsh_conversion2	/^function chartoint()$/;"	f
+checkAudio	zsh_idiomus	/^function checkAudio()$/;"	f
+checkdbs	zsh_android	/^function checkdbs()$/;"	f
+chkCmd	zsh_functions	/^function chkCmd()$/;"	f
+chooser	zsh_functions	/^function chooser()$/;"	f
+chosen	zsh_functions	/^					chosen=$match$/;"	v
+chosen	zsh_functions	/^				chosen=$(echo - $chosen | cut $bytes)$/;"	v
+chosenList	zsh_functions	/^		chosenList=($list)$/;"	v
+cleanup_on_interrupt	zsh_progress_bar	/^function cleanup_on_interrupt() {$/;"	f
+clear_progress_bar	zsh_progress_bar	/^function clear_progress_bar() {$/;"	f
+cmd	zsh_device	/^	local cmd=$1 img dir var dev$/;"	v
+cmd	zsh_file	/^					cmd='new' ; box=''$/;"	v
+cmd	zsh_file	/^					cmd='open'$/;"	v
+cmd	zsh_file	/^					cmd='open'; box=$search$/;"	v
+cmd	zsh_file	/^				cmd='search'$/;"	v
+cmd	zsh_file	/^			cmd="$d"$/;"	v
+cmd	zsh_file	/^			cmd=$1$/;"	v
+cmd	zsh_file	/^		cmd=$1 ; shift ; box="$*"$/;"	v
+cmd	zsh_file	/^		cmd='search'$/;"	v
+cmd	zsh_file	/^	cmd=$1; shift$/;"	v
+cmd	zsh_functions	/^				cmd='toilet'$/;"	v
+cmd	zsh_functions	/^			cmd=$debug[2]$/;"	v
+cmd	zsh_functions	/^		cmd=$1; shift$/;"	v
+cmd	zsh_functions	/^		cmd='figlet'$/;"	v
+cmd	zsh_functions	/^		cmd='show'$/;"	v
+cmd	zsh_functions	/^		cmd='toilet'$/;"	v
+cmd	zsh_functions	/^	cmd=$1$/;"	v
+cmd	zsh_git	/^	cmd=$1$/;"	v
+cmd	zsh_git	/^	cmd=($list $current)$/;"	v
+cmd	zsh_main	/^				cmd=1; shift$/;"	v
+cmd	zsh_main	/^		cmd=("$@")$/;"	v
+cmd	zsh_main	/^		cmd=(${$(fc -ln -1)[1]})$/;"	v
+cmd	zsh_proc	/^		cmd=(-C $1)$/;"	v
+cmdPrefix	zsh_functions	/^			cmdPrefix='color'$/;"	v
+cmdPrefix	zsh_functions	/^			cmdPrefix='debug'$/;"	v
+cmdtype	zsh_aliases	/^			cmdtype=($(typeOf $name))$/;"	v
+cod	zsh_device	/^	local cod=$1 ret$/;"	v
+cod	zsh_main	/^		cod=$1; shift$/;"	v
+cod	zsh_main	/^		cod=$last$/;"	v
+cod	zsh_sql	/^	cod=$1; state=$2; line=$3; shift 3$/;"	v
+code	zsh_network	/^	code=$tmp[-1]$/;"	v
+col	zsh_file	/^				col=${${(P)_mapCols}[$key]}$/;"	v
+color	zsh_functions	/^		color=''$/;"	v
+color	zsh_functions	/^		color=(-c head)$/;"	v
+color	zsh_functions	/^function color()$/;"	f
+color	zsh_progress_bar	/^		color="${COLOR_FG}${COLOR_BG_BLOCKED}"$/;"	v
+color	zsh_progress_bar	/^		color="${COLOR_FG}${COLOR_BG}"$/;"	v
+colorSet	zsh_functions	/^function colorSet()$/;"	f
+colorify	zsh_functions	/^function colorify()$/;"	f
+colors	zsh_functions	/^	colors=(-fg white -bg black)$/;"	v
+cols	zsh_proc	/^		cols=($(explode "$cols[2]" ','))$/;"	v
+cols	zsh_proc	/^		cols=(pid ppid %cpu stat cmd)$/;"	v
+cols	zsh_progress_bar	/^	cols=$(tput cols)$/;"	v
+columns	zsh_device	/^		columns=(TYPE NAME SIZE FSTYPE LABEL MOUNTPOINT)$/;"	v
+commit	zsh_git	/^function commit() #@TODO$/;"	f
+compalg	zsh_kerneltools	/^	compalg=${3:-mzip}$/;"	v
+compress	zsh_kerneltools	/^function compress()$/;"	f
+compress_cpio_image	zsh_kerneltools	/^function compress_cpio_image()$/;"	f
+confirm	zsh_functions	/^function confirm()$/;"	f
+cpath	zsh_aliases	/^			cpath=$(which "$name")$/;"	v
+cptree	zsh_aliases	/^function cptree()$/;"	f
+croot	zsh_git	/^function croot()$/;"	f
+cwd	_comp/_in	/^    local cwd="$(pwd -L)" ret dir$/;"	v
+cwdof	zsh_proc	/^function cwdof()$/;"	f
+d	zsh_git	/^		d=${d[2]:-"$*"}$/;"	v
+d1	zsh_file	/^		d1=$dir1; d2=$dir2$/;"	v
+dargs	zsh_file	/^	dargs=(-u -r)$/;"	v
+data	zsh_aliases	/^			data="#!${shell}"$/;"	v
+data	zsh_aliases	/^			data=$(< $ZSH_LIBS\/zsh_blank)$/;"	v
+data	zsh_device	/^		data=$(egrep -o "MOUNTPOINT=\\"$mpat\\"" <<<$data)$/;"	v
+data	zsh_device	/^	data=$(sudo lsblk $args "$@")$/;"	v
+data	zsh_file	/^				data="$(run $sudo rsync -ni --delete --existing --ignore-existing \\$/;"	v
+data	zsh_file	/^			data="$(run $sudo rsync -ni ${rsArgs[@]} $permFlags "$src[@]" $dir)"$/;"	v
+data	zsh_functions	/^			data=("${(@f)@}")$/;"	v
+data	zsh_functions	/^			local data=(${=CAUGHT})$/;"	v
+data	zsh_functions	/^		data=$*$/;"	v
+data	zsh_functions	/^	data=$stack[$l]$/;"	v
+data2	zsh_aliases	/^						data2="$functions[$func]"$/;"	v
+data2	zsh_aliases	/^	data2="$@"$/;"	v
+db	zsh_sql	/^		db=$(chooser ${DBNAME:+-D$DBNAME} $search $(dblist))$/;"	v
+dblist	zsh_sql	/^function dblist()$/;"	f
+dbsize	zsh_sql	/^function dbsize()$/;"	f
+dbtstamp	zsh_sql	/^function dbtstamp()$/;"	f
+ddiff	zsh_file	/^function ddiff()$/;"	f
+debug	zsh_debug	/^function debug()$/;"	f
+delay	zsh_proc	/^	delay=${delay[2]:-1}$/;"	v
+desc	zsh_functions	/^		desc=("${(@fqq)tmp[n+1,-1]}") # description$/;"	v
+dest	zsh_aliases	/^	local dest=$1$/;"	v
+dest	zsh_device	/^	dest=$2$/;"	v
+destroy_scroll_area	zsh_progress_bar	/^function destroy_scroll_area() {$/;"	f
+dev	zsh_device	/^			dev=$(awk -v needle="$var" '$2==needle {print $1}' \/etc\/fstab 2>\/dev\/null)$/;"	v
+dev	zsh_device	/^		dev=$(findSD -ld) || return$/;"	v
+dev	zsh_device	/^		dev=$(isDevice $dev) || {$/;"	v
+dev	zsh_device	/^		dev=$1 ; shift$/;"	v
+dev	zsh_device	/^		dev=$devs[1]$/;"	v
+dev	zsh_device	/^	dev="\/dev\/${dev#\/dev\/}"$/;"	v
+dev	zsh_device	/^	dev=$(isDevice $1) || dev=$(loopof $dev) || return$/;"	v
+dev	zsh_device	/^	dev=$(isDevice $1) || return 1$/;"	v
+dev	zsh_device	/^	dev=$(losetup -j "$1" -O NAME --noheadings)$/;"	v
+dev	zsh_device	/^	dev=${1:-$(chooser $(deviceInfo -d))}$/;"	v
+dev	zsh_device	/^	local dev=$(deviceof "$1")$/;"	v
+dev	zsh_device	/^	local dev=$1$/;"	v
+devList	zsh_device	/^	devList=(${devLoop} \/dev\/mapper\/loop${loopNum}p*(N) ${devLoop}p*(N))$/;"	v
+deviceInfo	zsh_device	/^function deviceInfo()$/;"	f
+deviceMount	zsh_device	/^function deviceMount()$/;"	f
+deviceOff	zsh_device	/^function deviceOff()$/;"	f
+deviceUnmount	zsh_device	/^function deviceUnmount()$/;"	f
+deviceof	zsh_device	/^function deviceof()$/;"	f
+devin	zsh_device	/^		devin=$(findDev $devin) || abort 127 "$devin: device not found"$/;"	v
+devin	zsh_device	/^		devin=$(isDevice $devin) && [[ -b "$devin" ]] || return 1$/;"	v
+devin	zsh_device	/^		devin=${devin:2}$/;"	v
+devin	zsh_device	/^	devin=$1$/;"	v
+devin	zsh_device	/^	local devin="$1"$/;"	v
+devout	zsh_device	/^		devout=${devout:2}$/;"	v
+devout	zsh_device	/^	devout=$2$/;"	v
+diff	zsh_file	/^function diff()$/;"	f
+dir	_comp/_in	/^            dir=${~words[1]}$/;"	v
+dir	_comp/_in	/^            dir=${~words[2]}$/;"	v
+dir	zsh_aliases	/^	local dir=$(lastarg "$1")$/;"	v
+dir	zsh_aliases	/^	local dir=$(lastarg "$@")$/;"	v
+dir	zsh_file	/^		dir=$src[$n]$/;"	v
+dir	zsh_file	/^	dir="$(getpath $(getfullpath $1))"$/;"	v
+dir	zsh_file	/^	dir=$1$/;"	v
+dir	zsh_functions	/^		dir=$baseDir$/;"	v
+dir	zsh_functions	/^		dir=$dir[2]$/;"	v
+dir	zsh_functions	/^	dir=$SOUNDS\/$1$/;"	v
+dir	zsh_functions	/^	local dir=${1:-.}$/;"	v
+dir	zsh_git	/^				dir=${${name[1]#\/*}\/\\\/\/_}$/;"	v
+dir	zsh_git	/^			dir=${dir%%.git}$/;"	v
+dir	zsh_git	/^			dir=${repo##*\/}$/;"	v
+dir	zsh_progtools	/^			dir=$(getpath $prettyF)$/;"	v
+dirUnmount	zsh_device	/^function dirUnmount()$/;"	f
+dirs	zsh_aliases	/^	dirs=(. $CFG)$/;"	v
+dirtyMem	zsh_proc	/^function dirtyMem()$/;"	f
+disable_trapping	zsh_progress_bar	/^function disable_trapping() {$/;"	f
+diskMount	zsh_device	/^function diskMount()$/;"	f
+diskUnmount	zsh_device	/^function diskUnmount()$/;"	f
+disks	zsh_device	/^		disks=("${(@f)$(deviceInfo -hda)}")$/;"	v
+dnslookup	zsh_dns	/^function dnslookup()$/;"	f
+do_sudo	zsh_main	/^function do_sudo()$/;"	f
+draw_progress_bar	zsh_progress_bar	/^function draw_progress_bar() {$/;"	f
+dt	zsh_network	/^						dt=$tmp$/;"	v
+duh	zsh_aliases	/^function duh()$/;"	f
+edalias	zsh_aliases	/^function edalias()$/;"	f
+edfunc	zsh_aliases	/^function edfunc()$/;"	f
+ejectSD	zsh_device	/^function ejectSD()$/;"	f
+emu	zsh_aliases	/^function emu()$/;"	f
+enable_trapping	zsh_progress_bar	/^function enable_trapping() {$/;"	f
+err	zsh_device	/^	local err=0 dir dev$/;"	v
+err	zsh_device	/^	local err=0 used var mnt dev$/;"	v
+err	zsh_main	/^	err=$#err; ll=$#ll; name=${(U)1}$/;"	v
+errCode	zsh_sql	/^			errCode=$match[1]$/;"	v
+err_exists	zsh_aliases	/^		local err_exists="exists but isn't a shell script."$/;"	v
+errline	zsh_progtools	/^	errline=`tail \/var\/log\/apache2\/error.log |  grep -e "PHP \\(Parse\\|Fatal\\|Warning\\|Notice\\)" | tail -n1`$/;"	v
+excludePatterns	zsh_file	/^	excludePatterns=(.osync_workdir 'backup*' '*.local' '.bsync*' '.git' 'node_modules')$/;"	v
+explode	zsh_main	/^function explode()$/;"	f
+expr	zsh_functions	/^			expr=($/;"	v
+expr	zsh_network	/^	expr=($/;"	v
+expr	zsh_network	/^	expr=()$/;"	v
+extract_cpio_image	zsh_kerneltools	/^function extract_cpio_image()$/;"	f
+f	zsh_aliases	/^function f()$/;"	f
+f	zsh_debug	/^	local f="$1" test_f l$/;"	v
+f	zsh_debug	/^	local f='explode' a=()$/;"	v
+f	zsh_idiomus	/^			f="rdata\/reviews\/$1\/v$2\/tracks\/$3$4.mp3" $/;"	v
+f	zsh_main	/^							f=$m$/;"	v
+f	zsh_main	/^						f=$m$/;"	v
+f	zsh_main	/^						f=($tmp[1])$/;"	v
+f	zsh_main	/^					f=($(type -p $m))$/;"	v
+f	zsh_main	/^					f=($m $_type[1])$/;"	v
+f	zsh_main	/^		f=1$/;"	v
+f	zsh_main	/^		f=force q=quiet v:=verbose$/;"	v
+field	zsh_functions	/^			field=''$/;"	v
+field	zsh_functions	/^		field=${field[2]:-1}$/;"	v
+field	zsh_network	/^			field=$a[1]$/;"	v
+fields	zsh_git	/^	fields='.data.search.nodes[] | .nameWithOwner,.createdAt[0:10],.updatedAt,.stargazers.totalCount,.description'$/;"	v
+file	zsh_aliases	/^					file="$ZSH_LIBS\/zsh_$name"$/;"	v
+file	zsh_aliases	/^				file="$ZSH_LIBS\/zsh_"${file#zsh_}$/;"	v
+file	zsh_aliases	/^				file=$(getfullpath $file)$/;"	v
+file	zsh_aliases	/^				file=$(getfullpath -r . $tmp[1])$/;"	v
+file	zsh_aliases	/^			file=$(getpath $file)\/$name$/;"	v
+file	zsh_aliases	/^			file=$ZSH_LIBS\/$name$/;"	v
+file	zsh_aliases	/^			file=$functions_source[$1]$/;"	v
+file	zsh_aliases	/^			file=$match[1]$/;"	v
+file	zsh_aliases	/^			file=$name$/;"	v
+file	zsh_aliases	/^			file=$tmp[1]$/;"	v
+file	zsh_aliases	/^			file=${cmdtype[2]}$/;"	v
+file	zsh_aliases	/^		file="$(chooser $ZSH_LIBS\/zsh_*(-N) "New zsh library" "Browse full path")" || cancel$/;"	v
+file	zsh_aliases	/^		file=$2$/;"	v
+file	zsh_aliases	/^		file=$arg[-1]$/;"	v
+file	zsh_aliases	/^		file=$tmp[1]$/;"	v
+file	zsh_debug	/^		local file=${BASH_SOURCE[1]} func=${FUNCNAME[1]} line=${BASH_LINENO[0]}$/;"	v
+file	zsh_main	/^					file=$split[1]; line=$split[2]; error=$split[3]; error2=$split[4]$/;"	v
+filename	zsh_progtools	/^	filename=`echo $str | sed 's\/.*\\(\\\/media\\\/sparc\\\/xdata\\\/[^ ]*\\).*$\/\\1\/'`$/;"	v
+files	zsh_file	/^		files=($targets)$/;"	v
+files	zsh_git	/^	files=$(echo "$@" | awk -F' - ' '\/\/ {print $2}')$/;"	v
+files	zsh_progtools	/^	files="$@"$/;"	v
+files	zsh_progtools	/^	files=($(prettier -l "$@"))$/;"	v
+findDev	zsh_device	/^function findDev()$/;"	f
+findSD	zsh_device	/^function findSD()$/;"	f
+find_dupes	zsh_aliases	/^function find_dupes()$/;"	f
+finderror	zsh_progtools	/^function finderror()$/;"	f
+fixtty	zsh_aliases	/^function fixtty()$/;"	f
+fname	zsh_file	/^		local fname=$_inc[2]$/;"	v
+fordir	zsh_file	/^function fordir() #TODO$/;"	f
+fordo	zsh_file	/^function fordo() #TODO$/;"	f
+forvim	zsh_aliases	/^function forvim()$/;"	f
+found	zsh_device	/^		found=()$/;"	v
+fstack	zsh_debug	/^function fstack()$/;"	f
+fstypeof	zsh_device	/^function fstypeof()$/;"	f
+fullcmd	zsh_functions	/^		fullcmd=("$@")$/;"	v
+fullcmd	zsh_functions	/^		fullcmd=(sudo "$@")$/;"	v
+fullpath	zsh_file	/^	fullpath="$dir\/$orig"$/;"	v
+func	zsh_aliases	/^					func=$(inAlias -f $name)$/;"	v
+func	zsh_aliases	/^				func=$name$/;"	v
+gbisect	zsh_git	/^function gbisect()$/;"	f
+gbranch	zsh_git	/^function gbranch() #@TODO$/;"	f
+gchk	zsh_git	/^function gchk()$/;"	f
+gclone	zsh_git	/^function gclone()$/;"	f
+ge	zsh_aliases	/^function ge()$/;"	f
+getPkg	zsh_android	/^function getPkg()$/;"	f
+getbranch	zsh_git	/^function getbranch()$/;"	f
+getext	zsh_file	/^function getext()$/;"	f
+getfilename	zsh_file	/^function getfilename()$/;"	f
+getfilenoext	zsh_file	/^function getfilenoext()$/;"	f
+getfullpath	zsh_file	/^function getfullpath()$/;"	f
+getmime	zsh_main	/^function getmime()$/;"	f
+getpath	zsh_file	/^function getpath()$/;"	f
+gettable	zsh_sql	/^function gettable()$/;"	f
+gfollow	zsh_git	/^function gfollow()$/;"	f
+ggrep	zsh_git	/^function ggrep() #@TODO$/;"	f
+gitgetrepo	zsh_git	/^function gitgetrepo()$/;"	f
+github	zsh_git	/^function github()$/;"	f
+githubAPI	zsh_git	/^function githubAPI()$/;"	f
+glob	zsh_file	/^					glob=("$p"(N\/F))$/;"	v
+glob	zsh_file	/^	local glob=("$1"(N\/F))$/;"	v
+glob	zsh_functions	/^	glob="$dir\/*.$e"$/;"	v
+glob	zsh_main	/^				glob=0; shift$/;"	v
+globo	zsh_network	/^function globo()$/;"	f
+gmerge	zsh_git	/^function gmerge() #@TODO$/;"	f
+google	zsh_network	/^function google()$/;"	f
+gpr	zsh_git	/^function gpr()$/;"	f
+gpush	zsh_git	/^function gpush()$/;"	f
+gremote	zsh_git	/^function gremote()$/;"	f
+group	zsh_functions	/^function group()$/;"	f
+gselect	zsh_git	/^function gselect()$/;"	f
+gtag	zsh_git	/^function gtag() #@TODO$/;"	f
+gunstage	zsh_git	/^function gunstage()$/;"	f
+gvimdiff	zsh_aliases	/^function gvimdiff()$/;"	f
+gx	zsh_functions	/^			gx=1$/;"	v
+hash	zsh_git	/^	hash=${2:-$(gselect -h)}$/;"	v
+hcolor	zsh_functions	/^		hcolor=${hcolor[2]:-head}$/;"	v
+heredoc	zsh_main	/^function heredoc()$/;"	f
+hextochar	zsh_conversion	/^function hextochar()$/;"	f
+hextochar	zsh_conversion2	/^function hextochar()$/;"	f
+hg	zsh_aliases	/^function hg()$/;"	f
+hidrivemount	zsh_aliases	/^function hidrivemount()$/;"	f
+highlight	zsh_functions	/^		highlight=$highlight[2]$/;"	v
+hl2	zsh_functions	/^		hl2=$Ch$highlight$C1$/;"	v
+host	zsh_aliases	/^	local host=$1$/;"	v
+host	zsh_file	/^			host=$match[1]; p=$match[2]$/;"	v
+host	zsh_file	/^		host=''; p=''  #sshArgs$/;"	v
+hostpat	zsh_network	/^	hostpat='[[:alnum:]][-.[:alnum:]]*\\.[[:alpha:]]+'$/;"	v
+htmlget	zsh_network	/^function htmlget()$/;"	f
+i	zsh_aliases	/^			i=$(chooser -f1 $opts) || cancel$/;"	v
+i	zsh_conversion	/^    local i=`printf %3d \\'"$1"`$/;"	v
+i	zsh_conversion2	/^    local i=`printf %3d \\'"$1"`$/;"	v
+i	zsh_device	/^			i=0$/;"	v
+i	zsh_device	/^		i=1$/;"	v
+i	zsh_sql	/^			i=1$/;"	v
+icon	zsh_functions	/^		icon="error"$/;"	v
+icon	zsh_functions	/^		icon="trophy-gold"$/;"	v
+id	zsh_functions	/^		id=$(noext $(getfilename $todo) $e)$/;"	v
+ignore	zsh_kerneltools	/^		ignore="( ${(j. -o .)ignore} ) -prune -o -print"$/;"	v
+ignore	zsh_kerneltools	/^		ignore=('-path .\/'${^ignore})$/;"	v
+imageMount	zsh_device	/^function imageMount()$/;"	f
+imageof	zsh_device	/^function imageof()$/;"	f
+imdb	zsh_network	/^function imdb()$/;"	f
+img	zsh_device	/^	img=$1 ; dir=$2$/;"	v
+imgName	zsh_kerneltools	/^	imgName=u${(C)$(getfilenoext $targetImg)}$/;"	v
+implode	zsh_main	/^function implode()$/;"	f
+in	zsh_functions	/^function in()$/;"	f
+inAlias	zsh_main	/^function inAlias()$/;"	f
+in_array	zsh_main	/^function in_array()$/;"	f
+include	zsh_main	/^function include()$/;"	f
+info	zsh_main	/^			info=ZSH_${match[1]}_INFO$/;"	v
+info	zsh_main	/^	info="ZSH_${(U)name}_INFO"$/;"	v
+init_vars	zsh_progress_bar	/^function init_vars() {$/;"	f
+input	zsh_functions	/^function input()$/;"	f
+inst	zsh_main	/^function inst()$/;"	f
+inttochar	zsh_conversion	/^function inttochar()$/;"	f
+inttochar	zsh_conversion2	/^function inttochar()$/;"	f
+ipfind	zsh_network	/^function ipfind()$/;"	f
+isCurrent	zsh_network	/^					isCurrent=$a[3]$/;"	v
+isDevice	zsh_device	/^function isDevice()$/;"	f
+isDeviceMounted	zsh_device	/^function isDeviceMounted()$/;"	f
+isDir	zsh_file	/^function isDir()$/;"	f
+isDirMounted	zsh_device	/^function isDirMounted()$/;"	f
+isEmptyDir	zsh_file	/^		local isEmptyDir=0$/;"	v
+isEmptyDir	zsh_file	/^function isEmptyDir()$/;"	f
+isLib	zsh_aliases	/^					isLib=1$/;"	v
+isLib	zsh_aliases	/^		isLib=1$/;"	v
+isLib	zsh_aliases	/^	isLib=0$/;"	v
+isLoop	zsh_device	/^function isLoop()$/;"	f
+isSD	zsh_device	/^function isSD()$/;"	f
+isScript	zsh_main	/^function isScript()$/;"	f
+isZshLib	zsh_main	/^function isZshLib()$/;"	f
+isdb	zsh_sql	/^function isdb()$/;"	f
+istable	zsh_sql	/^function istable()$/;"	f
+k	zsh_proc	/^function k()$/;"	f
+kcmd	zsh_functions	/^function kcmd()$/;"	f
+killSent	zsh_proc	/^					killSent=0$/;"	v
+l	zsh_functions	/^	local l=$(( ${#stack[@]} - 1 ))$/;"	v
+labelof	zsh_device	/^function labelof()$/;"	f
+lang	zsh_progtools	/^		lang=$(chooser Javascript PHP Python Shell) || cancel$/;"	v
+lang	zsh_progtools	/^		lang=$1$/;"	v
+lang	zsh_progtools	/^		lang=$lang[2]$/;"	v
+last	zsh_network	/^		last=$ip$/;"	v
+lastarg	zsh_aliases	/^function lastarg()$/;"	f
+lib_set_info	zsh_main	/^function lib_set_info()$/;"	f
+libmonitor	zsh_main	/^function libmonitor()$/;"	f
+limit	zsh_git	/^	local limit=20 endpoint='https:\/\/api.github.com\/graphql' #request response fields$/;"	v
+line	zsh_aliases	/^				line=${tmp:2}$/;"	v
+line	zsh_aliases	/^		line=$(wc -l $file)$/;"	v
+line	zsh_sql	/^			line=$match[3]$/;"	v
+linenum	zsh_aliases	/^			linenum=$tmp[2]$/;"	v
+linenum	zsh_aliases	/^		linenum=${linenum[2]:-2}$/;"	v
+linenum	zsh_aliases	/^		linenum=0$/;"	v
+linenum	zsh_progtools	/^	linenum=`echo $str | sed 's\/.*line \\([0-9]*\\).*$\/\\1\/'`$/;"	v
+lines	zsh_git	/^	lines=("${(@f)$(git log --graph --oneline --all $nlimit $@)}")$/;"	v
+lines	zsh_progress_bar	/^	lines=$(tput lines)$/;"	v
+list	zsh_aliases	/^	list=$(forvim "expand('%:p')")$/;"	v
+list	zsh_aliases	/^	list=${1:-vimlist.txt}$/;"	v
+list	zsh_file	/^				list=($base\/*(-\/omN))$/;"	v
+list	zsh_functions	/^		list=("$@")$/;"	v
+list	zsh_functions	/^	list=()$/;"	v
+listAudio	zsh_idiomus	/^function listAudio()$/;"	f
+listbranch	zsh_git	/^function listbranch()$/;"	f
+loadvim	zsh_aliases	/^function loadvim()$/;"	f
+logs	zsh_aliases	/^function logs()$/;"	f
+loop	zsh_device	/^		loop=$match[3]$/;"	v
+loop	zsh_device	/^function loop()$/;"	f
+loop	zsh_idiomus	/^			loop=0$/;"	v
+loop	zsh_idiomus	/^		loop=0$/;"	v
+loopNum	zsh_device	/^		loopNum=$match[1]$/;"	v
+loopNum	zsh_device	/^		loopNum=${devLoop#\/dev\/loop}$/;"	v
+loopdev	zsh_device	/^		loopdev=$(deviceof "$name")$/;"	v
+loopdev	zsh_device	/^		loopdev=$name$/;"	v
+loopdev	zsh_device	/^		loopdev=\/dev\/loop${name#loop}$/;"	v
+loopof	zsh_device	/^function loopof()$/;"	f
+lpath	zsh_main	/^			lpath="$ZSH_LIBS\/zsh_$name"$/;"	v
+lpath	zsh_main	/^			lpath=$lpath[2]$/;"	v
+lpath	zsh_main	/^		lpath=${1:P}$/;"	v
+lspart	zsh_device	/^function lspart()$/;"	f
+ltrim	zsh_main	/^function ltrim() {$/;"	f
+lvl	zsh_debug	/^	lvl=${1:-$_dbg_def_lvl}$/;"	v
+m	zsh_git	/^		m=(-m "$*")$/;"	v
+m	zsh_sql	/^				m=($split[1,i-1])$/;"	v
+m	zsh_sql	/^		m=()$/;"	v
+match_array	zsh_main	/^function match_array()$/;"	f
+mergeHash	zsh_git	/^	mergeHash=$(git rev-parse MERGE_HEAD)$/;"	v
+mime	zsh_aliases	/^				mime=$(getmime $cpath)$/;"	v
+mime	zsh_kerneltools	/^				mime=$(getmime "$tmp")$/;"	v
+mime	zsh_kerneltools	/^			mime=$(file "$imgfile")$/;"	v
+mime	zsh_kerneltools	/^		mime=$(getmime "$imgfile")$/;"	v
+mime	zsh_main	/^	local mime=$(getmime "$*")$/;"	v
+mime	zsh_main	/^	mime=$(getmime $1)$/;"	v
+mkcd	zsh_aliases	/^function mkcd()$/;"	f
+mkcp	zsh_aliases	/^function mkcp()$/;"	f
+mkscript	zsh_aliases	/^function mkscript()$/;"	f
+mnt	zsh_aliases	/^    local mnt="\/mnt\/webdav.$USER"$/;"	v
+mnt	zsh_device	/^				mnt=$var$/;"	v
+mnt	zsh_device	/^			mnt=$var$/;"	v
+mnt	zsh_device	/^		mnt=$(isDeviceMounted $dev) || continue$/;"	v
+mnt	zsh_device	/^	local mnt="$(mntof $1)" $/;"	v
+mntof	zsh_device	/^function mntof()$/;"	f
+mountSD	zsh_device	/^function mountSD()$/;"	f
+msg	zsh_functions	/^		msg="$mins minutes left to pizza time"$/;"	v
+msg	zsh_main	/^				msg="$@"$/;"	v
+msg	zsh_main	/^				msg="${C[$c]}${@}$C_"$/;"	v
+msg	zsh_main	/^			msg="[38;5;${c}m$@$C_"$/;"	v
+msg	zsh_main	/^		msg="$@"$/;"	v
+msg	zsh_sql	/^			msg=$match[4]$/;"	v
+msg	zsh_sql	/^	local msg='' _v=0 cod state line$/;"	v
+msgFormat	zsh_sql	/^					msgFormat=${msgFormat\/\/${~rx[1]}\/$rx[2]}$/;"	v
+msgFormat	zsh_sql	/^					msgFormat=${msgFormat\/\/${~rx[3]}\/$rx[4]}$/;"	v
+msgFormat	zsh_sql	/^					msgFormat=${msgFormat\/\/(#m)[()]\/'\\'$MATCH}$/;"	v
+msgFormat	zsh_sql	/^					msgFormat='^'${msgFormat\/\/${~rx[5]}\/$rx[6]}$/;"	v
+msgFormat	zsh_sql	/^				msgFormat="Duplicate entry '(.*)' for key '(.*)'"$/;"	v
+msgFormat	zsh_sql	/^				msgFormat="near '(.*)'"$/;"	v
+msgFormat	zsh_sql	/^				msgFormat='^[^(]+\\(`([^`]+)`.`([^`]+)`, CONSTRAINT `([^`]+)` FOREIGN KEY \\(([^)]+)\\) REFERENCES `([^`]+)` \\(([^)]+)\\)'$/;"	v
+mtime	zsh_main	/^	mtime=$(stat -L --printf='%Y' $lpath) || techo -P "%F{9}stat error on %F{11}$lpath%f"$/;"	v
+n	zsh_file	/^					n=0$/;"	v
+n	zsh_file	/^	n=$#$/;"	v
+n	zsh_functions	/^						n=int(n)$/;"	v
+n	zsh_git	/^	n=$#lines$/;"	v
+name	zsh_aliases	/^			name=${name#zsh_*}$/;"	v
+name	zsh_aliases	/^		name=$(getfilename $file)$/;"	v
+name	zsh_aliases	/^		name=$name[2]$/;"	v
+name	zsh_aliases	/^		name='zsh_'${name#zsh_*}$/;"	v
+name	zsh_aliases	/^		name=($name' '${^args})$/;"	v
+name	zsh_device	/^	local name=$1 loopdev$/;"	v
+name	zsh_file	/^		name="$prefix$base$(date +"%Y%m%d-%H%m%S")$suffix"$/;"	v
+name	zsh_file	/^	name="$prefix$base$suffix"$/;"	v
+name	zsh_file	/^	name=${2:-$orig}$/;"	v
+name	zsh_functions	/^	name=$1$/;"	v
+name	zsh_git	/^				local name=()$/;"	v
+name	zsh_git	/^			name=$(chooser -s' ' -f1 $repos "Open this search in github") || cancel$/;"	v
+name	zsh_kerneltools	/^	name=${$(getfilename "${(L)imgfile%.img}")#u}$/;"	v
+name	zsh_main	/^		name="${1#zsh_}"$/;"	v
+name	zsh_main	/^		name=${${1:t}#zsh_}$/;"	v
+name	zsh_main	/^	name=$1$/;"	v
+net	zsh_network	/^	net=192.168.0$/;"	v
+noext	zsh_file	/^function noext()$/;"	f
+nothing	zsh_file	/^					nothing=0$/;"	v
+nothing	zsh_file	/^				nothing=0$/;"	v
+nothing	zsh_file	/^	local nothing=1 permFlags ret host p$/;"	v
+ofs	zsh_functions	/^			ofs=${ofs:-;}$/;"	v
+ofs	zsh_functions	/^		ofs=$ofs[2]$/;"	v
+okcodes	zsh_functions	/^			okcodes=(0)$/;"	v
+okcodes	zsh_functions	/^		okcodes=($=okcodes[2]) #@TODO also split on comma$/;"	v
+opt	zsh_aliases	/^				opt=$(chooser -f1 "alias $name" "function $func()") || cancel$/;"	v
+options	zsh_aliases	/^						options=(Rename 'Use it' Cancel)$/;"	v
+options	zsh_aliases	/^				options=(Rename Append "Edit $func()" Cancel)$/;"	v
+opts	zsh_file	/^		opts=($=opts)$/;"	v
+opts	zsh_file	/^		opts=('-v '$^_vars)$/;"	v
+opts	zsh_functions	/^		local opts=($/;"	v
+opts	zsh_functions	/^function opts()$/;"	f
+opts	zsh_git	/^		opts=()$/;"	v
+opts	zsh_network	/^	opts=(-q --show-errors 0 --show-warnings false --wrap 0)$/;"	v
+opts	zsh_sql	/^		opts=(-B $_raw)  # $silent$/;"	v
+orig	zsh_file	/^	orig="$(getfilename "$1")"$/;"	v
+out	zsh_dns	/^	out=($(nslookup $1 $nserver | awk '\/Address: [0-9.]+\/{print $2}')) || return$/;"	v
+out	zsh_main	/^		out=${(@Ppj\/$_sep\/)1}$/;"	v
+out	zsh_main	/^		out=${(@pj\/$_sep\/)_list}$/;"	v
+out	zsh_network	/^	out=()$/;"	v
+output	zsh_aliases	/^    output=`pydf`; devs=`echo $output | cut -f1 -d `; labels=`sudo lsblk --noheadings -o LABEL $devs|stripcolors`; for line in $output; do i=1; echo "${labels[$i]} $line"; i++; done$/;"	v
+p	zsh_functions	/^	p=${p[2]:-Input text}$/;"	v
+p	zsh_proc	/^			p=$(pidof -s $arg) || { techo -c warn "$arg not found"; continue }$/;"	v
+p	zsh_proc	/^			p=$arg$/;"	v
+p	zsh_proc	/^function p()$/;"	f
+parseErrors	zsh_main	/^function parseErrors()$/;"	f
+parseSqlErrors	zsh_sql	/^function parseSqlErrors()$/;"	f
+parts	zsh_device	/^		parts=("${(f)$(deviceInfo -t part --short $devs)}")$/;"	v
+parts	zsh_device	/^	parts=($(grep 'MOUNTPOINT=".\\+"' <(deviceInfo -o NAME,MOUNTPOINT -t part $dev) | cut -d '"' -f 4))$/;"	v
+pass	zsh_sql	/^			pass=${pass[2]:-$sqlPass[$user]}$/;"	v
+pat	zsh_aliases	/^		pat="(function +)?$1\\(\\)"$/;"	v
+pat	zsh_aliases	/^		pat="alias +$1=['\\"].*['\\"]"$/;"	v
+pathpat	zsh_network	/^	pathpat='~?[-_.\/[:alnum:]]+'$/;"	v
+pattern	zsh_git	/^	pattern=$(echo "$@" | awk -F' - ' '\/\/ {print $1}')$/;"	v
+pattern	zsh_progtools	/^		pattern="\\<$pattern\\>"$/;"	v
+pbar	zsh_progress_bar	/^function pbar()$/;"	f
+percentage	zsh_progress_bar	/^	local percentage=$1 color cols$/;"	v
+percentage	zsh_progress_bar	/^	percentage=$1$/;"	v
+permFlags	zsh_file	/^				permFlags='-p' # og'$/;"	v
+permFlags	zsh_file	/^			permFlags=''$/;"	v
+pid	zsh_proc	/^		pid=$(pidof $prog)$/;"	v
+pid	zsh_proc	/^		pid=(-p $1)$/;"	v
+pid	zsh_proc	/^	pid=$1$/;"	v
+pid2	zsh_proc	/^		pid2=$(pidof $prog)$/;"	v
+pids	zsh_main	/^		pids=($(pidof inotifywait 2>\/dev\/null))$/;"	v
+pids	zsh_proc	/^	local pids=($@)$/;"	v
+pizza	zsh_functions	/^function pizza()$/;"	f
+pkg	zsh_functions	/^		pkg=$tmp[1]; cmd=$tmp[6]; packager=$tmp[9]$/;"	v
+pkg	zsh_functions	/^		pkg=$tmp[7]; cmd=$tmp[3]; packager=$tmp[5]$/;"	v
+pkgList	zsh_functions	/^		pkgList=($(apt-file find "\/$cmd$" |\\$/;"	v
+pkgList	zsh_functions	/^		pkgList=($/;"	v
+pos	zsh_aliases	/^				pos="+call cursor($linenum,$tmp[3])"$/;"	v
+pos	zsh_aliases	/^				pos=+$linenum$/;"	v
+prefix	zsh_aliases	/^		prefix='command'$/;"	v
+prefix	zsh_aliases	/^		prefix='sudo'$/;"	v
+pretty	zsh_progtools	/^function pretty()$/;"	f
+prettyF	zsh_progtools	/^		prettyF=$tmpBasePath\/$F.pretty$/;"	v
+print_bar_text	zsh_progress_bar	/^function print_bar_text() {$/;"	f
+printf_new	zsh_progress_bar	/^function printf_new() {$/;"	f
+procmon	zsh_proc	/^function procmon()$/;"	f
+profile	zsh_idiomus	/^	profile=$4$/;"	v
+prog	zsh_file	/^	prog=''$/;"	v
+prog	zsh_proc	/^	local prog=$1 timeout=5$/;"	v
+progress_bar	zsh_progress_bar	/^	progress_bar=$($/;"	v
+ptablecp	zsh_device	/^function ptablecp()$/;"	f
+querypat	zsh_network	/^	querypat="$argpat(&$argpat)*"$/;"	v
+recv	zsh_aliases	/^function recv()$/;"	f
+refactor	zsh_functions	/^function refactor()$/;"	f
+regex	zsh_functions	/^function regex {$/;"	f
+reload	zsh_main	/^function reload()$/;"	f
+remote	zsh_git	/^		remote=(${1:-$VCS_STATUS_REMOTE_NAME})$/;"	v
+remote	zsh_git	/^	remote=($(git remote))$/;"	v
+rename	zsh_file	/^function rename()$/;"	f
+replace	zsh_file	/^function replace()$/;"	f
+repo	zsh_git	/^		repo=$(git remote get-url $remote[1] 2>\/dev\/null) || {$/;"	v
+repo	zsh_git	/^	repo=$1 ; dir=$2$/;"	v
+request	zsh_git	/^	request=$(cat) <<-GQL$/;"	v
+request	zsh_git	/^	request=${request\/\/$'\\n'\/}$/;"	v
+required	zsh_main	/^	required=$#required$/;"	v
+response	zsh_git	/^	response=$(curl -sS -H "Authorization: bearer $GITHUB_API_TOKEN" -X POST -d $request $endpoint)$/;"	v
+result	zsh_aliases	/^		result=$var[$i]$/;"	v
+result	zsh_file	/^					result=($base\/(#i)*${box}*)$/;"	v
+ret	_comp/_in	/^    ret="$?"$/;"	v
+ret	zsh_aliases	/^						ret=0$/;"	v
+ret	zsh_aliases	/^				ret=0$/;"	v
+ret	zsh_debug	/^		ret=$?$/;"	v
+ret	zsh_device	/^		ret=$?$/;"	v
+ret	zsh_device	/^	ret=$?$/;"	v
+ret	zsh_device	/^	ret=${(P)cod}$/;"	v
+ret	zsh_file	/^			ret=($(ssh $host \\$/;"	v
+ret	zsh_functions	/^				ret=$?$/;"	v
+ret	zsh_functions	/^			ret=$?$/;"	v
+ret	zsh_functions	/^			ret=$CAUGHT$/;"	v
+ret	zsh_functions	/^			ret=$data[1]$/;"	v
+ret	zsh_functions	/^		ret=$?$/;"	v
+ret	zsh_functions	/^	local ret=$? verbose run$/;"	v
+ret	zsh_functions	/^	ret=$?$/;"	v
+ret	zsh_git	/^	ret=$?$/;"	v
+ret	zsh_main	/^			ret=$?$/;"	v
+ret	zsh_main	/^			ret=0$/;"	v
+ret	zsh_main	/^	ret=($(which -w $all $p $name))$/;"	v
+ret	zsh_sql	/^				ret=1$/;"	v
+ret	zsh_sql	/^				ret=2$/;"	v
+ret	zsh_sql	/^			ret=$?$/;"	v
+ret	zsh_sql	/^		ret=$?$/;"	v
+reviewId	zsh_idiomus	/^	reviewId=$1$/;"	v
+rsArgs	zsh_file	/^	rsArgs=( -hlDr )$/;"	v
+rsArgs	zsh_file	/^	rsArgs=(${@:--u})$/;"	v
+rtrim	zsh_main	/^function rtrim() {$/;"	f
+run	zsh_functions	/^function run()$/;"	f
+run_begin	zsh_functions	/^function run_begin()$/;"	f
+run_end	zsh_functions	/^function run_end()$/;"	f
+runas	zsh_non_interactive	/^function runas()$/;"	f
+runaswww	zsh_non_interactive	/^function runaswww()$/;"	f
+rx	zsh_sql	/^					rx=($/;"	v
+s	zsh_device	/^		s=short -short=s t:=type -type:=t o:=columns u=mounted$/;"	v
+s	zsh_file	/^	s=$1 ; r=$2 ; shift 2$/;"	v
+s	zsh_functions	/^			s=sudo S=trysudo n=dryrun I:=cmdinst -cd:=workdir \\$/;"	v
+s	zsh_network	/^		s=getscheme h=gethost u=getuser p=getpath q=getquery a=getall$/;"	v
+s1	zsh_device	/^	s1=$(sizeToKb $1) ;  s2=$(sizeToKb $2)$/;"	v
+savevim	zsh_aliases	/^function savevim()$/;"	f
+schemes	zsh_network	/^	local schemes=(ssh git https http ftp ftps file)$/;"	v
+script	zsh_debug	/^					script=$_cmd$/;"	v
+sd	zsh_device	/^function sd()$/;"	f
+sdDev	zsh_device	/^		sdDev=$var[1]$/;"	v
+sdDev	zsh_device	/^	sdDev=$(findSD -ld) || return$/;"	v
+sdDev	zsh_device	/^	sdDev=$SDDEV$/;"	v
+sdd	zsh_device	/^function sdd()$/;"	f
+search	zsh_file	/^				search=$box$/;"	v
+select	zsh_proc	/^	select=($user $pid $ppid $tty $cmd)$/;"	v
+selectors	zsh_functions	/^	selectors=(${${(@uM)@#-[bfsR]}#-}) # keep options order$/;"	v
+send	zsh_aliases	/^function send()$/;"	f
+sep	zsh_functions	/^		sep=${sep[2]:- }$/;"	v
+sequence	zsh_idiomus	/^	sequence=$3$/;"	v
+serial	zsh_device	/^	serial=$(sudo dmidecode -s system-serial-number)$/;"	v
+setup_scroll_area	zsh_progress_bar	/^function setup_scroll_area() {$/;"	f
+show	zsh_file	/^function show() #TODO$/;"	f
+shpydf	zsh_aliases	/^function shpydf()$/;"	f
+size	zsh_device	/^	local size=$2$/;"	v
+sizeCompare	zsh_device	/^function sizeCompare()$/;"	f
+sizeToKb	zsh_device	/^function sizeToKb()$/;"	f
+sndplay	zsh_functions	/^function sndplay()$/;"	f
+sourceDir	zsh_kerneltools	/^	sourceDir=$(getpath "$imgfile")$/;"	v
+sourceDir	zsh_kerneltools	/^	sourceDir=$1 ; [[ -z $sourceDir || $sourceDir = . ]] && sourceDir=$PWD$/;"	v
+split	zsh_main	/^					split=(${(Q)${(z)tmp}})$/;"	v
+split	zsh_sql	/^			split=(${(Q)${(z)tmp}})$/;"	v
+sql	zsh_sql	/^	sql="$*"$/;"	v
+sql	zsh_sql	/^function sql()$/;"	f
+sqlError	zsh_sql	/^function sqlError()$/;"	f
+sqlFetch	zsh_sql	/^function sqlFetch()$/;"	f
+sqlQuote	zsh_sql	/^function sqlQuote()$/;"	f
+sqlState	zsh_sql	/^			sqlState=$match[2]$/;"	v
+sqldbdump	zsh_sql	/^function sqldbdump()$/;"	f
+src	zsh_device	/^	src=$1$/;"	v
+src	zsh_file	/^		src=($files)$/;"	v
+stat	zsh_device	/^	stat=SOMEMOUNTS$/;"	v
+str	zsh_functions	/^			str=$(gxmessage $args -title "$title" -entrytext "$str" "$p")$/;"	v
+str	zsh_functions	/^		str="$@"$/;"	v
+str	zsh_functions	/^		str=${@:-${(P)_var}}$/;"	v
+str	zsh_progtools	/^	str=`echo $errline| sed -e ':a' -e 'N' -e '$!ba' -e 's\/\\n\/ \/g'`$/;"	v
+stripcolors	zsh_aliases	/^function stripcolors()$/;"	f
+sudo	zsh_file	/^	local sudo=""$/;"	v
+suffix	zsh_file	/^			suffix=.${base:e}$/;"	v
+syncDirs	zsh_file	/^function syncDirs()$/;"	f
+t	zsh_main	/^		t=$(date '+%s.%3N')$/;"	v
+tablelist	zsh_sql	/^function tablelist()$/;"	f
+tableshow	zsh_sql	/^function tableshow()$/;"	f
+tag	zsh_git	/^	tag=$()$/;"	v
+tags	zsh_progtools	/^function tags()$/;"	f
+targetDir	zsh_kerneltools	/^	targetDir=$(getpath $targetImg)$/;"	v
+targetDir	zsh_kerneltools	/^    targetDir=${2:-$PWD\/$name}$/;"	v
+targetImg	zsh_kerneltools	/^	targetImg=$(getfullpath "${2:-$sourceDir}.img")$/;"	v
+targets	zsh_file	/^		targets=($src)$/;"	v
+tblname	zsh_sql	/^	tblname=$(gettable $1) || return$/;"	v
+techo	zsh_main	/^function techo()$/;"	f
+test_f	zsh_debug	/^	test_f="_test_$f"$/;"	v
+throw	zsh_main	/^function throw()$/;"	f
+title	zsh_functions	/^		title="Error"$/;"	v
+title	zsh_functions	/^		title="Success"$/;"	v
+title	zsh_functions	/^	title=${title[2]:-Input text}$/;"	v
+tmp	zsh_aliases	/^						tmp='anonymous'$/;"	v
+tmp	zsh_aliases	/^						tmp=zsh_$match[1]$/;"	v
+tmp	zsh_aliases	/^				local tmp=$functions_source[$func] options$/;"	v
+tmp	zsh_aliases	/^		local tmp=$(which $1)$/;"	v
+tmp	zsh_android	/^tmp=($ANDROID_HOME\/build-tools\/*(\/On[1]))$/;"	v
+tmp	zsh_debug	/^					local tmp=$(inAlias -f $_cmd) || continue$/;"	v
+tmp	zsh_device	/^				tmp=$(run udisksctl mount -b $dev 2>&1)$/;"	v
+tmp	zsh_device	/^			tmp=$(udisksctl info -b $var | awk "match(\\$0, \/'dir': <b'([^']+)'\/, a) {print a[1]}")$/;"	v
+tmp	zsh_functions	/^	tmp=()$/;"	v
+tmp	zsh_git	/^				tmp=()$/;"	v
+tmp	zsh_kerneltools	/^				tmp="$sourceDir\/$name.img.gz"$/;"	v
+tmp	zsh_kerneltools	/^				tmp=$/;"	v
+tmp	zsh_kerneltools	/^		tmp="$imgfile"$/;"	v
+tmp	zsh_main	/^						tmp=($(inAlias $needsFunc $m)) || return 1$/;"	v
+tmp	zsh_network	/^			tmp=$a[2,-1]$/;"	v
+tmp	zsh_network	/^	tmp=($(curl -Ss -w "\\n¬ %{http_code}" -L $url | awkWrapper -e expr))$/;"	v
+tmpBasePath	zsh_progtools	/^		tmpBasePath=$TMP\/$baseName$/;"	v
+toBytes	zsh_conversion	/^function toBytes()$/;"	f
+toBytes	zsh_conversion2	/^function toBytes()$/;"	f
+tobin	zsh_conversion	/^function tobin()$/;"	f
+todo	zsh_functions	/^function todo()$/;"	f
+todos	zsh_functions	/^	todos=($~glob(-N))$/;"	v
+todosql__	zsh_sql	/^function todosql__()$/;"	f
+tohex	zsh_conversion	/^function tohex()$/;"	f
+tpath	zsh_main	/^			tpath=$(which -p $name)$/;"	v
+tpath	zsh_main	/^		tpath=$(getfullpath $name)$/;"	v
+trap_on_interrupt	zsh_progress_bar	/^function trap_on_interrupt() {$/;"	f
+trim	zsh_main	/^function trim()$/;"	f
+trysudo	zsh_functions	/^		trysudo=$/;"	v
+type	zsh_aliases	/^			type=${cmdtype[1]}$/;"	v
+type	zsh_main	/^			type='command'$/;"	v
+type	zsh_main	/^			type='script'$/;"	v
+type	zsh_main	/^		type=$ret[i]$/;"	v
+typeOf	zsh_main	/^function typeOf()$/;"	f
+uncompressed	zsh_kerneltools	/^				uncompressed="$imgfile" # already a cpio file$/;"	v
+uniqfile	zsh_file	/^function uniqfile()$/;"	f
+unloop	zsh_device	/^function unloop()$/;"	f
+unmerged	zsh_git	/^				unmerged=($(git ls-files --unmerged))$/;"	v
+url	zsh_git	/^		url="https:\/\/github.com\/$*"$/;"	v
+url	zsh_network	/^	url=$1$/;"	v
+url	zsh_network	/^	url=$url$arg$/;"	v
+url	zsh_network	/^function url()$/;"	f
+urlfollow	zsh_network	/^function urlfollow() {$/;"	f
+urlinfo	zsh_network	/^function urlinfo()$/;"	f
+usage	zsh_functions	/^	function usage() {$/;"	f
+usedb	zsh_sql	/^function usedb()$/;"	f
+user	zsh_network	/^	local user=${1:-debian} net$/;"	v
+user	zsh_non_interactive	/^    user=$1$/;"	v
+user	zsh_sql	/^			user=${user[2]:-$sqlUser[root]}$/;"	v
+user	zsh_sql	/^			user=${user[2]:-${sqlUser[$db]:-$root}}$/;"	v
+userpat	zsh_network	/^	userpat='[[:alnum:]]+'$/;"	v
+v	zsh_aliases	/^function v()$/;"	f
+v	zsh_file	/^					v=\\$#glob$/;"	v
+v	zsh_progress_bar	/^	v=$(printf "%-${num}s" "$str")$/;"	v
+val	zsh_functions	/^		val=${arr[$key]}$/;"	v
+var	zsh_aliases	/^		var=("${(@f)$(egrep -rHn --exclude tags "^([^#]* )?$pat" $ZSH_LIBS $fpath)}")$/;"	v
+var	zsh_device	/^					var=$(egrep -v '^(lsof|sudo|grep) ' <(sudo lsof -f -- $mnt))$/;"	v
+var	zsh_device	/^			var=$(egrep -v '^(lsof|sudo|grep) ' <(sudo lsof $mnt))$/;"	v
+var	zsh_device	/^			var=$(imageof $var)$/;"	v
+var	zsh_device	/^			var=$/;"	v
+var	zsh_device	/^			var=(${=$(chooser $found)})$/;"	v
+var	zsh_device	/^			var=(${=found})$/;"	v
+var	zsh_device	/^		var=$(isDevice $dev)$/;"	v
+var	zsh_device	/^		var=$(isDeviceMounted "$dev" "$mnt")$/;"	v
+var	zsh_device	/^		var=$(isDirMounted $mnt $dev)$/;"	v
+var	zsh_device	/^		var=$(run -s -p "Unmounting $dev ($mnt)" udisksctl unmount -b $dev 2>&1) && continue$/;"	v
+var	zsh_device	/^		var=$(run -s umount $dev 2>&1)$/;"	v
+var	zsh_file	/^			var=$dir1$/;"	v
+var	zsh_file	/^			var=$dir2$/;"	v
+var	zsh_sql	/^	local var=$1$N$/;"	v
+vars	zsh_network	/^	vars=(today=$(date '+%Y%m%d') yesterday=$(date -d yesterday '+%Y%m%d') now=$(date '+%s'))$/;"	v
+vartype	zsh_main	/^function vartype() {$/;"	f
+verbose	zsh_file	/^		verbose=(-v 0)$/;"	v
+verbose	zsh_functions	/^	verbose=${verbose[2]:-6}$/;"	v
+verbose	zsh_main	/^	verbose=${verbose[2]:-2}$/;"	v
+version	zsh_idiomus	/^	version=$2$/;"	v
+versionId	zsh_idiomus	/^	versionId=$5 $/;"	v
+vflash	zsh_functions	/^function vflash()$/;"	f
+vim	zsh_aliases	/^		vim=gvim$/;"	v
+vim	zsh_aliases	/^		vim=vim$/;"	v
+vimcmd	zsh_aliases	/^function vimcmd()$/;"	f
+vnc	zsh_network	/^function vnc()$/;"	f
+vreplace	zsh_progtools	/^function vreplace()$/;"	f
+vw	zsh_aliases	/^function vw()$/;"	f
+waitOnPids	zsh_proc	/^function waitOnPids()$/;"	f
+waitPid	zsh_proc	/^function waitPid()$/;"	f
+workdir	zsh_functions	/^			workdir=$workdir[2]$/;"	v
+zindent	zsh_main	/^function zindent()$/;"	f
+zshLibReadHeader	zsh_main	/^function zshLibReadHeader()$/;"	f

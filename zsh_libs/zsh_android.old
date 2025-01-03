@@ -1,0 +1,174 @@
+VERSION=1.0.1
+#lazyload:getpkg,isAndroidSDK,getPkg,vscode,androidenv,checkdbs
+
+phonebrand='2717' # phonebrand
+integer ret
+local dir dirs location
+
+include -rq file
+include -rq functions
+set -x
+
+location=$HOME/androidSDK # will be the sdk dir or a symlink to it
+ANDROID_SDK_ROOT=$(getfullpath $location)
+
+function isAndroidSDK()
+{
+	local desc
+	[[ -n $1 && -d $1/tools && -f $1/tools/source.properties ]] || return 1
+	desc="$(egrep '^Pkg.Desc' $1/tools/source.properties)"
+	[[ $desc == 'Pkg.Desc=Android SDK Tools' ]]
+}
+
+if ! isAndroidSDK $ANDROID_SDK_ROOT; then
+	ANDROID_SDK_ROOT=
+	dirs=($(run -v6 find $HOME -maxdepth 2 -type d -iname android\* -and -not -iname androidSDK))
+	for dir in $dirs; do
+		if isAndroidSDK $dir; then
+			ANDROID_SDK_ROOT=$dir
+			break
+		elif isAndroidSDK $dir/Sdk; then
+			ANDROID_SDK_ROOT=$dir/Sdk
+			break
+		fi
+	done
+
+	[[ -z $ANDROID_SDK_ROOT && ! -o interactive ]] && abort 127 'Android SDK not found'
+	#TODO check is link or not if == ~/androidSDK
+	#[[ -L $ANDROID_SDK_ROOT
+fi
+
+while ! isAndroidSDK $ANDROID_SDK_ROOT; do
+	#chooser -p 'Android SDK not found.' 'Copy from external drive' Download
+	#list=($HOME /usr/lib/android-sdk )
+
+	if [[ -n $ANDROID_SDK_ROOT ]]; then
+		techo -c warn "'$ANDROID_SDK_ROOT' does not look like an Android SDK folder. It should contain the subfolder $C[lred]\"tools\""
+	fi
+
+	[[ -o interactive ]] || abort 127 'Android SDK not found'
+	chooser -v ANDROID_SDK_ROOT --dir || abort $? 'Android SDK not found'
+done
+
+if [[ ! -d $location ]]; then
+	[[ -h $location ]] && rm -f $location
+	ln -s $ANDROID_SDK_ROOT $location
+fi
+
+export ANDROID_SDK_ROOT
+export ANDROID_HOME=$ANDROID_SDK_ROOT
+export ANDROID_PLATFORM_TOOLS=$ANDROID_SDK_ROOT/platform-tools
+path+=($ANDROID_HOME/emulator $ANDROID_HOME/tools $ANDROID_HOME/tools/bin $ANDROID_PLATFORM_TOOLS)
+
+techo -c head ANDROID_HOME$C_="$C[warn]'$ANDROID_HOME'$C_"
+
+() {
+# TODO: get from lsusb
+	local udevScript="$HOME/bin/udevrun.sh"
+	local rulesFile='/etc/udev/rules.d/70-myudev.rules'
+	local androidRulesFile='/lib/udev/rules.d/51-android.rules'
+	local needsReloading
+grep -q "ATTR{idVendor}==\"$phonebrand\"" $ || echo SUBSYSTEM=="usb", ATTR{idVendor}=="$phonebrand", MODE="0666", GROUP="plugdev" | sudo tee $androidRulesFile
+sudo udevadm control --reload-rules
+
+	local rule="ENV{adb_user}==\"yes\", RUN==\"/bin/su $USER --command='$udevScript'\""
+	set +x
+return # TODO
+	if [[ ! -f  $androidRulesFile ]]; then
+		local pkg='android-sdk-platform-tools-common'
+		run apt install $pkg && needsReloading=1 || {
+			(($CAUGHT==127)) && { # pkg does not exist
+				techo -c warn "Maybe $pkg does not exist anymore. The file looked for was $androidRulesFile"
+			}
+		}
+	fi
+	integer opt
+	if [[ ! -f $rulesFile ]]; then
+		opt=1
+	elif [[ "$(cat $rulesFile)" != "$rule" ]]; then
+		local key
+		techo -c warn "File $rulesFile exists but is different from maintainer version."
+		diff -u $rulesFile <(cat <<<$rule)
+		set -x
+		if chooser -v key -b1 --use-keys 'M' 'Maintainer version' 'K' 'Keep current' 'E' 'Edit'; then
+			echo chosen=$key
+			case $key in
+				M) opt=1 ;;
+				E)
+					gvimdiff -f $rulesFile <(echo '# Maintainer file';cat <<<$rule)
+					;;
+				*) ;;
+			esac
+		fi
+	fi
+
+	if ((opt==1)); then
+		echo -E $rule | sudo tee $rulesFile && needsReloading=1 || {
+			techo "Error writing udev rules to $rulesFile"
+		}
+	fi
+
+	((needsReloading)) && {
+		techo "New android udev rules was just installed. Reloading udev..."
+		sudo udevadm control --reload
+		#@TODO: check
+	}
+	set +x
+}
+ANDROID_BUILD_TOOLS=($ANDROID_HOME/build-tools/*(/On[1]))
+export ANDROID_BUILD_TOOLS
+if [[ -d $ANDROID_BUILD_TOOLS ]]; then
+	alias aapt=$ANDROID_BUILD_TOOLS/aapt
+	techo -c head ANDROID_BUILD_TOOLS$C_="$C[warn]'$ANDROID_BUILD_TOOLS'$C_"
+else
+	techo -c warn 'Build tools dir not found'
+fi
+
+#alias gcloud='source $HOME/google-cloud-sdk/completion.zsh.inc; path+=($HOME/google-cloud-sdk/bin); unalias gcloud'
+
+# Get package name from apk file
+function getPkg()
+{
+    #chkCmdInst aapt
+    aapt dump badging $1 | grep 'package: name' | cut -f2 -d"'"
+}
+
+function androidenv()
+{
+	local var vars=()
+	for var in ANDROID_SDK_ROOT ANDROID_HOME ANDROID_PLATFORM_TOOLS; do
+		var+=($var="'${(P)var}'")
+	done
+
+	echo $var
+	echo "export PATH=$PATH"
+
+}
+
+# Added 2019-06-10 17:59
+function checkdbs()
+{
+	for db in $(s find $1 -name \*.db); do
+		run -Esp "check DB $db" sqlite3 $db 'pragma integrity_check'
+	done
+}
+
+detect()
+{
+	# plug your device
+	# KERNEL[5715.855692] add      /devices/pci0000:00/0000:00:1d.0/usb2/2-1/2-1.2 (usb)
+#ACTION=add
+#BUSNUM=002
+#DEVNAME=/dev/bus/usb/002/008
+#DEVNUM=008
+#DEVPATH=/devices/pci0000:00/0000:00:1d.0/usb2/2-1/2-1.2
+#DEVTYPE=usb_device
+#MAJOR=189
+#MINOR=135
+#PRODUCT=2717/ff08/414
+#SEQNUM=3050
+#SUBSYSTEM=usb
+	udevadm monitor --kernel --property --subsystem-match=usb | grep 'ACTION=add'
+}
+# dmesg| awkWrapper '/idVendor=(....), idProduct=(....)/'
+#TODO adb unauthorized -> confirm on the cellphone

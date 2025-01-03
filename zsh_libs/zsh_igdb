@@ -1,0 +1,145 @@
+VERSION=1.0.0
+#lazyload=
+
+[[ -v comp ]] || typeset -ga comp
+
+API_DIR='/home/sparc/repos/tutsapi'
+IGDB_clientId=$(egrep "IGDB_CLIENT_ID = '[a-z0-9]+'" $API_DIR/igdb.config.php | explode --stdin "'" 2)
+IGDB_token=$(egrep "IGDB_TOKEN = '[a-z0-9]+'" $API_DIR/igdb.token.php | explode --stdin "'" 2)
+
+IGDB_HEADERS=(
+	-H "Client-ID: $IGDB_clientId"
+	-H "Authorization: Bearer $IGDB_token"
+	-H 'Accept: application/json'
+)
+MYIP=$(wget -qO- http://ipecho.net/plain)
+# Added 2021-04-15 17:43
+function igdb()
+{
+	local _var limit offset _opts endpoint fields filters args verbose=0
+    zparseopts -D -K -A _opts - v:=_var l: o: 'c' 'V'
+
+	[[ -n $_var[2] ]] && _var=$_var[2]
+
+	(($+_opts[-V])) && verbose=1
+
+	limit=50
+	(($+_opts[-l])) && limit=$_opts[-l]
+	limit="limit $limit;"
+
+	(($+_opts[-o])) && offset="offset $_opts[-o];"
+
+	(($#)) || abort 1 'no endpoint given'
+	endpoint=$1; shift
+	(($+_opts[-c])) && endpoint+='/count'
+	(($#)) && {
+		(($#1)) && fields="fields $1;"
+		shift
+	}
+	(($#)) && {
+		filters="$@"
+		[[ $filters[-1] == ';' ]] || filters+=';'
+	}
+
+	args=($IGDB_HEADERS -d "$fields $filters $limit $offset" 'https://api.igdb.com/v4/'$endpoint)
+
+	(($+opts[-V])) && techo curl $args
+	if (($+opts[-v])); then
+		tmp=$(curl $args)
+		typeset -g "$opts[-v]=$tmp"
+	else
+		curl $args
+	fi
+}
+
+IGDB_image_baseurl='https://images.igdb.com/igdb/image/upload'
+# cover_small		90 x 128 	Fit
+# screenshot_med 	569 x 320 	Lfill, Center gravity
+# cover_big			264 x 374 	Fit
+# logo_med			284 x 160 	Fit
+# screenshot_big 	889 x 500 	Lfill, Center gravity
+# screenshot_huge 	1280 x 720 	Lfill, Center gravity
+# thumb				90 x 90 	Thumb, Center gravity
+# micro				35 x 35 	Thumb, Center gravity
+# 720p				1280 x 720	Fit, Center gravity
+# 1080p				1920 x 1080	Fit, Center gravity
+function igdb_image()
+{
+	local type types w h
+	types=(cover_small screenshot_med cover_big logo_med screenshot_big screenshot_huge thumb micro 720p 1080p)
+	w=(90 569 264 284 889 1280 90 35 1280 1920)
+	h=(128 320 374 160 500 720 90 35 720 1080)
+
+	echo $IGDB_image_baseurl/t_$type/$1.jpg
+}
+
+# starts at 1
+IGDB__website_category=(official wikia wikipedia facebook twitter  twitch instagram youtube  iphone ipad android  steam reddit itch epicgames gog discord)
+function IGDB_website_category() { return $IGDB__website_category[$1] }
+
+# starts at 0
+IGDB__game_category=(main_game dlc_addon expansion bundle standalone_expansion mod episode season remake remaster expanded_game port fork)
+function IGDB_game_category() { return $IGDB__game_category[$1+1] }
+
+# starts at 1
+IGDB__platform_category=(console arcade platform operating_system portable_console computer)
+function IGDB_platform_category() { return $IGDB__platform_category[$1] }
+
+function slug() {
+	if (($1)) then
+		slug=$(sql -d tuts --nocolumns "select slug from element where element_id=$1")
+	else
+		slug=$1
+	fi
+	op https://www.igdb.com/games/$slug
+}
+
+function webhooks() {
+	local opts args
+    zparseopts -D -K -A opts - v:
+
+	args=($IGDB_HEADERS 'https://api.igdb.com/v4/webhooks')
+
+	if (($+opts[-v])); then
+		tmp=$(curl $args)
+		typeset -g "$opts[-v]=$tmp"
+	else
+		curl $args
+	fi
+	echo "MYIP: $MYIP"
+}
+
+function webhook_delete() {
+	local opts args
+    zparseopts -D -K -A opts - v:
+
+	(($#)) || abort 2 'Missing webhookId'
+	args=($IGDB_HEADERS -X DELETE 'https://api.igdb.com/v4/webhooks/'$1)
+
+	if (($+opts[-v])); then
+		tmp=$(curl $args)
+		typeset -g "$opts[-v]=$tmp"
+	else
+		curl $args
+	fi
+}
+
+function webhook() {
+	local endpoint method secret='wh!7866macaco' opts args url
+    zparseopts -D -K -A opts - v: 'V'
+
+	endpoint=$1/webhooks
+	url="http://$MYIP:5000/v1/$2/webhook"
+	chooser -v method ${3:+-D$3} create delete update
+	[[ $method == 'delete' ]] && url+='/delete'
+
+	args=($IGDB_HEADERS -H "Content-Type: application/x-www-form-urlencoded" -d "url=$url&method=$method&secret=$secret" 'https://api.igdb.com/v4/'$endpoint)
+
+	(($+opts[-V])) && techo curl $args
+	if (($+opts[-v])); then
+		tmp=$(curl $args)
+		typeset -g "$opts[-v]=$tmp"
+	else
+		curl $args
+	fi
+}
