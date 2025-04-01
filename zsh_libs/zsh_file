@@ -564,7 +564,16 @@ function box()
 				fi
 				[[ -d .git ]] && gstatus &
 				[[ -d android ]] && include android
+				boot_time=$(awk '/btime/ {print $2}' /proc/stat)
+
+				current_time=$(date +%s)
+				time_diff=$((current_time - boot_time))
+				if [[ $time_diff -le 300 ]]; then
+					code .
+					return 0
+				fi
 				todo -d . #@TODO mv to cd hook
+				confirm 'Open Code'	&& cod .
 				return 0
 			;;
 			start|run)

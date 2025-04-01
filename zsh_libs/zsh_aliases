@@ -29,7 +29,9 @@ function tudu()
 }
 function cod()
 {
-	code --goto "$@"
+	local p="$@"
+	(($#p)) || p='.'
+	code --goto $p
 }
 
 comp+=("what=which")
