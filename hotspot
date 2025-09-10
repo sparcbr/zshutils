@@ -1,0 +1,7 @@
+#!/bin/bash
+#nmcli dev wifi hotspot ifname wlp0s20f3 ssid sparc password "123456789"
+if [[ "$1" =~ ^(off|down|disable|0)$ ]]; then
+	nmcli connection down Hotspot
+else
+	nmcli connection up Hotspot
+fi
