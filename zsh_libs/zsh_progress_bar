@@ -117,9 +117,9 @@ function print_bar_text() {
 	((complete_size=(bar_size*percentage)/100))
 	((remainder_size=bar_size-complete_size))
 	progress_bar=$(
-	echo -ne "[${color}"; printf_new $PBAR_CHAR $complete_size; \
-		echo -en "${RESTORE_FG}${RESTORE_BG}" \
-		printf_new "." $remainder_size \
+	echo -ne "[${color}"; printf_new $PBAR_CHAR $complete_size;
+		echo -en "${RESTORE_FG}${RESTORE_BG}"; \
+		printf_new "." $remainder_size; \
 		echo -ne "]"
 	)
 
@@ -166,7 +166,7 @@ function pbar()
 			block_progress_bar $2        # indicate some action is requested from the user
 			;;
 		end) # finish
-			destroy_scroll_area 
+			destroy_scroll_area
 			;;
 		*)
 			return 1

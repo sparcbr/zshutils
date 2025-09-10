@@ -3,6 +3,7 @@ VERSION=1.0.9
 
 alias fullpath='getfullpath'
 alias full='getfullpath'
+alias sf='syncFile'
 
 [[ -v comp ]] || typeset -ga comp
 
@@ -262,7 +263,8 @@ typeset -A rsyncCodes=(
 function syncFile()
 {
 	local file=$1
-	local base=$(git root)
+	# local base=$(git root)
+	# echo "base=$base"
 	croot
 	local projName=$(basename $PWD)
 	syncDirs -cf $file 192.168.10.11:$projName/$file
@@ -391,7 +393,7 @@ function syncDirs()
 	fi
 	[[ -n $excludeFrom ]] && excludePatterns+=("${(@f)$(egrep -v '^ *#' $excludeFrom[2])}")
 	#(--exclude-from="${excludeFrom[2]}")
-	excludePatterns+=('backup*' '*.local' '.git' 'node_modules')
+	excludePatterns+=('backup*' '*.local' '.git' 'node_modules' '*.dev.js' '*.dev.php')
 	if [[ -z $dontAsk ]]; then
 		chooser -v excludePatterns --multi --selected "$excludePatterns" $excludePatterns
 		cod=$?
@@ -526,7 +528,6 @@ function box()
 	include -r functions
 	include -l network
 	#include 'boxes
-
 	zparseopts -D -M -A _opts - a -all=a
 
 	if (($#)); then
@@ -570,6 +571,9 @@ function box()
 				time_diff=$((current_time - boot_time))
 				if [[ $time_diff -le 300 ]]; then
 					code .
+					notify-send -u critical 'Lembrar das mensagens, paulo e revendas'
+					notify-send -u critical 'Folding tip: ctrl+shift+[, ctrl+k,ctrl+[ abrir, e ctrl+k,ctrl+] fechar'
+					notify-send -u critical 'alt+f to reindent'
 					return 0
 				fi
 				todo -d . #@TODO mv to cd hook
@@ -593,7 +597,7 @@ function box()
 				return
 			;;
 			list|search)
-				(($#VSCODE_ZDOTDIR || $#NOBOX)) && return 0 # ignore vscode
+				(($#NOBOX)) && return 0
 				search=$box
 				if [[ -n $search && -d $base/$search ]]; then
 					cmd='open'; box=$search
@@ -613,6 +617,8 @@ function box()
 				elif [[ -d $base/$box ]]; then
 					cmd='open'
 				fi
+				echo 'lembrar das mensagens'
+
 			;;
 			*)
 				box=$cmd

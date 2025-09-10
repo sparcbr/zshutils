@@ -1,5 +1,5 @@
 VERSION=1.0.2
-#lazyload=p,k
+#lazyload:psx,cpumon
 unalias p 2>/dev/null
 
 # Process handling. Stuff like pid, kill, lsof, etc...
@@ -177,3 +177,22 @@ function procmon()
 		sleep 1
 	done
 }
+function psx()
+{
+	ps -eo pid,user,%mem,rss,comm --sort=rss \
+	  | awk 'NR==1 || $4 >= 10240' \
+	  | grep -vE '\[.*\]' \
+	  | grep -vE 'gnome|kde|plasmashell|Xorg|wayland|systemd|dbus|pulseaudio|pipewire|tracker|xdg' \
+	  | awk 'NR==1 {
+		  printf "%-8s %-10s %-8s %-8s %-20s\n", "PID", "USER", "%MEM", "RSS_MB", "COMMAND"
+		}
+		NR>1 {
+		  printf "%-8s %-10s %6.1f%% %-8.1f %-20.20s\n", $1, $2, $3, $4/1024, $5
+		}'
+
+}
+function cpumon()
+{
+	top -d 3
+}
+

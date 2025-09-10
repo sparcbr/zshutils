@@ -57,8 +57,6 @@ function input()
 		g=gui z=z t:=title r=raw -clear-buffer \
 		b:=_buttons -buttons:=b -bcb:=cb N:=okcodes -okcodes:=N
 
-	# [[ -t
-
 	typeset -A buttons=(Cancel 130 Ok 0)
 	if (($#_buttons)); then
 		explode -A':' -v _buttons $_buttons[2] ','
@@ -141,7 +139,12 @@ function input()
 
 	# output value entered
 	if (($#_var)); then
+	echo 'aki:_var='"$_var"' str='"$str"
+	vartype todo
+	echo "todo=$todo"
+	set -x
 		typeset -g "$_var=$str"
+		set +x
 	else
 		echo $str
 	fi
@@ -828,12 +831,12 @@ function chkCmd()
 
 	(($#1)) || abort -v 1 "$0: empty command"
 	cmd=$1
-	if command -v $cmd >/dev/null; then
-		[[ -n $verbose ]] && techo -c head "$cmd$C_ already installed."
-		[[ -z $list ]] && return 0
-	else
-		techo -c lred "Command not found: ${C[head]}\"$cmd\"$C_. ${C[warn]}Searching for package to install."
-	fi
+	# if command -v $cmd >/dev/null; then
+	# 	[[ -n $verbose ]] && techo -c head "$cmd$C_ already installed."
+	# 	[[ -z $list ]] && return 0
+	# else
+	# 	techo -c lred "Command not found: ${C[head]}\"$cmd\"$C_. ${C[warn]}Searching for package to install."
+	# fi
 	integer i n
 	typeset -a similar lines pkgList
 	#@TODO make unique list of potential packages
@@ -864,6 +867,8 @@ function chkCmd()
 			)}
 		)
 	fi
+
+	typeset -a pkgList
 
 	if ((! $#pkgList)); then
 		# order: 1º (pkg == cmd) 2º cmdpath in $path 3º cmdpath ~ bin
@@ -942,7 +947,7 @@ function chkCmd()
 		pkgList[i+1]=$tmp[1] # version
 		in_array -v n ';' tmp || n=2
 		desc=("${(@fqq)tmp[n+1,-1]}") # description
-
+typeset -p pkgList
 		# i:pkg   |   i+1:version   |   i+2:packager   |   i+3:cmd
 		case $pkgList[i+3] in
 			$cmd|'-')
@@ -958,11 +963,17 @@ function chkCmd()
 	chooser -R'^(.*) \(version: '\''(.*)'\''\) ([^ ]*) ([^ ]*)|Similar command: (.*) \((.*) (.*) version: (.*)\) ([^ ]*) ([^ ])' \
 		-v tmp --ifs $'\n' $lines $similar || return
 	#chooser -f'*' -v tmp --ifs $'\n' $lines $similar || return
+	typeset -p lines
+	# ( gxmessage '(version: '\''3.4.3-2build2'\'')' apt gxmessage \''xmessage clone based on GTK+'\' $'\n' )
+	explode -v tmp $tmp[1]
 
 	if [[ $tmp[1] =~ '^Similar' ]]; then
-		pkg=$tmp[7]; cmd=$tmp[3]; packager=$tmp[5]
+		echo error
+		exit 1
+		# pkg=$tmp[7]; cmd=$tmp[3]; packager=$tmp[5]
 	else
-		pkg=$tmp[1]; cmd=$tmp[6]; packager=$tmp[9]
+		# pkg=$tmp[1]; cmd=$tmp[6]; packager=$tmp[9]
+		pkg=$tmp[1]; cmd=$tmp[4]; packager=$tmp[3]
 	fi
 
 	run -s -p "Installing $pkg (command: $C[lcyan]$cmd$C_)" $packager install $pkg
@@ -1374,6 +1385,7 @@ function todo()
 			#dir=$(getfilename $todo)
 		fi
 		id=$(noext $(getfilename $todo) $e)
+		set -x
 		input -p "Adding to todo $id" "$data" || cancel
 		;;
 	show)

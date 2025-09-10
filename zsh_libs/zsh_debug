@@ -106,6 +106,7 @@ function debug()
 				function)
 					if [[ -v functions[$_cmd] ]]; then
 						_func+=($_cmd)
+						break
 					fi
 					;;
 				script) #shell script
@@ -126,7 +127,7 @@ function debug()
 		#ret=$pipestatus
 		shift
 		if [[ -n $script ]]; then
-			DEBUG=1 $script
+			DEBUG=1 $script "$@"
 			ret=$?
 		else
 			{

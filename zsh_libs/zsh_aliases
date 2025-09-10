@@ -12,8 +12,6 @@ alias sys="sudo systemctl"
 alias c='cod'
 alias wh='what'
 alias pizza='alarm 13 pizza time'
-alias pma='echo d4urjrvvAOkHZUhc|xclip ; open "http://192.168.10.11/pma/index.php?route=/database/structure&server=1&db=new_3"'
-
 
 gExcludeDirs=(__tests__ .local)
 gNodeExcludeDirs=(node_modules)
@@ -21,7 +19,44 @@ gRNExcludeDirs=(android android/app/build ios $gNodeExcludeDirs)
 gPhPExcludeDirs=(vendor)
 function blaster()
 {
-	open "https://blaster.zipline.com.br/egestor/#$1"
+	local arg
+	# se arg not a number then return
+	[[ "$1" =~ '^[0-9]+$' ]] && arg="#$1" || arg="?subd=$1"
+	open "https://blaster.zipline.com.br/egestor/$arg"
+}
+
+function pma()
+{
+	local tbl db type='database'
+	zparseopts -D -M -A opts - t:=tbl d:=db
+	[[ -n $db ]] && db='&db='$db[2] || {
+		db='new_3'
+	}
+	if [[ -n $tbl ]]; then
+		tbl='&table='$tbl[2]
+		type='table'
+	else
+		[[ $# > 1 ]] && {
+			db=$1
+			shift
+		}
+		[[ -n $1 ]] && {
+			tbl="&table=$1"
+			type='table'
+		}
+	fi
+	echo d4urjrvvAOkHZUhc|xclip
+	open "http://192.168.10.11/pma/index.php?route=/$type/structure&server=1&db=$db"$tbl
+	# echo "http://192.168.10.11/pma/index.php?route=/$type/structure&server=1&db=$db"$tbl
+}
+
+function ticket()
+{
+	if [[ $1 == '-d' ]]; then
+		open 'http://192.168.10.11/elizandro/zipticket/painel/#'$2
+	else
+		open 'https://zipline.zipticket.com.br/painel/#'$1
+	fi
 }
 function tudu()
 {
@@ -405,7 +440,9 @@ function v()
 {
 	local opts=() sudo arg args vim
 	#typeset -aU
-	if [[ -n $DISPLAY ]]; then
+	if [[ $TERM_PROGRAM == 'vscode' ]]; then
+		vim=c
+	elif [[ -n $DISPLAY ]]; then
 		vim=gvim
 	else
 		vim=vim
@@ -440,6 +477,10 @@ function v()
 		if [[ "$arg" =~ ":" ]]; then
 			local tmp pos file
 			integer i j linenum col
+			if [[ $TERM_PROGRAM == 'vscode' ]]; then
+				c $arg
+				continue
+			fi
 			explode -v tmp $arg ':'
 			i=$#tmp
 			while [[ $tmp[i] == <-> && $i -gt 1 ]]; do ((i--)); done
@@ -462,7 +503,9 @@ function v()
 			fi
 		fi
 		#$sudo $vim $opts $arg
-		if [[ $vim == 'gvim' ]]; then
+		if [[ $TERM_PROGRAM == 'vscode' ]]; then
+			c $arg
+		elif [[ $vim == 'gvim' ]]; then
 			$sudo $vim $opts $arg &
 		else
 			$sudo $vim $opts $arg
@@ -737,6 +780,11 @@ function fixtty() # Added 2020-01-14 21:06
 	# show cursor
 	tput cnorm # or echo -en "\e[?25h"
 	confirm 'Reset terminal' && tput reset
+}
+
+function logdev() {
+	local limit=${1:-40}
+	ssh dev tail -n $limit -f /var/log/nginx/error.log | ccze
 }
 up() { xdotool key Ctrl+Shift+F sleep 0.4 type ❯ ; xdotool key Shift+F3 }
 zle -N myComp myComp
