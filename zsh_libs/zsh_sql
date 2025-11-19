@@ -3,7 +3,6 @@ VERSION=1.0.6
 alias sql="noglob sql"
 alias sqlps="sql -n 'show full processlist'"
 alias sqlkill="sql -n kill"
-alias myadmin="open http://phpmyadmin"
 # databases data dir
 DB_DATA_DIR=/var/lib/mysql
 #DBNAME='idiomus'
@@ -66,19 +65,22 @@ function sqlType()
 function sql()
 {
 	local file name verbose user pass silent host ret _out mysqlopts
-	local _colsOut _cols _idVar _raw _opts presql=''
+	local _colsOut _cols _idVar _raw _opts  presql='' timeout json
 	integer p i _id
 
 	typeset -g sql
 
-	zparseopts -D -M -A _opts - f: d:=name 'n' v=verbose u: -user:=u p: -pass:=p 't' -table=t \
-		-ssh:=host o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw 'i' --pager -nocolumns \
-		-force 's' -limit:
+	zparseopts -D -M -A _opts - f: d:=name 'n' v=verbose u: -user:=u p: -pass:=p 't' -table=t -cli \
+		-ssh:=ssh h:=host -host:=h  o:=_out c:=_colsOut -columns:=c -id:=_idVar r=_raw 'i' --pager -nocolumns \
+		-force 's' -limit: -timeout:=timeout -json:=json
 
 	if (($+_opts[--skip-foreign])); then
 		presql='SET GLOBAL FOREIGN_KEY_CHECKS=0;'
 	fi
 
+	if (($+_opts[--timeout])); then
+		presql+='SET SESSION max_statement_time = '$timeout[2];
+	fi
 	sql="$*"
 
 	if (($+_opts[-f])); then
@@ -92,7 +94,7 @@ function sql()
 		#TODO
 	fi
 
-	if [[ -n $host ]]; then # remote
+	if [[ -n $ssh ]]; then # ssh
 		#OPT_CHK file -f for remote
 		#(($+file)) &&
 		unset '_opts[--ssh]'
@@ -116,16 +118,23 @@ function sql()
 				rsync -a $file $host[2]:/tmp/sql_$file:t
 				(($#verbose)) && techo -r -c head "ssh $host[2] $db < $file"
 			fi
-			if ((p)); then ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}" 2>&p
-			else; ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}"; fi
+			mysql
+			# if ((p)); then ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}" 2>&p
+			# else; ssh $host[2] "include sql; noglob sql $remote_opts ${(qq)sql}"; fi
 		fi
 		ret=$?
 
-	else #### Local ####
+	else #### Local #### or direct mysql remote now as well
 		(($+_opts[--nocolumns] && $+_opts[-o])) && abort 2 "--nocolumns and -o options can't be used together"
 		mysqlopts=()
-		(($+_opts[-n])) || usedb $name[2]
 
+		sql=$presql$sql
+		[[ -n "$host" ]] && host=$host[2] || host=dev # host padrão
+		if (($+_opts[-d])); then
+			db=$name[2]
+		elif ((! $+_opts[-n])); then
+			usedb $name[2]
+		fi
 		# credentials
 		if [[ -n $db ]] && ((!$+_opts[-n])); then
 			user=${_opts[-u]:-${sqlUser[$db]:-$sqlUser[root]}}
@@ -137,24 +146,35 @@ function sql()
 		(($+_opts[-p])) && pass=$_opts[-p]
 		mysqlopts+=(${user:+-u$user} ${pass:+-p"$pass"})
 
-		if (($+_opts[-i])); then # interactive mode
-			mysql $mysqlopts $db
+		# interactive mode
+		(($+_opts[-i])) && { mysql $mysqlopts $db; return }
+
+		[[ -n $host ]] && mysqlopts+=(-h $host)
+
+		if (($+_opts[--cli] || !$#sql)); then
+			[[ -n $sql ]] && mysqlopts+=(-e "$sql")
+			(($#verbose)) && techo -r -c head mycli $mysqlopts $db
+			mycli $mysqlopts $db
 			return
 		fi
 
 		mysqlopts+=(-B $_raw --disable-auto-rehash) # batch mode, $silent
 		mysqlopts+=(${_opts[--nocolumns]+--skip-column-names} ${_opts[-t]+-t} ${_opts[--force]+-f})
 
+		# json output
+		if (($+_opts[--json])); then
+			mysqlopts+=(--result-format=json)
+		fi
 		# Safety
 		if (($+_opts[--limit])); then
-			sqllimit=$_opts[--limit]
+			sqllimit=${_opts[--limit]}
 			input -v sqllimit -p 'Row count limit (-1 for unlimited):'
 		fi
 		mysqlopts+=(--safe-updates --select-limit=$sqllimit)
 
 		if (($+_opts[-o])); then
 			i=1
-			_out=$_out[2]
+			_out=${_out[2]}
 			if [[ $_out[-1] == <-> ]]; then
 				input -v _out -p "Not allowed: $_out ends with a number. Ex: use an underscore" ${_out}_
 			fi
@@ -177,7 +197,7 @@ function sql()
 			ret=$?
 			if ((i)); then
 				if (($#_colsOut)); then
-					_colsOut=$_colsOut[2]
+					_colsOut=${_colsOut[2]}
 					typeset -gA $_colsOut
 					integer colN=1
 					for col in $_cols; do
@@ -332,6 +352,7 @@ function parseSqlErrors()
 {
 	local data msg rx errCode sqlState msgFormat line
 	while read -r data; do
+	echo $data >> teste.txt
 		[[ $data == 'EOF' ]] && return
 		if [[ $data =~ $'^ERROR ([0-9]{4}) \\(([0-9A-Z]{5})\\) at line ([0-9]+): (.*)' ]]; then
 			msg=$match[4]
@@ -402,7 +423,7 @@ function parseSqlErrors()
 						msgFormat=${msgFormat//${~rx[3]}/$rx[4]}
 						msgFormat='^'${msgFormat//${~rx[5]}/$rx[6]}
 					else
-						techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState)"
+						techo -c lred "Unknown error: $C[warn]$errCode$C_ ($sqlState) - $msg"
 						continue
 					fi
 					;;
@@ -432,19 +453,27 @@ function parseSqlErrors()
 
 function isdb()
 {
-	[[ -n $1 ]] && [[ -d "$DB_DATA_DIR/$1" ]]
+	local ret
+	# [[ -n $1 ]] && [[ -d "$DB_DATA_DIR/$1" ]]
+	[[ -n $1 ]] && {
+		ret=$(sql -n "SHOW DATABASES LIKE '$1'")
+		[[ -n $ret ]] && return 0
+	}
+	return 1
 }
 
 function usedb()
 {
 	integer error
-	if [[ ${1:0:1} == '-' ]]; then
-		local search s
-		zparseopts -D -M - S:=search s:=s ; OPT_CHK s '-s(changed to -S)'
-	fi
-	if (($#)); then
-		isdb $1 && { db=$1 ; return 0 }
 
+	isdb $1 && { db=$1 ; return 0 }
+
+	# if [[ ${1:0:1} == '-' ]]; then
+	# 	local search s
+	# 	zparseopts -D -M - S:=search s:=s ; OPT_CHK s '-s(changed to -S)'
+	# fi
+
+	if (($#)); then
 		error=1
 		techo -c lred "Database not found: \"$1\""
 		if [[ -o interactive ]]; then  #TODO not working?

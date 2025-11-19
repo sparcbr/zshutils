@@ -1,5 +1,5 @@
 VERSION=1.0.0
-#lazyload=tobin,chartoint,inttochar,tobytes,tohex,hextochar
+#lazyload=tobin,chartoint,inttochar,tobytes,tohex,hextochar,unixtodatetime
 
 function tobin()
 {
@@ -104,6 +104,14 @@ function parsedatetime()
 	return 1
 }
 
+function unixtodatetime() {
+    local ts=$1
+    # If it looks like milliseconds (13 digits), divide by 1000
+    if [[ $ts =~ '^[0-9]{13}$' ]]; then
+        ts=$(( ts / 1000 ))
+    fi
+    date -d "@$ts"
+}
 function datetime()
 {
 	local _opts _dt

@@ -15,12 +15,15 @@ alias gls='git ls-files'
 unalias glog 2>/dev/null
 alias gst='gstatus'
 alias gstat='gstatus'
+alias grestore='git restore'
 alias grest='grestore'
+alias gunstage='git restore --staged'
 alias staged='gstaged'
 alias gds='gstaged'
 alias gdsw='g diff --staged --word-diff=color --word-diff-regex=.'
 alias master="git checkout master"
 alias gp="gpull"
+alias guns='gunstage'
 #local tmp=$(git rev-parse --short HEAD || echo '')
 typeset -gi hashAbbvLen=7
 
@@ -160,6 +163,7 @@ function colorhash()
 function gpull()
 {
 	local upstream tmp _opts _opt gopts=()
+	croot
 	#zparseopts -D -M -A _opts -
 	upstream=$(git for-each-ref --format='%(upstream:short)' "$(git symbolic-ref -q HEAD)") || {
 		techo -c warn 'No upstream branch set'
@@ -199,6 +203,7 @@ function gpull()
 	echo $tmp
 }
 
+comp+=('gshow=_git=git-show')
 function gshow()
 {
 	local _opts gopts=()
@@ -209,7 +214,7 @@ function gshow()
 	git show $gopts "$@"
 }
 
-comp+=('gchk=git')
+comp+=('gchk=_git=git-checkout')
 function gchk()
 {
 	git checkout "$@" && git status
@@ -218,12 +223,6 @@ function gchk()
 function gstaged()
 {
 	gdiff --staged "$@"
-}
-
-comp+=('gunstage=git')
-function gunstage()
-{
-	grestore --staged "$@"
 }
 
 function gselect()
@@ -554,7 +553,7 @@ function grebase()
 	esac
 }
 
-comp+=(gmerge=gmerge)
+comp+=(gmerge=git)
 function gmerge() #@TODO
 {
 	local mergeHash status unmerged cmd=$1
@@ -609,23 +608,33 @@ function ggrep()
 
 function commit() #@TODO
 {
-	local m args amend
-	zparseopts -D -M - m:=m A=amend -amend=A
+	local m args amend msg
+	zparseopts -D -M - m:=m A=amend -amend=A n=dryrun
 
 	getbranch -q
 
-	[[ $branch == 'master' ]] && {
-		confirm "Commit to master branch" || cancel
-	}
+	[[ $branch == 'master' ]] && techo -c warn "ATENÇÂO: comitando para master branch"
 
-	[[ $amend[1] == '-A' ]] && amend='--amend'
-	#@TODO check for empty changes
-	if [[ -n "$1" && ${1:0:1} != - ]]; then
-		m=(-m "$*")
+	if [[ -n "$dryrun" ]]; then
+		.git/hooks/pre-commit && techo -c head "All OK, but nothing commited!"
+		return
+	fi
+
+	if [[ $amend[1] == '-A' ]]; then
+		amend='--amend'
+	elif [[ -n "$1" && ${1:0:1} != - || -z "$1" ]]; then
+		msg="$*"
+		[[ -z "$msg" ]] && {
+			[[ -z "$task" ]] && {
+				tudu && msg="#$task - $taskDesc"
+			}
+		}
+		input -p 'Commit message' -v msg || cancel
+		m=(-m "$msg")
 	else
 		args="$@"
 	fi
-	git commit $amend $m $args || banner -c lred
+	git commit $amend $m $args || banner -c lred Erro ao comitar
 }
 
 # Added 2019-01-25 11:17:01
@@ -1169,7 +1178,7 @@ function gbisect()
 # Added 2020-3-28 21:27
 #search changes of string: -Sstring
 #--ignore-space-at-eol -b -w --ignore-blank-lines --minimal
-comp+=('gdiff=git-diff')
+comp+=('gdiff=git')
 function gdiff()
 {
 	local cmd _opts _dopts args flist hashes=()
@@ -1549,6 +1558,7 @@ function gexpirestash()
 
 #tODO:  <16-10-20, yourname> #confirm first to discard changes not saved in stash or some other place
 # call this from gst -i
+comp+=('grestore=git')
 function grestore()
 {
 	local files

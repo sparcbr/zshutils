@@ -143,6 +143,7 @@ function del()
 		fi
 	done
 }
+
 #@TODO
 function rename()
 {
@@ -267,7 +268,9 @@ function syncFile()
 	# echo "base=$base"
 	croot
 	local projName=$(basename $PWD)
-	syncDirs -cf $file 192.168.10.11:$projName/$file
+	local basePath="$PWD"  # ou caminho absoluto do base
+    local relativeFile=$(realpath --relative-to="$basePath" "$file")
+	syncDirs -cf "$relativeFile" "dev:$projName/$relativeFile"
 }
 
 # Added 2019-05-03 16:50
@@ -563,7 +566,7 @@ function box()
 						run "$initCmd[@]"
 					done
 				fi
-				[[ -d .git ]] && gstatus &
+				# [[ -d .git ]] && gstatus &
 				[[ -d android ]] && include android
 				boot_time=$(awk '/btime/ {print $2}' /proc/stat)
 

@@ -12,28 +12,61 @@ alias sys="sudo systemctl"
 alias c='cod'
 alias wh='what'
 alias pizza='alarm 13 pizza time'
+alias grcat='grc -c ~/.grc/my-tail.conf tail'
+alias tailf='grc -c ~/.grc/my-tail.conf tail -f'
+alias queuelist='sql --limit 10 -d _queuev4 "SELECT id, FROM_UNIXTIME(available_at) as available, FROM_UNIXTIME(created_at) as created, payload, attempts FROM jobs ORDER BY id DESC"'
+alias hoje='find . -type f -daystart -mtime 0 -print0 | xargs -0 ls -1Fcrtl --color'
 
 gExcludeDirs=(__tests__ .local)
 gNodeExcludeDirs=(node_modules)
 gRNExcludeDirs=(android android/app/build ios $gNodeExcludeDirs)
 gPhPExcludeDirs=(vendor)
+
+function gr()
+{
+	# rg --no-heading --max-columns=200 --max-columns-preview --line-number --color=always $@ | while IFS= read -r raw; do
+	run rg --no-heading --max-columns=200 --max-columns-preview --line-number --color=always --sort=modified $@ | while IFS=: read -r file line rest; do
+		file_clean=$(echo "$file" | sed 's/\x1b\[[0-9;]*m//g')
+		ts=$(stat -c %Y "$file_clean")
+		dt=$(date -d "@$ts" '+%Y-%m-%d %H:%M:%S')
+		printf "[%s] %s:%s %b\n" "$dt" "$file" "$lineno" "$raw_rest"
+	done
+}
+function lastv4()
+{
+	local last=$(curl -s -D - https://v4.egestor.com.br/contadores.json -o /dev/null | grep last-mod)
+	echo $last
+	last=$(echo $last | sed 's/last-modified: //I' | tr -d '\r')
+    last=$(date -d "$last" '+%Y-%m-%d %H:%M:%S %Z') #convert time zone to local
+    echo $last
+}
+
+function venda()
+{
+	[[ -n "$1" ]] && open "http://192.168.10.11/elizandro/newgestor/vendas/?cod=$1"
+}
+function financeiro()
+{
+	[[ -n "$1" ]] && open "http://192.168.10.11/elizandro/newgestor/financeiro/?cod=$1"
+}
 function blaster()
 {
-	local arg
+	local arg sis='egestor'
 	# se arg not a number then return
+	[[ "$1" == '-nfe' ]] && { sis='nfemais'; shift; }
 	[[ "$1" =~ '^[0-9]+$' ]] && arg="#$1" || arg="?subd=$1"
-	open "https://blaster.zipline.com.br/egestor/$arg"
+	open "https://blaster.zipline.com.br/$sis/$arg"
 }
 
 function pma()
 {
 	local tbl db type='database'
 	zparseopts -D -M -A opts - t:=tbl d:=db
-	[[ -n $db ]] && db='&db='$db[2] || {
+	[[ -n $db ]] && db='&db='${db[2]} || {
 		db='new_3'
 	}
 	if [[ -n $tbl ]]; then
-		tbl='&table='$tbl[2]
+		tbl='&table='${tbl[2]}
 		type='table'
 	else
 		[[ $# > 1 ]] && {
@@ -50,6 +83,10 @@ function pma()
 	# echo "http://192.168.10.11/pma/index.php?route=/$type/structure&server=1&db=$db"$tbl
 }
 
+function spotter() {
+	open https://app.exactsales.com.br/spotter/detalhes-lead/$1
+}
+
 function ticket()
 {
 	if [[ $1 == '-d' ]]; then
@@ -58,9 +95,24 @@ function ticket()
 		open 'https://zipline.zipticket.com.br/painel/#'$1
 	fi
 }
+function bradial()
+{
+	open 'https://chat.bradial.com.br/app/accounts/1419/tickets/'+$1
+}
+
 function tudu()
 {
-	open "https://bracket.egestor.com.br/interno/kasper/kanboard/?controller=TaskViewController&action=show&task_id=$1&project_id=1"
+	local ret
+	if [[ -n "$1" ]]; then
+		open "https://bracket.egestor.com.br/interno/kasper/kanboard/?controller=TaskViewController&action=show&task_id=$1&project_id=1"
+	else
+		ret=($(sql -u lamer -h bracket -d kanboard 'select id, title from tasks where project_id=1 and owner_id=11 and column_id=3')) || abort 'Nao consegui pegar a tarefa'
+		[[ -z "$ret" ]] && { echo "Nenhuma tarefa em andamento"; return 1; }
+		task=$ret[3]
+		taskDesc=$ret[4,-1]
+		echo $task
+		echo $taskDesc
+	fi
 }
 function cod()
 {

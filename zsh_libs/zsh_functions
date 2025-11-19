@@ -139,12 +139,12 @@ function input()
 
 	# output value entered
 	if (($#_var)); then
-	echo 'aki:_var='"$_var"' str='"$str"
-	vartype todo
-	echo "todo=$todo"
-	set -x
+		# echo 'aki:_var='"$_var"' str='"$str"
+		vartype todo
+		# echo "todo=$todo"
+		# set -x
 		typeset -g "$_var=$str"
-		set +x
+		# set +x
 	else
 		echo $str
 	fi
@@ -1428,7 +1428,6 @@ function alarm()
 	local integer mins=13
 	local msg
 	[[ $1 == <-> ]] && { mins=$1; shift }
-	[[ $1 == 'off' ]] && { k play; return }
 
 	msg=${*:-alarm}
 	{ while (( mins )); do
