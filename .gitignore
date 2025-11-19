@@ -6,3 +6,4 @@
 *.local.php
 pCloud
 *.zwc
+*.dev.*
