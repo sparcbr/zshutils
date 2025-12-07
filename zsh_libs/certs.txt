@@ -1,5 +1,0 @@
-s /root/letsencrypt/certbot-auto certonly --cert-name=maquinadeconversao.com.br --webroot \
---webroot-path /usr/share/httpd/pabloluz.com -d pabloluz.com \
---webroot-path /usr/share/httpd/maquinadeconversao.com.br -d maquinadeconversao.com.br \
---webroot-path /usr/share/httpd/idiomusapp.com -d idiomusapp.com \
---webroot-path /usr/share/httpd/bossle.com.br -d mail.idiomusapp.com -d mail.maquinadeconversao.com.br -d mail.pabloluz.com -d bossle.com.br -d mail.bossle.com.br
