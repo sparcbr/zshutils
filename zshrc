@@ -1,5 +1,6 @@
 if [[ 'code' == $(cat /proc/$PPID/comm) ]]; then
 	#return
+	echo 'Running inside VSCode?'
 fi
 integer verbose
 if [[ -f $TMPDIR/debug_zshrc && $SHLVL == 1 && ! -o LOGIN ]]; then
@@ -107,11 +108,6 @@ zinit load hlissner/zsh-autopair
 zinit load zdharma-continuum/zsh-navigation-tools
 zinit load jessarcher/zsh-artisan
 zinit load tom-doerr/zsh_codex
-	#zdharma-continuum/zconvey \
-	#zdharma-continuum/zshelldoc \
-	#sharat87/zsh-vim-mode \
-	#gradle/gradle-completion \
-	#ranger/ranger \
 
 #type asdf && {
 #	asdf list nodejs 2>/dev/null || {
@@ -157,7 +153,12 @@ ZSH_AUTOSUGGEST_USE_ASYNC=1
 #bindkey "$terminfo[kcud1]" backward-word
 bindkey '^X' create_completion
 
-for lib in debug functions device proc sql git android progtools conversion mediatool network; do include -l $lib; done
+if type include; then 
+    include -qr aliases
+    for lib in debug functions device proc sql git android progtools conversion mediatool network; do include -l $lib; done
+else
+    echo "include command not found"
+fi
 compdef $comp
 
 #cd $old_pwd

@@ -58,30 +58,6 @@ function blaster()
 	open "https://blaster.zipline.com.br/$sis/$arg"
 }
 
-function pma()
-{
-	local tbl db type='database'
-	zparseopts -D -M -A opts - t:=tbl d:=db
-	[[ -n $db ]] && db='&db='${db[2]} || {
-		db='new_3'
-	}
-	if [[ -n $tbl ]]; then
-		tbl='&table='${tbl[2]}
-		type='table'
-	else
-		[[ $# > 1 ]] && {
-			db=$1
-			shift
-		}
-		[[ -n $1 ]] && {
-			tbl="&table=$1"
-			type='table'
-		}
-	fi
-	echo d4urjrvvAOkHZUhc|xclip
-	open "http://192.168.10.11/pma/index.php?route=/$type/structure&server=1&db=$db"$tbl
-	# echo "http://192.168.10.11/pma/index.php?route=/$type/structure&server=1&db=$db"$tbl
-}
 
 function spotter() {
 	open https://app.exactsales.com.br/spotter/detalhes-lead/$1
@@ -94,10 +70,6 @@ function ticket()
 	else
 		open 'https://zipline.zipticket.com.br/painel/#'$1
 	fi
-}
-function bradial()
-{
-	open 'https://chat.bradial.com.br/app/accounts/1419/tickets/'+$1
 }
 
 function tudu()

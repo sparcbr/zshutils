@@ -30,6 +30,7 @@ typeset -gi hashAbbvLen=7
 export github_token=''
 
 include -r functions
+include -r file
 [[ ! -v comp ]] && typeset -g -a comp
 
 type meld >/dev/null || { [[ -n $DISPLAY ]] && confirm 'Install meld' && aptinst meld }

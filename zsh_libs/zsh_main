@@ -17,6 +17,14 @@ function _dbg_trap() { set +x }
 #	done
 #}
 
+function updateFromRepo()
+{
+	local sourceDir="$HOME/repos/zshutils"
+	include -r file
+	[[ -d "$sourceDir" ]] || { echo "zshutils repo not found" ; return 1 }
+	syncDirs -t  $sourceDir $ZDOTDIR/bin
+}
+
 function techo()
 {
 	local c _O _topts nonl print noesc ts msg
